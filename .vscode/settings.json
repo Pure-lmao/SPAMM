@@ -1,0 +1,6 @@
+{
+  "rust-analyzer.linkedProjects": [
+    "aggregator/program/Cargo.toml",
+    "market_maker/program/Cargo.toml"
+  ]
+}

@@ -1,0 +1,30 @@
+[package]
+name = "spamm_market_maker"
+version = "0.0.1"
+edition = "2021"
+license = "CC-BY-NC-4.0"
+description = "SPAMM market maker program"
+autotests = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["bpf-entrypoint"]
+bpf-entrypoint = []
+
+[dependencies]
+doppler = { path = "doppler", default-features = true }
+pinocchio = { version = "0.11.1", default-features = false, features = ["cpi", "copy"] }
+pinocchio-log = { version = "0.5.1", default-features = false, features = ["macro"] }
+pinocchio-system = { version = "0.6.0", default-features = false }
+pinocchio-token = { version = "0.6.0", default-features = false }
+pinocchio-associated-token-account = "0.4.0"
+solana-define-syscall = { version = "5.0", features = ["unstable-static-syscalls"] }
+spamm_aggregator = { path = "../../aggregator/program", default-features = false }
+zeropod = { version = "0.1.0", features = ["solana-address"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+   'cfg(target_os, values("solana"))',
+] }
