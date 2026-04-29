@@ -11,4 +11,4 @@ pub use ix_get_quote::{GetQuoteIxPayload, GET_QUOTE_IX_PAYLOAD_LEN};
 pub use ix_init_event::{InitEventIxPayload, INIT_EVENT_IX_DATA_LEN};
 pub use ix_init_market::{InitMarketIxPayload, INIT_MARKET_IX_DATA_MIN_LEN};
 pub use ix_init_program::{InitProgramIxPayload, INIT_PROGRAM_IX_DATA_LEN};
-pub use wire::{GetQuoteReturnWire, MmOracleQuoteHead};
+pub use wire::{GetQuoteReturnWire};

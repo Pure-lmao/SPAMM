@@ -1,7 +1,7 @@
 //! Close the event-state PDA created in `init_event` and return rent to `auth`.
 //!
 //! Accounts: **(4)** — same ordering as `init_event`
-//! 0. `auth` (signer, writable) — must match `MmAccountConfig::auth_signer` on `config_pda`
+//! 0. `auth` (signer, writable) — must match `MmAccountConfig::admin` on `config_pda`
 //! 1. `config_pda` (readonly)
 //! 2. `event_state_pda` (writable)
 //! 3. `system_program` (readonly)

@@ -12,6 +12,7 @@ use crate::instructions::{
    add_line_to_netting_account::ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR, 
    remove_line_from_netting_account::REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    close_netting_account::CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
+   withdraw_from_liability_account::WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR,
 };
 
 
@@ -26,6 +27,7 @@ mod grade_bets;
 mod settle_bet;
 mod change_config_status;
 mod force_close_pda;
+mod withdraw_from_liability_account;
 
 pub use fill_bet::FillBetIxData;
 
@@ -47,6 +49,8 @@ pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResu
       ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR => add_line_to_netting_account::process(accounts, data),
       REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR => remove_line_from_netting_account::process(accounts, data),
       CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR => close_netting_account::process(accounts, data),
+
+      WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR => withdraw_from_liability_account::process(accounts, data),
 
       255 => force_close_pda::process(accounts),
       _ => {

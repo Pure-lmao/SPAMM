@@ -2,8 +2,9 @@ agg:
 - fix fill logic to avoid [($0.01, 2.0); 5] on ($100, 2.0)
 - sdk/ts
 - mollusk tests
+- onchain tests
 
 mm:
+- actually check the code (AI generated)
 - sdk/ts
-- align discs
 

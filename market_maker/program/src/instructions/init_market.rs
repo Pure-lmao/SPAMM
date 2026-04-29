@@ -1,16 +1,16 @@
 //! Create the MM oracle PDA for one market: `["oracle", market_id_wire]` with `to_zc(true)`.
 //!
-//! Accounts: **(4)**
-//! 0. `feepayer` (signer) — must match `auth_signer` for `config_pda`
+//! On-chain account layout: **`[u64 sequence LE][oracle_body]`** — the first 8 bytes are a monotonic
+//! sequence (Doppler / off-chain tools may bump it); `get_quote` reads odds from `oracle_body` at
+//! offset **8** (2 or 3 × `u32` LE, see `get_quote`).
+//!
+//! Accounts **(4)**
+//! 0. `feepayer` (signer) — must match `admin` for `config_pda`
 //! 1. `config_pda` (readonly) — PDA `["config"]`
-//! 2. `mm_oracle_pda` (writable) — created; `space = 8` (sequence) + `oracle_body.len()` from data
+//! 2. `mm_oracle_pda` (writable) — created; space `8 + oracle_body.len()`
 //! 3. `system_program` (readonly)
 //!
-//! Instruction `data` (after router `u8` in `lib.rs`):
-//! - `market_id` (`MarketId::WIRE_SIZE` bytes) — PDA only
-//! - `oracle_body` (0 or more bytes) — written to the account after an initial `u64` sequence, **LE 0**
-//!
-//! On-chain account layout: `[sequence: u64 LE = 0][...oracle_body]`
+//! Instruction `data`: [`InitMarketIxPayload`] — `market_id` + `oracle_body`.
 
 use pinocchio::ProgramResult;
 use pinocchio::address::address_eq;
@@ -68,7 +68,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       log!("init_market: body length");
       ProgramError::InvalidInstructionData
    })?;
-   let oracle_space: u64 = 9u64
+   let oracle_space: u64 = 8u64
       .checked_add(body_len)
       .ok_or(ProgramError::InvalidInstructionData)?;
 
@@ -94,19 +94,12 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       }
       .invoke_signed(&signers)?;
    }
-   {
-      unsafe {
-         let ptr = mm_oracle_pda.data_mut_ptr();
-         let disc_bump_seq = [
-            0,
-            bump, 
-            0, 0, 0, 0, 0, 0, 0, 0
-         ]; //0u8 disc, u8 bump, 0u64 sequence
-         write_arbitrary_bytes_unchecked(
-            ptr, 0, &disc_bump_seq);
-         if body_len > 0 {
-            write_arbitrary_bytes_unchecked(ptr, 10, &oracle_body);
-         }
+   unsafe {
+      let ptr = mm_oracle_pda.data_mut_ptr();
+      let seq = 0u64.to_le_bytes();
+      core::ptr::copy_nonoverlapping(seq.as_ptr(), ptr, 8);
+      if body_len > 0 {
+         write_arbitrary_bytes_unchecked(ptr, 8, &oracle_body);
       }
    }
    Ok(())

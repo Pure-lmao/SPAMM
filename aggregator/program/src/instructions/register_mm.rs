@@ -1,26 +1,29 @@
 use pinocchio::{
    AccountView, Address, ProgramResult, Resize, cpi::{Seed, Signer}, error::ProgramError, hint::unlikely
 };
-use pinocchio_token::instructions::InitializeAccount3;
+use pinocchio_associated_token_account::instructions::Create as CreateATA;
 use pinocchio_log::log;
 use pinocchio_system::instructions::{CreateAccount, Transfer};
+use solana_address::address_eq;
 
 use crate::{
-   helpers::{
-      TOKEN_ACCOUNT_LEN, get_rent_local, verify_config_pda, verify_mint, verify_mm_auth_signer, verify_mm_list_pda, verify_mm_program_executable, verify_signer, verify_system_program, verify_token_account, verify_token_program
-   }, readers::read_u16_le_unchecked, state::{MM_LIST_HEADER_LEN, other::{LIABILITY_TOKEN_ACCOUNT_SEED, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET}}, writers::{write_arbitrary_bytes_unchecked, write_u16_le_unchecked}
+   ID, helpers::{
+      get_rent_local, verify_associated_token_program, verify_config_pda, verify_mint, verify_mm_admin, verify_mm_list_pda, verify_mm_program_executable, verify_signer, verify_system_program, verify_token_program
+   }, readers::read_u16_le_unchecked, state::{MM_LIST_HEADER_LEN, other::{MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET}}, writers::{write_arbitrary_bytes_unchecked, write_u16_le_unchecked}
 };
 
-/// Accounts (9):
-/// 0. `mm_auth_signer` (writable signer)
+/// Accounts (11):
+/// 0. `mm_admin` (writable signer)
 /// 1. `mm_program` (readonly)
 /// 2. `mm_config_pda` (readonly)
-/// 3. `mm_liability_token_account` (writable)
-/// 4. `our_config_pda` (readonly)
-/// 5. `mm_list_pda` (writable) — registry of MM program ids (see [`MM_LIST_HEADER_LEN`])
-/// 6. `token_program` (readonly)
-/// 7. `mint` (readonly)
-/// 8. `system_program` (readonly)
+/// 3. `mm_encumbrance_pda` (writable)
+/// 4. `mm_liability_token_account` (writable)
+/// 5. `our_config_pda` (readonly)
+/// 6. `mm_list_pda` (writable)
+/// 7. `token_program` (readonly)
+/// 8. `associated_token_program` (readonly)
+/// 9. `mint` (readonly)
+/// 10. `system_program` (readonly)
 ///
 /// No instruction data after the router discriminator.
 
@@ -28,14 +31,16 @@ pub const REGISTER_MM_IX_DISCRIMINATOR: u8 = 2;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
-      mm_auth_signer, //check for signer
+      mm_admin, //check for signer
       mm_program, //check for executable
-      mm_config_pda, //check for config pda from seed
+      mm_config_pda, //checked in auth signer check
+      mm_encumbrance_pda, //check for liability pda
       mm_liability_token_account, //check for liability token account
       our_config_pda, //check from const
       mm_list_pda, //check from const
       token_program, //check from const
       mint, //check from const
+      associated_token_program, //check from const
       system_program, //check from const
    ] = accounts else {
       log!("register_mm: accounts mismatch");
@@ -47,11 +52,13 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   verify_signer(&mm_auth_signer)?;
+   verify_signer(&mm_admin)?;
    verify_mm_program_executable(&mm_program)?;
-   verify_mm_auth_signer(&mm_auth_signer, &mm_program, mm_config_pda)?;
+   verify_mm_admin(&mm_admin, &mm_program, mm_config_pda)?;
    verify_system_program(&system_program)?;
    verify_token_program(&token_program)?;
+   verify_associated_token_program(&associated_token_program)?;
+   verify_system_program(system_program)?;
    verify_mint(&mint)?;
    verify_config_pda(&our_config_pda, false)?;
    verify_mm_list_pda(mm_list_pda)?;
@@ -79,7 +86,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let cur_lamports = mm_list_pda.lamports();
    if new_rent > cur_lamports {
       Transfer {
-         from: &mm_auth_signer,
+         from: &mm_admin,
          to: mm_list_pda,
          lamports: new_rent - cur_lamports,
       }
@@ -96,52 +103,47 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       write_u16_le_unchecked(ptr, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET, (numbet_of_mms + 1) as u16);
    }
 
-   // create the mm token account
-   if unlikely(mm_liability_token_account.lamports() > 0 || mm_liability_token_account.data_len() != 0) {
-      log!("register_mm: mm token account must be uninitialized");
+   // create the mm liability pda
+   if unlikely(mm_encumbrance_pda.data_len() != 0 || mm_encumbrance_pda.lamports() != 0) {
+      log!("register_mm: mm liability pda must be empty");
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let seeds = [
-      LIABILITY_TOKEN_ACCOUNT_SEED,
-      mm_program.address().as_ref(),
-      mint.address().as_ref(),
-   ];
-   let (_expected_pda, bump) = Address::find_program_address(
-      &seeds,
-      &token_program.address()
+   let (expected_mm_encumbrance_pda, mm_encumbrance_pda_bump) = Address::find_program_address(
+      &[MM_ENCUMBRANCE_PDA_SEED, mm_program.address().as_ref()], 
+      &ID
    );
+   if unlikely(!address_eq(mm_encumbrance_pda.address(), &expected_mm_encumbrance_pda)) {
+      log!("register_mm: mm liability pda address mismatch");
+      return Err(ProgramError::InvalidAccountOwner);
+   }
 
-   let bump_seed = &[bump];
-   let signer_seeds = [
-      Seed::from(LIABILITY_TOKEN_ACCOUNT_SEED),
+   let mm_encumbrance_pda_bump_seed = [mm_encumbrance_pda_bump];
+   let mm_encumbrance_pda_seeds = [
+      Seed::from(MM_ENCUMBRANCE_PDA_SEED),
       Seed::from(mm_program.address().as_ref()),
-      Seed::from(mint.address().as_ref()),
-      Seed::from(bump_seed),
+      Seed::from(&mm_encumbrance_pda_bump_seed),
    ];
+   let mm_encumbrance_pda_signer = Signer::from(&mm_encumbrance_pda_seeds);
+   
+   CreateAccount{
+      from: mm_admin,
+      to: mm_encumbrance_pda,
+      lamports: get_rent_local(MM_ENCUMBRANCE_PDA_LEN as u64),
+      space: MM_ENCUMBRANCE_PDA_LEN as u64,
+      owner: &ID,
+   }.invoke_signed(&[mm_encumbrance_pda_signer])?;
 
-   let signer = &[Signer::from(&signer_seeds)];
-
-   CreateAccount {
-      from: &mm_auth_signer,
-      to: &mm_liability_token_account,
-      lamports: get_rent_local(TOKEN_ACCOUNT_LEN as u64),
-      space: TOKEN_ACCOUNT_LEN as u64,
-      owner: &token_program.address(),
-   }.invoke_signed(signer)?;
-
-   InitializeAccount3::new(
-      &mm_liability_token_account, 
-      &mint, 
-      &our_config_pda.address()
-   ).invoke()?;
-
-   verify_token_account(true, 
-      &mm_liability_token_account,
-      &our_config_pda,
-      &mint,
-      &token_program
-   )?;
+   // create the mm liability token account (ata of pda)
+   CreateATA {
+      funding_account: mm_admin,
+      account: mm_liability_token_account,
+      wallet: mm_encumbrance_pda,
+      mint,
+      token_program,
+      system_program,
+   }.invoke()?;
+   
 
    Ok(())
 }

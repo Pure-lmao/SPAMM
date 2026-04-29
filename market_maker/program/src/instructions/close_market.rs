@@ -1,7 +1,7 @@
 //! Close the MM oracle PDA created in `init_market` and return rent to `auth`.
 //!
 //! Accounts: **(4)** — same ordering as `init_market`
-//! 0. `auth` (signer, writable) — must match `auth_signer` for `config_pda`
+//! 0. `auth` (signer, writable) — must match `admin` for `config_pda`
 //! 1. `config_pda` (readonly)
 //! 2. `mm_oracle_pda` (writable)
 //! 3. `system_program` (readonly)

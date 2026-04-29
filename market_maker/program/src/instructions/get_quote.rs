@@ -1,14 +1,13 @@
 //! CPI entry used by the aggregator (and RPC) to read a quote for one MM.
-//! Validates accounts, event state, oracle PDA, writes the quote buffer, and sets return data.
+//! Validates PDAs, event state, oracle layout, writes the quote buffer, sets return data (matches
+//! [`spamm_aggregator::state::GetQuoteIxData`] wire after the router byte).
 //!
-//! Accounts: **(4)**
-//! 0. `user` (readonly; not required signer when invoked via CPI from the aggregator)
-//! 1. `event_state_pda` (readonly) — MM-owned PDA `["event_state", event_id]`
-//! 2. `mm_oracle_pda` (readonly) — MM-owned PDA `["oracle", market_id_wire]`; after `u64` sequence, the
-//!    **body** is `N × u32` LE odds: `N = 2` (binary) except Soccer with `mkt` in `{1,2,3,5,6,7}` where
-//!    `N = 3` (1X2 and double-chance). In the 3-outcome case only `side == 0` is allowed; the `mkt` field
-//!    picks which of the three odds to quote.
-//! 3. `mm_quote_buffer` (writable) — MM-owned, `MM_QUOTE_BUFFER_LEN` bytes
+//! Accounts **(5)** — must match aggregator CPI account order:
+//! 0. `user`
+//! 1. `mm_oracle_pda` — [`crate::mm_helpers::find_oracle_pda`]; layout `[u64 seq LE][u32 odds…]` (`init_market`)
+//! 2. `event_state_pda` — [`crate::mm_helpers::verify_event_state`]
+//! 3. `mm_config_pda` — MM `["config"]` PDA (validated; unused for pricing)
+//! 4. `mm_quote_buffer` — single program PDA [`crate::constants::MM_QUOTE_BUFFER_SEED`]
 //!
 //! Instruction `data` (bytes after the router discriminator in `lib.rs`): **73 bytes**, zeropod layout, in order:
 //! - `amount` (u64 LE)
@@ -22,7 +21,7 @@
 
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
-use crate::mm_helpers::{mm_oracle_pda_ok, verify_event_state, verify_quote_buffer};
+use crate::mm_helpers::{mm_oracle_pda_ok, verify_event_state, verify_mm_config_pda, verify_quote_buffer};
 use zeropod::ZeroPodFixed;
 
 use crate::constants::MAX_QUOTE_STAKE_UNITS;
@@ -37,7 +36,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       user,
       mm_oracle_pda,
       event_state_pda,
-      _mm_config_pda,
+      mm_config_pda,
       mm_quote_buffer,
    ] = accounts else {
       log!("get_quote: mm accounts mismatch");
@@ -64,6 +63,11 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::InvalidAccountData);
    }
 
+   if unlikely(!verify_mm_config_pda(mm_config_pda, program_id)) {
+      log!("get_quote: mm config pda invalid");
+      return Err(ProgramError::InvalidSeeds);
+   }
+
    if unlikely(!verify_event_state(
       event_state_pda,
       program_id,
@@ -85,7 +89,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       log!("get_quote: oracle data too short (need sequence u64 + body)");
       return Err(ProgramError::InvalidAccountData);
    }
-   // Oracle: [u64 sequence][body: N × u32 LE odds] — N = 2 or 3 (see module comment).
+   // Oracle: [u64 sequence LE][body]; odds start at byte 8 (`init_market`).
    let body = &oracle_data[8..];
    let odds_scaled = if soccer_mkt_is_three_outcome_1x2_or_double_chance(&market_id) {
       if unlikely(side != 0) {

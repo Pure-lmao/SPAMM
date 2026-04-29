@@ -2,14 +2,14 @@ use pinocchio::{AccountView, ProgramResult, error::ProgramError};
 use pinocchio_log::log;
 
 use crate::{
-   helpers::{verify_mm_auth_signer, verify_netting_pda_exists, verify_signer},
-   state::{add_netting_line},
+   helpers::{verify_mm_admin, verify_mm_program_executable, verify_netting_pda_exists, verify_signer},
+   state::add_netting_line,
 };
 
 /// Accounts (4):
-/// 0. `auth_signer` (signer)
-/// 1. `mm_program` — MM program id used in netting PDA seeds
-/// 2. `config_pda` (readonly)
+/// 0. `admin` (signer)
+/// 1. `mm_program` (readonly)
+/// 2. `mm_config_pda` (readonly)
 /// 3. `netting_pda` (writable)
 /// 
 /// Data: (event_id: EventId, mkt: u32)
@@ -19,18 +19,18 @@ pub const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 7;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
-      auth_signer, 
+      admin, 
       mm_program, 
-      config_pda,
+      mm_config_pda,
       netting_pda
    ] = accounts else {
       log!("add_line_to_netting_account: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   verify_signer(&auth_signer)?;
-
-   verify_mm_auth_signer(&auth_signer, &mm_program, config_pda)?;
+   verify_signer(&admin)?;
+   verify_mm_program_executable(&mm_program)?;
+   verify_mm_admin(&admin, &mm_program, mm_config_pda)?;
 
    let parsed_data = AddLineToLiabilityNettingIxData::decode(data)?;
    let event_id = parsed_data.event_id;

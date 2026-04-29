@@ -22,14 +22,14 @@ mod init_program;
 #[inline(never)]
 pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {
    match d {
-      //ORACLE UPDATE DISCRIMINATOR of 0 is handled in hot path
+      // Oracle hot-path discriminator `0` is handled in `lib.rs` (Doppler).
       INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(program_id, accounts, data),
 
-      //2-4 are reserved for future use
+      // Discriminator 2-4 are reserved for whatever SPAMM-specific instructions you want to add.
 
-      //MUST be 5
+      // Aggregator CPI (`lib.rs` strips router byte): MUST match `GET_QUOTE_IX_DISCRIMINATOR` /
+      // `FILL_QUOTE_IX_DISCRIMINATOR` in `spamm_aggregator`.
       GET_QUOTE_IX_DISCRIMINATOR => get_quote::process(program_id, accounts, data),
-      //MUST be 6
       FILL_QUOTE_IX_DISCRIMINATOR => fill_quote::process(program_id, accounts, data),
 
       INIT_EVENT_IX_DISCRIMINATOR => init_event::process(program_id, accounts, data),

@@ -8,7 +8,7 @@ use crate::{
 };
 
 pub const NETTING_PDA_SEED: &[u8] = b"netting";
-pub const NETTING_PDA_DISCRIMINATOR: u8 = 4;
+pub const NETTING_PDA_DISCRIMINATOR: u8 = 5;
 
 #[derive(Copy, Clone, ZeroPod)]
 pub struct NettingPdaDataHeader {
@@ -203,20 +203,20 @@ pub fn apply_netting(
    side: u8,
    amount_filled: u64,
    odds_scaled: u32,
-) -> u64 {
+) -> (bool, i64) {
    let m_id = *market_id;
    let sport = m_id.event_id.sport;
    let period = m_id.period;
    let mkt = m_id.mkt;
 
    if sport == Sport::Soccer && period != 1 {
-      return 0;
+      return (false, 0i64);
    }
    if sport == Sport::Soccer && (mkt > 0 && mkt < 4) && side == 1 {
-      return 0;
+      return (false, 0i64);
    }
    if sport != Sport::Soccer && period != 0 {
-      return 0;
+      return (false, 0i64);
    }
 
    let in_100_to_300 = mkt.wrapping_sub(100) <= 200;
@@ -227,7 +227,7 @@ pub fn apply_netting(
       mkt == 0 || in_100_to_300 || in_1000_to_2000
    };
    if unlikely(!is_valid_netting_mkt) {
-      return 0;
+      return (false, 0i64);
    }
 
    let data = unsafe {
@@ -237,17 +237,17 @@ pub fn apply_netting(
       )
    };
    if data.len() < NETTING_HEADER_LEN || data[NETTING_DISC_OFFSET] != NETTING_PDA_DISCRIMINATOR {
-      return 0;
+      return (false, 0i64);
    }
 
    let profit_on_win_u64 = calc_potential_profit(amount_filled, odds_scaled);
    let profit_on_win: i64 = if let Ok(value) = profit_on_win_u64 { 
       value.try_into().ok().unwrap_or(0)
-   } else { return 0 };
+   } else { return (false, 0i64) };
    
    let amount_filled_i64 = match i64::try_from(amount_filled) {
       Ok(value) => value,
-      Err(_) => return 0,
+      Err(_) => return (false, 0i64),
    };
 
    if sport == Sport::Soccer && mkt.wrapping_sub(1) <= 2 {
@@ -263,12 +263,12 @@ pub fn apply_netting(
          if i == outcome_index {
             *value = match value.checked_add(profit_on_win) {
                Some(v) => v,
-               None => return 0,
+               None => return (false, 0i64),
             };
          } else {
             *value = match value.checked_sub(amount_filled_i64) {
                Some(v) => v,
-               None => return 0,
+               None => return (false, 0i64),
             };
          }
       }
@@ -279,7 +279,7 @@ pub fn apply_netting(
          unsafe { writers::write_i64_le_unchecked(data.as_mut_ptr(), start, *value) };
       }
 
-      return net_reduction(old_net, new_net);
+      return (true, signed_reserve_delta(old_net, new_net));
    }
 
    if sport != Sport::Soccer && mkt == 0 {
@@ -295,11 +295,11 @@ pub fn apply_netting(
       let old_net = max3(ft[0], ft[1], ft[2]);
       ft[selected_index] = match ft[selected_index].checked_add(profit_on_win) {
          Some(v) => v,
-         None => return 0,
+         None => return (false, 0i64),
       };
       ft[opposing_index] = match ft[opposing_index].checked_sub(amount_filled_i64) {
          Some(v) => v,
-         None => return 0,
+         None => return (false, 0i64),
       };
       let new_net = max3(ft[0], ft[1], ft[2]);
 
@@ -308,33 +308,30 @@ pub fn apply_netting(
          unsafe { write_i64_le_unchecked(data.as_mut_ptr(), start, *value) };
       }
 
-      return net_reduction(old_net, new_net);
+      return (true, signed_reserve_delta(old_net, new_net));
    }
 
    let number_of_lines =
       unsafe { read_u8_unchecked(data.as_ptr(), NETTING_NUMBER_OF_LINES_OFFSET) } as usize;
 
-   if ensure_netting_lines_view(data, number_of_lines).is_err() {
-      return 0;
+   match ensure_netting_lines_view(data, number_of_lines) {
+      Ok(()) => {}
+      Err(_) => return (false, 0i64),
    }
    let lines_start = NETTING_HEADER_LEN;
 
    let line_idx = match find_netting_line_or_insertion(data, lines_start, number_of_lines, mkt) {
       Ok(idx) => idx,
-      Err(insertion_idx) => {
-         if insert_blank_netting_line_at(
-            data,
-            lines_start,
-            number_of_lines,
-            mkt,
-            insertion_idx,
-         )
-         .is_err()
-         {
-            return 0;
-         }
-         insertion_idx
-      }
+      Err(insertion_idx) => match insert_blank_netting_line_at(
+         data,
+         lines_start,
+         number_of_lines,
+         mkt,
+         insertion_idx,
+      ) {
+         Ok(()) => insertion_idx,
+         Err(_) => return (false, 0i64),
+      },
    };
 
    let line_offset = lines_start + (line_idx * NETTING_LINE_LEN);
@@ -346,20 +343,20 @@ pub fn apply_netting(
    if side == 0 {
       side0 = match side0.checked_add(profit_on_win) {
          Some(v) => v,
-         None => return 0,
+         None => return (false, 0i64),
       };
       side1 = match side1.checked_sub(amount_filled_i64) {
          Some(v) => v,
-         None => return 0,
+         None => return (false, 0i64),
       };
    } else {
       side1 = match side1.checked_add(profit_on_win) {
          Some(v) => v,
-         None => return 0,
+         None => return (false, 0i64),
       };
       side0 = match side0.checked_sub(amount_filled_i64) {
          Some(v) => v,
-         None => return 0,
+         None => return (false, 0i64),
       };
    }
    let new_net = max2(side0, side1);
@@ -368,7 +365,17 @@ pub fn apply_netting(
       write_i64_pair_unchecked(data.as_mut_ptr(), side0_offset, (side0, side1));
    }
 
-   net_reduction(old_net, new_net)
+   (true, signed_reserve_delta(old_net, new_net))
+}
+
+/// Signed change in portfolio worst-case reserve (`new_net - old_net`). Positive means more
+/// encumbrance / MM margin required; negative means netting released reserve.
+#[inline(always)]
+fn signed_reserve_delta(old_net: i64, new_net: i64) -> i64 {
+   match new_net.checked_sub(old_net) {
+      Some(d) => d,
+      None => 0i64,
+   }
 }
 
 
@@ -383,15 +390,6 @@ fn max3(a: i64, b: i64, c: i64) -> i64 {
    let ab = if a > b { a } else { b };
    let best = if ab > c { ab } else { c };
    if best > 0 { best } else { 0 }
-}
-
-#[inline(always)]
-fn net_reduction(old_net: i64, new_net: i64) -> u64 {
-   if new_net < old_net {
-      (old_net - new_net) as u64
-   } else {
-      0
-   }
 }
 
 const _: () = assert!(NETTING_LINE_LEN == 20);

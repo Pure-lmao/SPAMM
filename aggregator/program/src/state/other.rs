@@ -1,6 +1,8 @@
 use pinocchio::Address;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
+use crate::state::EventId;
+
 
 #[repr(C)]
 #[derive(Copy, Clone, ZeroPod)]
@@ -17,11 +19,15 @@ pub const CONFIG_PDA_AUTHORITY_OFFSET: usize = 2;
 
 const _: () = assert!(CONFIG_PDA_LEN == 34);
 
-/// Aggregator-owned MM registry PDA body (single seed [`crate::constants::MM_LIST_PDA_SEED`]).
-/// Wire layout: byte `0` = discriminator, bytes `1..3` = `number_of_mms` (LE), then `number_of_mms`
-/// × 32-byte [`Address`] values (MM program ids).
-pub const MM_LIST_PDA_DISCRIMINATOR: u8 = 10;
-pub const MM_LIST_HEADER_LEN: usize = 1 + 2;
+
+#[derive(Copy, Clone, ZeroPod)]
+pub struct MmListPdaData {
+   pub discriminator: u8,
+   pub number_of_mms: u16,
+   //pub mms: [Address; number_of_mms],
+}
+pub const MM_LIST_PDA_DISCRIMINATOR: u8 = 3;
+pub const MM_LIST_HEADER_LEN: usize = <MmListPdaData as ZeroPodFixed>::SIZE;
 pub const MM_LIST_PDA_NUMBER_OF_MMS_OFFSET: usize = 1;
 
 const _: () = assert!(MM_LIST_HEADER_LEN == 3);
@@ -33,13 +39,14 @@ pub const EVENT_STATE_DISCRIMINATOR: u8 = 3;
 pub struct EventStateData {
    pub discriminator: u8,
    pub bump: u8,
+   pub event_id: EventId,
    pub sequence: u16,
    pub state_hash: [u8; 32],
 }
 
 pub const EVENT_STATE_LEN: usize = <EventStateData as ZeroPodFixed>::SIZE;
 
-const _: () = assert!(EVENT_STATE_LEN == 36);
+const _: () = assert!(EVENT_STATE_LEN == 49);
 
 pub const MM_MARKET_DATA_PDA_SEED: &[u8] = b"market_data";
 pub const MM_MARKET_DATA_PDA_DISCRIMINATOR: u8 = 0;
@@ -52,4 +59,17 @@ pub struct MmMarketDataPdaData {
 pub const MM_MARKET_DATA_PDA_MIN_LEN: usize = <MmMarketDataPdaData as ZeroPodFixed>::SIZE;
 pub const MM_MARKET_DATA_PDA_BUMP_OFFSET: usize = 1;
 
-pub const LIABILITY_TOKEN_ACCOUNT_SEED: &[u8] = b"liability_token_account";
+
+pub const MM_ENCUMBRANCE_PDA_SEED: &[u8] = b"encumbrance";
+pub const MM_ENCUMBRANCE_PDA_DISCRIMINATOR: u8 = 4;
+#[derive(Copy, Clone, ZeroPod)]
+pub struct MmEncumbrancePdaData {
+   pub discriminator: u8,
+   pub bump: u8,
+   pub encumbrance: i64,
+}
+pub const MM_ENCUMBRANCE_PDA_LEN: usize = <MmEncumbrancePdaData as ZeroPodFixed>::SIZE;
+pub const MM_ENCUMBRANCE_PDA_BUMP_OFFSET: usize = 1;
+pub const MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET: usize = 2;
+
+const _: () = assert!(MM_ENCUMBRANCE_PDA_LEN == 10);

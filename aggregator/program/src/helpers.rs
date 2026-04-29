@@ -15,8 +15,8 @@ use crate::{
    parsers::get_token_account_balance,
    readers::{read_address_unchecked, read_u8_unchecked},
    state::{
-      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, MM_ACCOUNT_CONFIG_SEED, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_AUTHORITY_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
-         CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_STATUS_OFFSET, MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED
+      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, MM_ACCOUNT_CONFIG_SEED, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
+         CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_STATUS_OFFSET, MM_ENCUMBRANCE_PDA_BUMP_OFFSET, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED
       }
    },
 };
@@ -370,17 +370,17 @@ pub fn verify_mm_config_pda(mm_config_pda: &AccountView, mm_program_account: &Ac
 }
 
 #[inline(always)]
-pub fn verify_mm_auth_signer(auth_signer: &AccountView, mm_program_account: &AccountView, config_pda: &AccountView) -> ProgramResult {
+pub fn verify_mm_admin(admin: &AccountView, mm_program_account: &AccountView, config_pda: &AccountView) -> ProgramResult {
    if unlikely(!address_eq(config_pda.owner(), &mm_program_account.address())) {
-      log!("verify_mm_auth_signer: config pda must be owned by the mm program");
+      log!("verify_mm_admin: config pda must be owned by the mm program");
       return Err(ProgramError::InvalidAccountOwner);
    }
 
    let stored_bump = unsafe { 
       read_u8_unchecked(config_pda.data_ptr(), MM_CONFIG_PDA_BUMP_OFFSET) 
    };
-   let stored_auth_signer = unsafe { 
-      read_address_unchecked(config_pda.data_ptr(), MM_CONFIG_PDA_AUTHORITY_OFFSET) 
+   let stored_admin = unsafe { 
+      read_address_unchecked(config_pda.data_ptr(), MM_CONFIG_PDA_ADMIN_OFFSET) 
    };
 
    let expected_address = Address::derive_address(
@@ -390,16 +390,44 @@ pub fn verify_mm_auth_signer(auth_signer: &AccountView, mm_program_account: &Acc
    );
 
    if unlikely(!address_eq(config_pda.address(), &expected_address)) {
-      log!("verify_mm_auth_signer: config pda address does not match seeds");
+      log!("verify_mm_admin: config pda address does not match seeds");
       return Err(ProgramError::InvalidSeeds);
    }
 
-   if unlikely(!address_eq(auth_signer.address(), &stored_auth_signer)) {
-      log!("verify_mm_auth_signer: signer does not match config auth_signer");
+   if unlikely(!address_eq(admin.address(), &stored_admin)) {
+      log!("verify_mm_admin: signer does not match config admin");
       return Err(ProgramError::IncorrectAuthority);
    }
 
    Ok(())
+}
+
+pub fn verify_mm_encumbrance_pda(mm_encumbrance_pda: &AccountView, mm_program_account: &AccountView) -> Option<u8> {
+   if unlikely(!address_eq(mm_encumbrance_pda.owner(), &ID)) {
+      return None;
+   }
+
+   if unlikely(mm_encumbrance_pda.data_len() != MM_ENCUMBRANCE_PDA_LEN) {
+      return None;
+   }
+
+   let stored_bump = unsafe { 
+      read_u8_unchecked(mm_encumbrance_pda.data_ptr(), MM_ENCUMBRANCE_PDA_BUMP_OFFSET) 
+   };
+   let expected_address = Address::derive_address(
+      &[
+         MM_ENCUMBRANCE_PDA_SEED,
+         mm_program_account.address().as_ref(),
+      ],
+      Some(stored_bump),
+      &ID,
+   );
+
+   if unlikely(!address_eq(mm_encumbrance_pda.address(), &expected_address)) {
+      return None;
+   }
+
+   Some(stored_bump)
 }
 
 /// Move all lamports from `pda` to `recipient` (PDA signs with `signers`), then [`AccountView::close`].

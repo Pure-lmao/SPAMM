@@ -1,3 +1,13 @@
+//! Create a liability netting account for an event.
+//! 
+//! Accounts:
+//! - mm admin (writable signer) - must match authority in mm config pda
+//! - mm program (readonly - executable)
+//! - mm config pda (readonly)
+//! - netting pda (writable - uninitialized)
+//! - system program (readonly)
+//! Data: `{event_id: EventId}`
+
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer},
    error::ProgramError, hint::unlikely,
@@ -7,9 +17,9 @@ use pinocchio_system::instructions::CreateAccount;
 
 use crate::{
    ID,
-   helpers::{get_rent_local, verify_mm_program_executable, verify_signer, verify_system_program},
+   helpers::{get_rent_local, verify_mm_admin, verify_mm_program_executable, verify_signer, verify_system_program},
    state::{
-      EventId, NettingPdaDataHeader, NETTING_ACCOUNT_ALLOC_LEN, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_SEED,
+      EventId, NETTING_ACCOUNT_ALLOC_LEN, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_SEED, NettingPdaDataHeader
    },
 };
 
@@ -17,8 +27,9 @@ pub const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 6;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
-      feepayer, //verified as signer
-      mm_program_account, //verified by equ const
+      mm_admin, //verified as signer
+      mm_config_pda, //verified by verify_config_pda
+      mm_program_account, //verified by executable
       netting_pda, //verified by find_program_address
       system_program, //verified by equ const
    ] = accounts else {
@@ -26,7 +37,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   verify_signer(&feepayer)?;
+   verify_signer(&mm_admin)?;
+   verify_mm_admin(mm_admin, mm_program_account, mm_config_pda)?;
    verify_system_program(&system_program)?;
    verify_mm_program_executable(&mm_program_account)?;
 
@@ -74,7 +86,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    let space = NETTING_ACCOUNT_ALLOC_LEN as u64;
    CreateAccount {
-      from: feepayer,
+      from: mm_admin,
       to: netting_pda,
       lamports: get_rent_local(space),
       space,

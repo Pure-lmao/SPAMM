@@ -23,12 +23,12 @@ impl GetQuoteIxData {
    pub fn to_zc(self) -> GetQuoteIxDataZc {
       GetQuoteIxDataZc {
          instruction_discriminator: self.instruction_discriminator,
-         side: self.side,
-         event_state_sequence: self.event_state_sequence.into(),
-         odds_scaled: self.odds_scaled.into(),
          amount: self.amount.into(),
+         odds_scaled: self.odds_scaled.into(),
          market_id: self.market_id.to_zc(false),
+         side: self.side,
          event_state_hash: self.event_state_hash,
+         event_state_sequence: self.event_state_sequence.into(),
       }
    }
 

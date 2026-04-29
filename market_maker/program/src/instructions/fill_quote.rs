@@ -1,25 +1,13 @@
-//! CPI entry used by the aggregator to fill a bet after quotes are sorted.
-//! Confirms the instruction matches the MM quote buffer, transfers liability to the aggregator,
-//! and marks the buffer used.
+//! CPI entry used by the aggregator to fill a leg after quotes are sorted.
+//! Validates MM config + quote-buffer PDAs, instruction vs buffer snapshot, transfer from MM ATA.
 //!
-//! Accounts: **(4)**
-//! 0. `user` (readonly)
-//! 1. `mm_oracle_pda` (readonly)
-//! 2. `mm_config_pda` (readonly)
-//! 3. `mm_quote_buffer` (writable)
-//! 4. `mm_token_account` (writable)
-//! 5. `liability_account` (writable)
-//!
-//! Instruction `data` (bytes after the router discriminator in `lib.rs`): **83 bytes**, zeropod layout, in order:
-//! - `amount_to_fill` (u64 LE) — `<=` quote `max_amount`
-//! - `odds_scaled` (u32 LE) — must match the buffer quote
-//! - `market_id` (**26** bytes)
-//! - `side` (u8): `0` or `1`
-//! - `event_state_hash` (`[u8; 32]`)
-//! - `event_state_sequence` (u16 LE)
-//! - `amount_to_send` (u64 LE) — amount to transfer to the liability token account
-
-
+//! Accounts **(6)** (aggregator order):
+//! 0. `user`
+//! 1. `mm_oracle_pda` — unused here (reserved for future oracle checks)
+//! 2. `mm_config_pda`
+//! 3. `mm_quote_buffer`
+//! 4. `mm_token_account` — SPL authority must be the config PDA (`init_program`)
+//! 5. `liability_account`
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer}, error::ProgramError,
    hint::{likely, unlikely},
@@ -28,12 +16,15 @@ use pinocchio_log::log;
 use pinocchio_token::{instructions::Transfer, state::Account as TokenAccount};
 use zeropod::ZeroPodFixed;
 
-use crate::constants::MM_QUOTE_BUFFER_SEED;
 use crate::state::FillQuoteIxPayload;
-use crate::mm_helpers::verify_quote_buffer;
+use crate::mm_helpers::{verify_mm_config_pda, verify_quote_buffer};
 use spamm_aggregator::constants::ODDS_SCALE;
+use spamm_aggregator::readers::read_u8_unchecked;
+use spamm_aggregator::state::mm_account_config::MM_CONFIG_PDA_BUMP_OFFSET;
 use spamm_aggregator::state::mm_quote::MM_QUOTE_BUFFER_DISCRIMINATOR;
-use spamm_aggregator::state::{MMQuoteBuffer, MM_QUOTE_BUFFER_LEN, MarketId};
+use spamm_aggregator::state::{
+   MM_ACCOUNT_CONFIG_SEED, MMQuoteBuffer, MM_QUOTE_BUFFER_LEN, MarketId,
+};
 
 /// `MMQuoteBuffer::is_used` byte offset in the wire buffer (after `discriminator`).
 const IS_USED_OFFSET: usize = 1;
@@ -41,8 +32,6 @@ const IS_USED_OFFSET: usize = 1;
 pub const FILL_QUOTE_IX_DISCRIMINATOR: u8 = 6;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
-   // `lib.rs` strips the outer instruction discriminator; `data` is the `FillQuoteIxData` body
-   // (83 bytes) without the leading `FILL_QUOTE_IX_DISCRIMINATOR` byte.
    let parsed = FillQuoteIxPayload::decode(data)?;
 
    let [
@@ -78,18 +67,14 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::InvalidInstructionData);
    }
 
+   if unlikely(!verify_mm_config_pda(mm_config_pda, program_id)) {
+      log!("fill_quote: mm config pda invalid");
+      return Err(ProgramError::InvalidSeeds);
+   }
+
    if unlikely(!verify_quote_buffer(mm_quote_buffer, program_id)) {
       log!("fill_quote: quote buffer invalid");
       return Err(ProgramError::InvalidAccountData);
-   }
-
-   let (expected_buffer_pda, buffer_bump) = Address::find_program_address(
-      &[MM_QUOTE_BUFFER_SEED],
-      program_id,
-   );
-   if unlikely(!address_eq(mm_quote_buffer.address(), &expected_buffer_pda)) {
-      log!("fill_quote: quote buffer PDA mismatch");
-      return Err(ProgramError::InvalidSeeds);
    }
 
    let on_chain = {
@@ -155,8 +140,8 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    {
       let src = TokenAccount::from_account_view(mm_token_account)?;
-      if unlikely(!address_eq(src.owner(), mm_quote_buffer.address())) {
-         log!("fill_quote: mm token must be owned by the quote buffer PDA");
+      if unlikely(!address_eq(src.owner(), mm_config_pda.address())) {
+         log!("fill_quote: mm token authority must be config PDA");
          return Err(ProgramError::InvalidAccountData);
       }
       if unlikely(src.amount() < parsed.amount_to_send) {
@@ -170,15 +155,22 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       }
    }
 
-   let bump_ref = [buffer_bump];
+   let config_bump = unsafe { read_u8_unchecked(mm_config_pda.data_ptr(), MM_CONFIG_PDA_BUMP_OFFSET) };
+   let bump_ref = [config_bump];
    let signer_seeds = [
-      Seed::from(MM_QUOTE_BUFFER_SEED),
+      Seed::from(MM_ACCOUNT_CONFIG_SEED),
       Seed::from(&bump_ref as &[u8]),
    ];
    let signers = [Signer::from(&signer_seeds)];
 
    if likely(parsed.amount_to_send > 0) {
-      Transfer::new(mm_token_account, liability_account, mm_config_pda, parsed.amount_to_send).invoke_signed(&signers)?;
+      Transfer::new(
+         mm_token_account,
+         liability_account,
+         mm_config_pda,
+         parsed.amount_to_send,
+      )
+      .invoke_signed(&signers)?;
    }
 
 

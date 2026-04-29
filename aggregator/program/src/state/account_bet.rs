@@ -14,6 +14,8 @@ pub struct BetFiller {
    pub mm_address: Address,
    pub amount: u64,
    pub odds_scaled: u32,
+   pub is_potentially_netted: bool,
+   pub encumbrance_delta: i64,
 }
 
 #[repr(u8)]
@@ -78,6 +80,8 @@ impl BetFiller {
          mm_address: self.mm_address,
          amount: self.amount.into(),
          odds_scaled: self.odds_scaled.into(),
+         is_potentially_netted: self.is_potentially_netted.into(),
+         encumbrance_delta: self.encumbrance_delta.into(),
       }
    }
 }
@@ -142,31 +146,43 @@ impl BetAccountData {
             mm_address: zc.filler_0.mm_address,
             amount: zc.filler_0.amount.get(),
             odds_scaled: zc.filler_0.odds_scaled.get(),
+            is_potentially_netted: zc.filler_0.is_potentially_netted.get(),
+            encumbrance_delta: zc.filler_0.encumbrance_delta.get(),
          },
          filler_1: BetFiller {
             mm_address: zc.filler_1.mm_address,
             amount: zc.filler_1.amount.get(),
             odds_scaled: zc.filler_1.odds_scaled.get(),
+            is_potentially_netted: zc.filler_1.is_potentially_netted.get(),
+            encumbrance_delta: zc.filler_1.encumbrance_delta.get(),
          },
          filler_2: BetFiller {
             mm_address: zc.filler_2.mm_address,
             amount: zc.filler_2.amount.get(),
             odds_scaled: zc.filler_2.odds_scaled.get(),
+            is_potentially_netted: zc.filler_2.is_potentially_netted.get(),
+            encumbrance_delta: zc.filler_2.encumbrance_delta.get(),
          },
          filler_3: BetFiller {
             mm_address: zc.filler_3.mm_address,
             amount: zc.filler_3.amount.get(),
             odds_scaled: zc.filler_3.odds_scaled.get(),
+            is_potentially_netted: zc.filler_3.is_potentially_netted.get(),
+            encumbrance_delta: zc.filler_3.encumbrance_delta.get(),
          },
          filler_4: BetFiller {
             mm_address: zc.filler_4.mm_address,
             amount: zc.filler_4.amount.get(),
             odds_scaled: zc.filler_4.odds_scaled.get(),
+            is_potentially_netted: zc.filler_4.is_potentially_netted.get(),
+            encumbrance_delta: zc.filler_4.encumbrance_delta.get(),
          },
       })   
    }
 }
 
+const BET_FILLER_WIRE_LEN: usize = <BetFiller as ZeroPodFixed>::SIZE;
+const BET_ACCOUNT_EXPECTED_LEN: usize = 153 + MAX_NUMBER_OF_MMS * BET_FILLER_WIRE_LEN;
+
 const _: () = assert!(MAX_NUMBER_OF_MMS == 5);
-const _: () = assert!(<BetFiller as ZeroPodFixed>::SIZE == 44);
-const _: () = assert!(<BetAccountData as ZeroPodFixed>::SIZE == 153 + MAX_NUMBER_OF_MMS * 44);
+const _: () = assert!(<BetAccountData as ZeroPodFixed>::SIZE == BET_ACCOUNT_EXPECTED_LEN);

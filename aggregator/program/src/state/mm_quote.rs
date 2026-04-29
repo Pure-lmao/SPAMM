@@ -12,6 +12,8 @@ pub struct MMQuote<'a> {
    pub mm_quote_buffer: &'a AccountView,
    pub mm_config_pda: &'a AccountView,
    pub mm_market_data_pda: &'a AccountView,
+   pub encumbrance_pda_index: usize,
+   pub encumbrance_pda_bump: u8,
    pub mm_liability_token_account: &'a AccountView,
 }
 

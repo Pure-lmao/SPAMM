@@ -6,9 +6,9 @@ use pinocchio::{Address, error::ProgramError};
 pub const INIT_PROGRAM_IX_DATA_LEN: usize = 32;
 
 /// Wire layout (minus the outer instruction discriminator):
-/// - `auth_signer: [u8; 32]`
+/// - `admin: [u8; 32]`
 pub struct InitProgramIxPayload {
-   pub auth_signer: Address,
+   pub admin: Address,
 }
 
 impl InitProgramIxPayload {
@@ -21,7 +21,7 @@ impl InitProgramIxPayload {
       let mut a = [0u8; 32];
       a.copy_from_slice(data);
       Ok(Self {
-         auth_signer: Address::new_from_array(a),
+         admin: Address::new_from_array(a),
       })
    }
 }

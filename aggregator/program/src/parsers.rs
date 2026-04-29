@@ -1,7 +1,14 @@
 use pinocchio::{AccountView, error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
 
-use crate::{constants::ODDS_SCALE, instructions::FillBetIxData, readers::{read_u32_le_unchecked, read_u64_le_unchecked}, state::{Sport, mm_quote::{QUOTE_DATA_LEN, QUOTE_DATA_MAX_AMOUNT_OFFSET, QUOTE_DATA_ODDS_SCALED_OFFSET}}};
+use crate::{constants::ODDS_SCALE, 
+   instructions::FillBetIxData, 
+   readers::{read_i64_le_unchecked, read_u32_le_unchecked, read_u64_le_unchecked}, 
+   state::{Sport, 
+      mm_quote::{QUOTE_DATA_LEN, QUOTE_DATA_MAX_AMOUNT_OFFSET, QUOTE_DATA_ODDS_SCALED_OFFSET}, 
+      other::{MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET}
+   }
+};
 
 #[inline(always)]
 pub fn parse_fill_bet_data(data: &[u8]) -> Result<FillBetIxData, ProgramError> {
@@ -64,4 +71,14 @@ pub fn get_token_account_balance(token_account: &AccountView) -> Result<u64, Pro
       return Err(ProgramError::InvalidInstructionData);
    }
    Ok(unsafe { read_u64_le_unchecked(token_account.data_ptr(), TOKEN_ACCOUNT_AMOUNT_OFFSET) })
+}
+
+pub fn get_encumbrance(encumbrance_pda: &AccountView) -> Result<i64, ProgramError> {
+   if encumbrance_pda.data_len() != MM_ENCUMBRANCE_PDA_LEN {
+      log!("get_encumbrance: encumbrance pda data length mismatch");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   Ok(unsafe { 
+      read_i64_le_unchecked(encumbrance_pda.data_ptr(), MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET)
+   })
 }

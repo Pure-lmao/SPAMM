@@ -1,8 +1,7 @@
-//! Create the event-state PDA: `["event_state", event_id]`, initial
-//! `sequence = 0` and `state_hash = 0..0`.
-//!
+//! Create the event-state PDA: `["event_state", event_id]`. Initial `sequence = 1`, `state_hash = 0`,
+//! matching the SPAMM README (first sporting sequence consumers must observe before quoting live odds).//!
 //! Accounts: **(4)**
-//! 0. `feepayer` (signer) — must match `MmAccountConfig::auth_signer` on `config_pda`
+//! 0. `feepayer` (signer) — must match `MmAccountConfig::admin` on `config_pda`
 //! 1. `config_pda` (readonly) — PDA `["config"]` under the MM
 //! 2. `event_state_pda` (writable) — created, [`EVENT_STATE_LEN`] bytes
 //! 3. `system_program` (readonly)
@@ -86,8 +85,9 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       }
       let initial = EventStateData {
          discriminator: EVENT_STATE_DISCRIMINATOR,
+         event_id,
          bump,
-         sequence: 0,
+         sequence: 1,
          state_hash: [0u8; 32],
       };
       unsafe {

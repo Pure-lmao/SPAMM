@@ -1,6 +1,6 @@
 //! Settle the graded bet and move funds to the winner then close bet/ata to the feepayer.
 //! 
-//! Accounts: **7** then **2 × 5** per filler but can be blank if no fillers
+//! Accounts: **9** then **5** per filler but can be blank if no fillers
 //! 0. `signer` (signer)
 //! 1. `bet_account` (writable)
 //! 2. `bet_ata` (writable)
@@ -14,8 +14,9 @@
 //! Per filler:
 //! 0 `mm_address` (readonly)
 //! 1. `mm_config_pda` (readonly)
-//! 2. `token_account` (writable)
-//! 3. `liability_token_account` (writable)
+//! 2. `mm_encumbrance_pda` (writable)
+//! 3. `mm_liability_token_account` (writable)
+//! 4. `mm_token_account` (writable)
 //! 
 //! No Data
 
@@ -25,9 +26,9 @@ use pinocchio::{
 use pinocchio_log::log;
 use pinocchio_system::ID as SYSTEM_ID;
 use pinocchio_token::instructions::{Transfer};
-use crate::{ID, constants::{CONFIG_PDA_BUMP, CONFIG_PDA_SEED}, helpers::{calc_potential_profit, close_pda_return_rent, safe_close_ata, verify_config_pda, verify_mint, verify_signer, verify_token_account, verify_token_program}, state::{
-      BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, account_bet::BetResult
-   },
+use crate::{ID, helpers::{calc_potential_profit, close_pda_return_rent, safe_close_ata, verify_config_pda, verify_mint, verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program}, parsers::get_encumbrance, state::{
+      BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, account_bet::BetResult, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED}
+   }, writers::write_i64_le_unchecked
 };
 
 pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 5;
@@ -45,24 +46,29 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
       token_program, //verified by equ const
       filler_0_mm_address,
       filler_0_mm_config_pda,
+      filler_0_mm_encumbrance_pda,
+      filler_0_mm_liability_token_account,
       filler_0_token_account,
-      filler_0_liability_token_account,
       filler_1_mm_address,
       filler_1_mm_config_pda,
+      filler_1_mm_encumbrance_pda,
+      filler_1_mm_liability_token_account,
       filler_1_token_account,
-      filler_1_liability_token_account,
       filler_2_mm_address,
       filler_2_mm_config_pda,
+      filler_2_mm_encumbrance_pda,
+      filler_2_mm_liability_token_account,
       filler_2_token_account,
-      filler_2_liability_token_account,
       filler_3_mm_address,
       filler_3_mm_config_pda,
+      filler_3_mm_encumbrance_pda,
+      filler_3_mm_liability_token_account,
       filler_3_token_account,
-      filler_3_liability_token_account,
       filler_4_mm_address,
       filler_4_mm_config_pda,
+      filler_4_mm_encumbrance_pda,
+      filler_4_mm_liability_token_account,
       filler_4_token_account,
-      filler_4_liability_token_account,
    ] = accounts else {
       log!("settle_bet: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
@@ -125,75 +131,75 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    handle_filler(
       filler_0_mm_address,
       filler_0_mm_config_pda,
+      filler_0_mm_encumbrance_pda,
+      filler_0_mm_liability_token_account,
       filler_0_token_account,
-      filler_0_liability_token_account,
       &bet_data.filler_0,
       user_ata,
       bet_account,
       bet_ata,
       mint,
       token_program,
-      our_config_pda,
       bet_data.result,
       bet_account_signer,      
    )?;
    handle_filler(
       filler_1_mm_address,
       filler_1_mm_config_pda,
+      filler_1_mm_encumbrance_pda,
+      filler_1_mm_liability_token_account,
       filler_1_token_account,
-      filler_1_liability_token_account,
       &bet_data.filler_1,
       user_ata,
       bet_account,
       bet_ata,
       mint,
       token_program,
-      our_config_pda,
       bet_data.result,
       bet_account_signer,
    )?;
    handle_filler(
       filler_2_mm_address,
       filler_2_mm_config_pda,
+      filler_2_mm_encumbrance_pda,
+      filler_2_mm_liability_token_account,
       filler_2_token_account,
-      filler_2_liability_token_account,
       &bet_data.filler_2,
       user_ata,
       bet_account,
       bet_ata,
       mint,
       token_program,
-      our_config_pda,
       bet_data.result,
       bet_account_signer,
    )?;
    handle_filler(
       filler_3_mm_address,
       filler_3_mm_config_pda,
+      filler_3_mm_encumbrance_pda,
+      filler_3_mm_liability_token_account,
       filler_3_token_account,
-      filler_3_liability_token_account,
       &bet_data.filler_3,
       user_ata,
       bet_account,
       bet_ata,
       mint,
       token_program,
-      our_config_pda,
       bet_data.result,
       bet_account_signer,
    )?;
    handle_filler(
       filler_4_mm_address,
       filler_4_mm_config_pda,
+      filler_4_mm_encumbrance_pda,
+      filler_4_mm_liability_token_account,
       filler_4_token_account,
-      filler_4_liability_token_account,
       &bet_data.filler_4,
       user_ata,
       bet_account,
       bet_ata,
       mint,
       token_program,
-      our_config_pda,
       bet_data.result,
       bet_account_signer,
    )?;
@@ -240,15 +246,15 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
 fn handle_filler(
    mm_address: &AccountView,
    mm_config_pda: &AccountView,
+   mm_encumbrance_pda: &mut AccountView,
+   mm_liability_token_account: &AccountView,
    token_account: &AccountView,
-   liability_token_account: &AccountView,
    filler: &BetFiller,
    user_ata: &AccountView,
    bet_account: &AccountView,
    bet_ata: &AccountView,
    mint: &AccountView,
    token_program: &AccountView,
-   our_config_pda: &AccountView,
    bet_result: BetResult,
    bet_account_signer: &[Signer<'_, '_>],
 ) -> ProgramResult {
@@ -267,47 +273,64 @@ fn handle_filler(
       &mint, &token_program
    )?;
 
+   let Some(valid_mm_encumbrance_pda_bump) = verify_mm_encumbrance_pda(
+      mm_encumbrance_pda,
+      mm_address,
+   ) else {
+      return Err(ProgramError::InvalidInstructionData);
+   };
+
    verify_token_account(true, 
-      &liability_token_account, our_config_pda, 
+      &mm_liability_token_account, mm_encumbrance_pda, 
       &mint, &token_program
    )?;
 
    let (
-      amount_to_user_from_filler_liability_token_account, 
-      amount_to_filler_from_bet_ata,
-      amount_to_filler_from_liability_token_account
-   ): (u64, u64, u64) = match bet_result {
+      amount_to_user_from_filler_liability_token_account, //user profit
+      amount_to_filler_from_bet_ata, // bet ata -> mm token (non-netted stake / mm take)
+      amount_to_liability_token_account_from_bet_ata, // bet ata -> liability (netted pool)
+      encumbrance_adjustment
+   ): (u64, u64, u64, i64) = match bet_result {
       BetResult::Won => {
          let user_profit = calc_potential_profit(filler.amount, filler.odds_scaled)?;
 
-         (user_profit, 0, 0) //and user gets amount back from the bet ata
+         // MM margin for this leg sits in the liability vault at fill time (netted or not).
+         (user_profit, 0, 0, -filler.encumbrance_delta)
       },
       BetResult::Lost => {
-         //the profit is the amount they risked
-         let mm_profit = calc_potential_profit(filler.amount, filler.odds_scaled)?;
-
-         (0, filler.amount, mm_profit)
+         if filler.is_potentially_netted {
+            let stake_i64: i64 = filler.amount.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
+            (0, 0, filler.amount, stake_i64 - filler.encumbrance_delta)
+         } else {
+            (0, filler.amount, 0, -filler.encumbrance_delta)
+         }
       },
       BetResult::HalfWon => {
          let half_amount = filler.amount.checked_div(2).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
          
          let user_profit = calc_potential_profit(half_amount, filler.odds_scaled)?;
+         let release_i64 = if filler.is_potentially_netted {
+            user_profit as i64
+         } else {
+            filler.encumbrance_delta
+         };
 
-         // mm gets back half of the risk they put up, which is the same amount as the user profit
-
-         (user_profit, 0, user_profit) //and the user gets half the amount back from the bet ata
+         (user_profit, 0, 0, -release_i64)
       },
       BetResult::HalfLost => {
          let half_amount = filler.amount.checked_div(2).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
-         
-         let mm_profit = calc_potential_profit(half_amount, filler.odds_scaled)?;
+         let mm_half_profit = calc_potential_profit(half_amount, filler.odds_scaled)?;
 
-         (0, half_amount, mm_profit) //and the mm gets half the amount back from the bet ata
+         if filler.is_potentially_netted {
+            let half_i64: i64 = half_amount.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
+            let mmh_i64: i64 = mm_half_profit.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
+            (0, 0, half_amount, half_i64 - mmh_i64)
+         } else {
+            (0, half_amount, 0, -filler.encumbrance_delta)
+         }
       },
       BetResult::Push | BetResult::Cancelled | BetResult::RolledBack => {
-         let mm_risked = calc_potential_profit(filler.amount, filler.odds_scaled)?;
-
-         (0, 0, mm_risked) //and the user gets the amount back from the bet ata
+         (0, 0, 0, -filler.encumbrance_delta)
       }
       BetResult::Pending => {
          log!("settle_bet: bet result is pending");
@@ -315,23 +338,25 @@ fn handle_filler(
       }
    };
 
-   let config_pda_signer_seeds = [
-      Seed::from(CONFIG_PDA_SEED),
-      Seed::from(&[CONFIG_PDA_BUMP]),
+   let encumbrance_pda_bump_seed = &[valid_mm_encumbrance_pda_bump];
+   let encumbrance_pda_signer_seeds = [
+      Seed::from(MM_ENCUMBRANCE_PDA_SEED),
+      Seed::from(mm_address.address().as_ref()),
+      Seed::from(encumbrance_pda_bump_seed),
    ];
 
-   let config_pda_signer = [
-      Signer::from(&config_pda_signer_seeds),
+   let encumbrance_pda_signer = [
+      Signer::from(&encumbrance_pda_signer_seeds),
    ];
    
    // TODO: once p-token is live, send these to be batched
    if amount_to_user_from_filler_liability_token_account > 0 {
       Transfer::new(
-         liability_token_account,
+         mm_liability_token_account,
          user_ata,
-         our_config_pda,
+         mm_encumbrance_pda,
          amount_to_user_from_filler_liability_token_account,
-      ).invoke_signed(&config_pda_signer)?;
+      ).invoke_signed(&encumbrance_pda_signer)?;
    };
 
    if amount_to_filler_from_bet_ata > 0 {
@@ -343,13 +368,28 @@ fn handle_filler(
       ).invoke_signed(bet_account_signer)?;
    }
 
-   if amount_to_filler_from_liability_token_account > 0 {
+   if amount_to_liability_token_account_from_bet_ata > 0 {
       Transfer::new(
-         liability_token_account,
-         token_account,
-         our_config_pda,
-         amount_to_filler_from_liability_token_account,
-      ).invoke_signed(&config_pda_signer)?;
+         bet_ata,
+         mm_liability_token_account,
+         bet_account,
+         amount_to_liability_token_account_from_bet_ata,
+      ).invoke_signed(bet_account_signer)?;
+   }
+
+   if encumbrance_adjustment != 0 {
+      let mut encumbrance = get_encumbrance(&mm_encumbrance_pda)?;
+      encumbrance = encumbrance
+         .checked_add(encumbrance_adjustment)
+         .ok_or_else(|| ProgramError::ArithmeticOverflow)?;
+
+      unsafe {
+         write_i64_le_unchecked(
+            mm_encumbrance_pda.data_mut_ptr(), 
+            MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, 
+            encumbrance
+         );
+      }
    }
 
    Ok(())

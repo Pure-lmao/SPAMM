@@ -1,14 +1,16 @@
-//! One-time setup: create the `["config"]` PDA and the `["mm_quote_buffer"]` PDA, then
-//! store `auth_signer` in the config.
+//! One-time setup: create `["config"]`, then `["mm_quote_buffer"]`, then the MM collateral ATA whose
+//! **authority is the config PDA** (SPAMM framework README; matches aggregator token checks).
 //!
-//! Accounts: **(4)**
-//! 0. `feepayer` (signer) — funds both PDAs
-//! 1. `config_pda` (writable) — created; body [`MmAccountConfig`]
-//! 2. `mm_quote_buffer_pda` (writable) — created, length [`MM_QUOTE_BUFFER_LEN`], all zeros
-//! 3. `system_program` (readonly)
+//! Accounts **(7)** — order matters for ATA creation:
+//! 0. `feepayer` (signer)
+//! 1. `config_pda` (writable, empty)
+//! 2. `mm_quote_buffer_pda` (writable, empty)
+//! 3. `mm_token_account` (writable, empty) — ATA created with authority = config PDA
+//! 4. `mint` (readonly)
+//! 5. `token_program` (readonly)
+//! 6. `system_program` (readonly)
 //!
-//! Instruction `data` (bytes after the router discriminator in `lib.rs`): **32** bytes —
-//! `auth_signer: [u8; 32]`
+//! Instruction `data`: [`InitProgramIxPayload`] — `admin` pubkey (must equal `feepayer`; example policy).
 
 use pinocchio::ProgramResult;
 use pinocchio::address::address_eq;
@@ -18,11 +20,10 @@ use pinocchio::error::ProgramError;
 use pinocchio::hint::unlikely;
 use pinocchio::{AccountView, Address};
 use pinocchio_log::log;
-use pinocchio_system::instructions::CreateAccount;
 use pinocchio_associated_token_account::instructions::Create as CreateAssociatedTokenAccount;
+use pinocchio_system::instructions::CreateAccount;
 
-use spamm_aggregator::helpers::get_rent_local;
-use spamm_aggregator::helpers::{verify_signer, verify_system_program};
+use spamm_aggregator::helpers::{get_rent_local, verify_signer, verify_system_program, verify_token_program};
 use spamm_aggregator::state::{
    MmAccountConfig, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_ACCOUNT_CONFIG_DISCRIMINATOR,
    MM_QUOTE_BUFFER_LEN,
@@ -50,6 +51,13 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    verify_signer(feepayer)?;
    verify_system_program(system_program)?;
+   verify_token_program(token_program)?;
+
+   // Example MM: single admin pays setup; avoids arbitrary `admin` in data without that key signing.
+   if unlikely(!address_eq(feepayer.address(), &parsed.admin)) {
+      log!("init_program: feepayer must match admin");
+      return Err(ProgramError::InvalidInstructionData);
+   }
 
    if unlikely(
       config_pda.lamports() > 0
@@ -61,19 +69,13 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let (config_addr, config_bump) = Address::find_program_address(
-      &[MM_ACCOUNT_CONFIG_SEED],
-      program_id,
-   );
+   let (config_addr, config_bump) = Address::find_program_address(&[MM_ACCOUNT_CONFIG_SEED], program_id);
    if unlikely(!address_eq(config_pda.address(), &config_addr)) {
       log!("init_program: config pda invalid");
       return Err(ProgramError::InvalidSeeds);
    }
 
-   let (buf_addr, buf_bump) = Address::find_program_address(
-      &[MM_QUOTE_BUFFER_SEED],
-      program_id,
-   );
+   let (buf_addr, buf_bump) = Address::find_program_address(&[MM_QUOTE_BUFFER_SEED], program_id);
    if unlikely(!address_eq(mm_quote_buffer_pda.address(), &buf_addr)) {
       log!("init_program: quote buffer pda invalid");
       return Err(ProgramError::InvalidSeeds);
@@ -96,16 +98,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
          owner: program_id,
       }
       .invoke_signed(&signers)?;
-
-      // create the token account for the mm
-      CreateAssociatedTokenAccount {
-         funding_account: feepayer,
-         account: token_account,
-         wallet: &config_pda,
-         mint: &mint,
-         token_program: &token_program,
-         system_program: &system_program,
-      }.invoke()?;
    }
 
    {
@@ -113,7 +105,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       let initial = MmAccountConfig {
          discriminator: MM_ACCOUNT_CONFIG_DISCRIMINATOR,
          bump: config_bump,
-         auth_signer: parsed.auth_signer,
+         admin: parsed.admin,
       };
       unsafe {
          core::ptr::write(data.as_mut_ptr().cast::<MmAccountConfig>(), initial);
@@ -138,6 +130,16 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       }
       .invoke_signed(&signers)?;
    }
+
+   CreateAssociatedTokenAccount {
+      funding_account: feepayer,
+      account: token_account,
+      wallet: config_pda,
+      mint,
+      token_program,
+      system_program,
+   }
+   .invoke()?;
 
    Ok(())
 }
