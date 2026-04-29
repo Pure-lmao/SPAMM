@@ -1,10 +1,12 @@
 agg:
 - fix fill logic to avoid [($0.01, 2.0); 5] on ($100, 2.0)
-- sdk/ts
+- client code for onchain tests
 - mollusk tests
 - onchain tests
+- add parlays
 
 mm:
 - actually check the code (AI generated)
 - sdk/ts
+- add parlays??
 

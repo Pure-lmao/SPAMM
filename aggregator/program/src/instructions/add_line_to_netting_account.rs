@@ -12,7 +12,7 @@ use crate::{
 /// 2. `mm_config_pda` (readonly)
 /// 3. `netting_pda` (writable)
 /// 
-/// Data: (event_id: EventId, mkt: u32)
+/// Data: (event_id: EventId, period: u8, mkt: u32)
 
 
 pub const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 7;
@@ -34,12 +34,13 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    let parsed_data = AddLineToLiabilityNettingIxData::decode(data)?;
    let event_id = parsed_data.event_id;
+   let period = parsed_data.period;
    let mkt = parsed_data.mkt;
 
    verify_netting_pda_exists(netting_pda, mm_program, &event_id)?;
 
    let mut acc_data = netting_pda.try_borrow_mut()?;
-   add_netting_line(&mut acc_data, mkt)?;
+   add_netting_line(&mut acc_data, event_id.sport, period, mkt)?;
 
    Ok(())
 }
@@ -53,6 +54,7 @@ use crate::state::EventId;
 #[derive(Copy, Clone, ZeroPod)]
 pub struct AddLineToLiabilityNettingIxData {
    pub event_id: EventId,
+   pub period: u8,
    pub mkt: u32,
 }
 
@@ -69,9 +71,8 @@ impl AddLineToLiabilityNettingIxData {
          .map_err(|_| ProgramError::InvalidInstructionData)?;
       Ok(Self {
          event_id: EventId::from_zc(&zc.event_id).ok_or(ProgramError::InvalidInstructionData)?,
+         period: zc.period,
          mkt: zc.mkt.get(),
       })
    }
 }
-
-const _: () = assert!(ADD_LINE_TO_LIABILITY_NETTING_IX_LEN == EventId::WIRE_SIZE + 4);

@@ -9,6 +9,14 @@ Liability for paying out winning bets is held in a token account owned by the ag
 
 The aggregator program is responsible for grading the bets. Funds are transferred to the winners by calling settle_bet on a graded bet.
 
+## Deployment
+
+The SPAMM Aggregator program is deployed to Solana devnet at the address `5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H`. The betting token is `Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr` which you can get [here](https://spl-token-faucet.com/). If the devnet SOL aidrop is 429, you can get some [here](https://faucet.solana.com/).
+
+Breaking changes are to be expected. The aggregator admin can delete Aggregator PDAs (like Bet Accounts) at any time.
+
+Contact pure_lmao on X/Discord/Telegram if you are interested in this idea and you can give feedback and be updated on framework changes if you build a SPAMM.
+
 --------------
 
 # SPAMM Program Framework
@@ -45,7 +53,7 @@ struct GetQuoteIxData {
    amount: u64,
    odds_scaled: u32,
    market_id: MarketId,
-   side: u8,
+   side: u8, // two-outcome markets: 0 or 1; soccer mkt 1 or 5: 0, 1, or 2
    event_state_hash: [u8; 32],
    event_state_sequence: u16,
 }
@@ -69,7 +77,7 @@ struct MMQuoteBuffer {
    is_used: u8 = 0, // set to 0 after giving quote
    user_address: Address,
    market_id: MarketId,
-   side: u8,
+   side: u8, // same encoding as GetQuoteIxData.side
    max_amount: u64,
    odds_scaled: u32,
    event_state_hash: [u8; 32],
@@ -101,7 +109,7 @@ struct FillQuoteIxData {
    amount_to_fill: u64,
    odds_scaled: u32,
    market_id: MarketId,
-   side: u8,
+   side: u8, // two-outcome markets: 0 or 1; soccer mkt 1 or 5: 0, 1, or 2
    event_state_hash: [u8; 32],
    event_state_sequence: u16,
    amount_to_send: u64,
@@ -142,7 +150,7 @@ struct MarketData {
    // anything else you want
 }
 ```
-It MUST have the seeds `["market_data", market_id]` HOWEVER, the market_id for soccer should be modified to have mkt of 1 when mkt is 1, 2, 3, keeping FT odds together in one Oracle account to match API data feeds, and modified to be 5 when mkt is 5, 6, 7, keeping Double Chance odds together. It can contain any data that you want to store for the market. The aggregator verifies the Market Data PDA exists with the expected seed. You should perform additional checks as needed such as the sequence and data validation.
+It MUST have the seeds `["market_data", market_id]` using the wire `MarketId` bytes (the aggregator hashes `mkt` exactly as supplied). Soccer full-time 1×2 uses **`mkt` 1** with **`side`** 0 = home, 1 = draw, 2 = away. Soccer NOT-home / NOT-draw / NOT-away uses **`mkt` 5** with **`side`** 0, 1, or 2 for those three outcomes. On every other market **`side`** MUST be **0** or **1**; **`side` 2** is only valid when **`mkt`** is **1** or **5**. The account can contain any data that you want to store for the market. The aggregator verifies the Market Data PDA exists with the expected seed. You should perform additional checks as needed such as the sequence and data validation.
 
 It is recommended you use something like Doppler (https://github.com/blueshift-gg/doppler) and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). It has 21 CU updates, or 49 if you include the update authority key in the account. You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_quote function.
 
@@ -236,7 +244,7 @@ MM accounts owned by the aggregator:
 5. Connect to the aggregator API to get events and markets.
 6. Create event state PDAs for events you wish to quote.
 7. Create market data PDAs for markets you wish to quote.
-8. If you want to net liabilities on a market, create a liability netting PDA for the event by calling create_netting_account and add lines to the netting account by calling add_line_to_netting_account. The main win market (FT in soccer, ML in non-soccer) is added by default.
+8. If you want to net liabilities on a market, create a liability netting PDA for the event by calling create_netting_account and add lines to the netting account by calling add_line_to_netting_account (passing `period` and `mkt` for each spread/total line you want reserved). The main win market (FT in soccer, ML in non-soccer) is added by default.
 9. Update the Event State PDA as the event progresses.
 10. Update the Market Data PDA as the market odds change.
 11. Clients can now call the get_quote function of your SPAMM to get quotes for markets you are quoting. You should verify accounts that are passed and calculate the odds you want to offer based on the Market Data PDA and any data you have stored in your Config PDA.
@@ -250,6 +258,13 @@ MM accounts owned by the aggregator:
 # SPAMM Aggregator
 
 The aggregator is responsible for filling user bets with offers from the integrated SPAMMs. It is also responsible for grading the bets.
+
+## Design Decisions
+To be honest, I did not want the aggregator to be responsible for grading the bets or holding any funds, to reflect how propAMMs and their aggregators are designed. However, they are also simpler in that the only info needed for the quote is the two token mints, and once the swap is complete, that is the interaction over with. For betting, linking an event/market id for every single SPAMM using their own system would be nearly impossible, never mind trying to do it onchain. Therefore a unified system of ids is needed that all SPAMMs must use. This already puts the aggregator in a position of responsibility for the bets.
+
+By offering liability netting on most markets, the aggregator massively improves the capital efficiency of each SPAMM and encourages them to try to balance liabilities which can increase the quality of the quotes offered. Without netting, each SPAMM would need to have a lot more capital on hand to be able to fill every bet. With the netting, the aggregator must hold on to some of the funds in order to distribute them to the winners. This puts more responsibility on the aggregator.
+
+Settling bets could be the responsibility of the SPAMM if netting was not involved, but I believe it is a major improvement to have. As it is, the aggregator  already holds a lot of responsibility so settling bets fairly is a natural extension. The alternative is no netting, SPAMMs hold the bet accounts, and users specify which SPAMMs are allowed to fill the bet based on the user trust of the SPAMM (similar to users opting out of Singbet filling orders on Mollybet since they are known to cancel bets for no reason). Forcing the user to profile every SPAMM is not a good user experience and would hinder new SPAMMs joining the network.
 
 ## User bet flow
 The user bet flow is as follows:
@@ -267,12 +282,14 @@ The user bet flow is as follows:
 
 
 ## Liability Netting
-Liability netting is a feature in major pre-game markets (FT (soccer), ML (non-soccer), Spread, Totals) to allow you to gain more capital efficiency by netting liabilities on opposing outcomes and returning excess funds to your token account. It is NOT available in live markets due to the chance of a bet being rolled back due to an invalid event state change which makes the netting invalid. It does NOT consider the whole event position, only on a per market basis.
+Liability netting is a feature in major pre-game markets (FT (soccer), ML (non-soccer), Spread, Totals) to allow you to gain more capital efficiency by netting liabilities on opposing outcomes and returning excess funds to your token account. It is NOT available in live markets due to the chance of a bet being rolled back due to an invalid event state change which makes the netting invalid. It does NOT consider the whole event position; spread and total style netting is tracked per `(period, market)` line (see below), while the main win market uses the header `home` / `draw` / `away` fields. For soccer, that header applies to **`mkt` 1** (1×2) and **`mkt` 5** (NOT-home / NOT-draw / NOT-away), each with **`side`** 0, 1, or 2 selecting which column is updated.
 This requires you to have created a liability netting PDA for the event via create_netting_account. This PDA should be a PDA owned by THIS program. It MUST be of the seeds `["netting", mm_program_address, event_id]`.
 
-The account is initiated with the win market and 10 blank lines (for spreads and totals). They are auto-populated each time a bet of a valid market is filled. Additionally, you can add a line to the netting account by calling the add_line_to_netting_account function with the event_id and mkt to be added. This should be done when you want to specify the lines you intend on quoting or expect to be popular.
+The account is initiated with the win market and 10 blank lines (for spreads and totals). They are auto-populated each time a bet of a valid market is filled. Additionally, you can add a line to the netting account by calling the add_line_to_netting_account function with the `event_id`, `period`, and `mkt` to be added. This should be done when you want to specify the lines you intend on quoting or expect to be popular.
 
-You can remove a line from the netting account by calling the remove_line_from_netting_account function with the event_id and mkt to be removed. This should be done when you no longer want that line to be netted in favour of adding a more popular line. 
+You can remove a line from the netting account by calling the remove_line_from_netting_account function with the `event_id`, `period`, and `mkt` to be removed. This should be done when you no longer want that line to be netted in favour of adding a more popular line.
+
+Spread/total lines in account data are stored in sorted order by `period` ascending, then `mkt` ascending. Each line is 21 bytes (packed): `period` (u8), `mkt` (u32 little-endian), `outcome_0` (i64 LE), `outcome_1` (i64 LE). 
 
 When a bet is on a market that is eligible for liability netting, the profit is paid back to the mm liability token account owned by the aggregator, not the mm token account owned by the mm program. This is so that offsetting funds are still accessible to the mm program for paying winning bettors. Your total outstanding liability is tracked by a PDA and any excess funds can be withdrawn by calling the withdraw_from_liability_account function.
 
@@ -297,7 +314,7 @@ SPAMMs should NOT rely on the event state hash and sequence in reflecting realit
 | MM List PDA | 3 | ["mm_list"] | created in init_program, used by clients to find SPAMMs to reach for quotes |
 | MM Encumbrance PDA | 4 | ["encumbrance", mm_program_address] | created in register_mm |
 | MM Liability Token Account | n/a | n/a | authority is the MM Encumbrance PDA, created in register_mm |
-| MM Netting PDA | 5 | ["netting", mm_program_address, event_id] | created with create_netting_account |
+| MM Netting PDA | 5 | ["netting", mm_program_address, event_id] | created with create_netting_account; see Liability Netting for line layout |
 
 ## Instructions
 
@@ -371,7 +388,7 @@ struct FillBetIxData {
    discriminator: u8, // 3
    bet_id: u64,
    market_id: MarketId,
-   side: u8,
+   side: u8, // two-outcome markets: 0 or 1; soccer mkt 1 or 5: 0, 1, or 2
    amount: u64,
    min_odds_scaled: u32,
    event_state_sequence: u16,
@@ -495,6 +512,7 @@ Data:
 struct AddLineToNettingIxData {
    discriminator: u8, // 7
    event_id: EventId,
+   period: u8,
    mkt: u32,
 }
 ```
@@ -519,6 +537,7 @@ Data:
 struct RemoveLineFromNettingIxData {
    discriminator: u8, // 8
    event_id: EventId,
+   period: u8,
    mkt: u32,
 }
 ```

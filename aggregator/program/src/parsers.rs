@@ -25,8 +25,13 @@ pub fn parse_fill_bet_data(data: &[u8]) -> Result<FillBetIxData, ProgramError> {
    }
 
    let side = parsed_data.side;
-   if unlikely(side != 0 && side != 1) {
-      log!("fill_bet: side must be 0 or 1");
+   let mkt = parsed_data.market_id.mkt;
+   if unlikely(side > 2) {
+      log!("fill_bet: side must be 0, 1, or 2");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(side == 2 && mkt != 1 && mkt != 5) {
+      log!("fill_bet: side 2 is only valid for mkt 1 or 5");
       return Err(ProgramError::InvalidInstructionData);
    }
 

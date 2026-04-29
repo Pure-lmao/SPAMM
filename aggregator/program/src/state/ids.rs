@@ -103,24 +103,11 @@ impl MarketId {
    }
 
    #[inline(always)]
-   pub fn to_zc(self, for_seed: bool) -> MarketIdZc {
-      // If for_seed is true, we need to modify the mkt to be 1 for mkt 2 and 3, and 5 for mkt 6 and 7
-      // this is to keep the mm_market_data account seeds for FT and DC together
-      let mkt = if for_seed {
-         if self.mkt == 2 || self.mkt == 3 {
-            1
-         } else if self.mkt == 6 || self.mkt == 7 {
-            5
-         } else {
-            self.mkt
-         }
-      } else {
-         self.mkt
-      };
+   pub fn to_zc(self, _for_seed: bool) -> MarketIdZc {
       MarketIdZc {
          event_id: self.event_id.to_zc(),
          player: self.player.into(),
-         mkt: mkt.into(),
+         mkt: self.mkt.into(),
          period: self.period,
          is_pregame: self.is_pregame.into(),
       }
@@ -144,6 +131,21 @@ impl MarketId {
       }
       let zc = Self::from_bytes(data).ok()?;
       Self::from_zc(zc)
+   }
+
+   /// Whether `(period, mkt)` may be stored as a netting PDA **line-table** row (spread/total style).
+   /// Header fields cover soccer win mkt (1) and DC wont fit (5) and non-soccer ML (`period` 0, `mkt` 0);
+   /// those keys must not duplicate. Soccer `mkt` 4 may use the line table. Rejects `mkt > 10_000`
+   /// for every sport.
+   #[inline(always)]
+   pub fn allow_add_netting_line(sport: Sport, period: u8, mkt: u32) -> bool {
+      if mkt > 10_000 {
+         return false;
+      }
+      match sport {
+         Sport::Soccer => !matches!(mkt, 1 | 5),
+         _ => !(period == 0 && mkt == 0),
+      }
    }
 }
 

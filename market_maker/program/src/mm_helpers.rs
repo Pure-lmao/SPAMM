@@ -86,7 +86,7 @@ pub fn find_event_state_pda(program_id: &Address, event_id: &EventId) -> (Addres
    Address::find_program_address(&seeds, program_id)
 }
 
-/// Oracle PDA: `["oracle", market_id_wire]`, with `to_zc(true)` on `market_id` (see `get_quote`).
+/// Oracle PDA: `["oracle", market_id_wire]`, with `MarketId` wire bytes from `to_zc` (see `get_quote`).
 #[inline(always)]
 pub fn find_oracle_pda(program_id: &Address, market_id: &MarketId) -> (Address, u8) {
    let mut market_wire = [0u8; MarketId::WIRE_SIZE];

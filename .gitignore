@@ -2,3 +2,5 @@ target
 Cargo.lock
 .env
 *_keypair.json
+node_modules/
+dist

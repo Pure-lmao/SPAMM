@@ -46,8 +46,13 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   if unlikely(parsed.side != 0 && parsed.side != 1) {
-      log!("fill_quote: side must be 0 or 1");
+   let mkt = parsed.market_id.mkt;
+   if unlikely(parsed.side > 2) {
+      log!("fill_quote: side must be 0, 1, or 2");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(parsed.side == 2 && mkt != 1 && mkt != 5) {
+      log!("fill_quote: side 2 is only valid for mkt 1 or 5");
       return Err(ProgramError::InvalidInstructionData);
    }
    if unlikely(parsed.amount_to_fill == 0) {

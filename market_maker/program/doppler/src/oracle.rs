@@ -4,7 +4,12 @@ const ACCOUNT_1_DATA_START: usize = 0x28c0;
 // MODIFIED FROM ORIGINAL TO ADD BUMP TO LAYOUT.
 // Code *should* be updated to use the new layout but not tested.
 
-// Account layout: discriminator (1) + bump (1) + sequence (4) + OracleData (N)
+// Account layout: {
+//   discriminator: u8,
+//   bump: u8,
+//   sequence: u64,
+//   OracleData: [u8; N]
+// }
 // Sequence offset: 0x28c0 + 0x02 = 0x28c1
 const ORACLE_SEQUENCE: usize = ACCOUNT_1_DATA_START + 0x02;
 

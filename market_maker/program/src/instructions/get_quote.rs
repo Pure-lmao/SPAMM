@@ -13,7 +13,7 @@
 //! - `amount` (u64 LE)
 //! - `odds_scaled` (u32 LE) — min odds hint from caller
 //! - `market_id` (**26** bytes): nested `event_id` (`u64` LE `event_id`, `u32` LE `league`, `u8` `sport`) then `u64` LE `player`, `u32` LE `mkt`, `u8` `period`
-//! - `side` (u8): `0` or `1`
+//! - `side` (u8): `0` or `1` on two-outcome markets; `0`, `1`, or `2` on soccer `mkt` 1 or 5 (three-way)
 //! - `event_state_hash` (`[u8; 32]`)
 //! - `event_state_sequence` (u16 LE), must be `> 0`
 //!
@@ -44,8 +44,14 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    };
    let parsed_data = GetQuoteIxPayload::decode(data)?;
    let side = parsed_data.side;
-   if unlikely(side != 0 && side != 1) {
-      log!("get_quote: side must be 0 or 1");
+   let market_id = parsed_data.market_id;
+   let mkt = market_id.mkt;
+   if unlikely(side > 2) {
+      log!("get_quote: side must be 0, 1, or 2");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(side == 2 && mkt != 1 && mkt != 5) {
+      log!("get_quote: side 2 is only valid for mkt 1 or 5");
       return Err(ProgramError::InvalidInstructionData);
    }
 
@@ -55,7 +61,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   let market_id = parsed_data.market_id;
    let event_state_hash = parsed_data.event_state_hash;
 
    if unlikely(!verify_quote_buffer(mm_quote_buffer, program_id)) {
@@ -92,15 +97,11 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    // Oracle: [u64 sequence LE][body]; odds start at byte 8 (`init_market`).
    let body = &oracle_data[8..];
    let odds_scaled = if soccer_mkt_is_three_outcome_1x2_or_double_chance(&market_id) {
-      if unlikely(side != 0) {
-         log!("get_quote: soccer 1X2/DC: only side 0 is quoted");
-         return Err(ProgramError::InvalidInstructionData);
-      }
       if unlikely(body.len() < 12) {
          log!("get_quote: oracle body needs 3 outcomes (3 x u32)");
          return Err(ProgramError::InvalidAccountData);
       }
-      u32_le_at(body, soccer_three_outcome_index(market_id.mkt))
+      u32_le_at(body, side as usize)
          .ok_or(ProgramError::InvalidAccountData)?
    } else {
       if unlikely(body.len() < 8) {
@@ -136,20 +137,10 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    Ok(())
 }
 
-/// Soccer 1X2 (home / draw / away) and double-chance: three `u32` odds in the oracle body.
+/// Soccer full-time 3-way (`mkt` 1) and NOT-home / NOT-draw / NOT-away (`mkt` 5): three `u32` odds in the oracle body; `side` picks the word.
 #[inline(always)]
 fn soccer_mkt_is_three_outcome_1x2_or_double_chance(m: &MarketId) -> bool {
-   m.event_id.sport == Sport::Soccer && matches!(m.mkt, 1 | 2 | 3 | 5 | 6 | 7)
-}
-
-/// Map `mkt` to a word index into the three `u32`s (1,2,3) → 0,1,2; (5,6,7) → 0,1,2 for DC.
-#[inline(always)]
-fn soccer_three_outcome_index(mkt: u32) -> usize {
-   match mkt {
-      1 | 2 | 3 => (mkt - 1) as usize,
-      5 | 6 | 7 => (mkt - 5) as usize,
-      _ => 0,
-   }
+   m.event_id.sport == Sport::Soccer && matches!(m.mkt, 1 | 5)
 }
 
 #[inline(always)]

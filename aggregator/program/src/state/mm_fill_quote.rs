@@ -14,7 +14,6 @@ pub struct FillQuoteIxData {
    pub side: u8,
    pub event_state_hash: [u8; 32],
    pub event_state_sequence: u16,
-
    pub amount_to_send: u64
 }
 
@@ -25,12 +24,12 @@ impl FillQuoteIxData {
    pub fn to_zc(self) -> FillQuoteIxDataZc {
       FillQuoteIxDataZc {
          instruction_discriminator: self.instruction_discriminator,
-         side: self.side,
-         event_state_sequence: self.event_state_sequence.into(),
          amount_to_fill: self.amount_to_fill.into(),
          odds_scaled: self.odds_scaled.into(),
          market_id: self.market_id.to_zc(false),
+         side: self.side,
          event_state_hash: self.event_state_hash,
+         event_state_sequence: self.event_state_sequence.into(),
          amount_to_send: self.amount_to_send.into(),
       }
    }

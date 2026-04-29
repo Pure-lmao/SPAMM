@@ -1,4 +1,4 @@
-//! Create the MM oracle PDA for one market: `["oracle", market_id_wire]` with `to_zc(true)`.
+//! Create the MM oracle PDA for one market: `["oracle", market_id_wire]` with `MarketId` wire bytes (`to_zc`).
 //!
 //! On-chain account layout: **`[u64 sequence LE][oracle_body]`** — the first 8 bytes are a monotonic
 //! sequence (Doppler / off-chain tools may bump it); `get_quote` reads odds from `oracle_body` at
@@ -68,7 +68,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       log!("init_market: body length");
       ProgramError::InvalidInstructionData
    })?;
-   let oracle_space: u64 = 8u64
+   let oracle_space: u64 = 10u64
       .checked_add(body_len)
       .ok_or(ProgramError::InvalidInstructionData)?;
 
@@ -96,10 +96,14 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    }
    unsafe {
       let ptr = mm_oracle_pda.data_mut_ptr();
-      let seq = 0u64.to_le_bytes();
-      core::ptr::copy_nonoverlapping(seq.as_ptr(), ptr, 8);
+      let disc_bump_seq = [
+         0,
+         bump, 
+         0, 0, 0, 0, 0, 0, 0, 0
+      ]; //0u8 disc, u8 bump, 0u64 sequence
+      write_arbitrary_bytes_unchecked(ptr, 0, &disc_bump_seq);
       if body_len > 0 {
-         write_arbitrary_bytes_unchecked(ptr, 8, &oracle_body);
+         write_arbitrary_bytes_unchecked(ptr, 10, &oracle_body);
       }
    }
    Ok(())

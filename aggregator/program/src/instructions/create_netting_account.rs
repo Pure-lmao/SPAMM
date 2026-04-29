@@ -98,9 +98,9 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       discriminator: NETTING_PDA_DISCRIMINATOR,
       bump,
       event_id,
-      ft_0: 0,
-      ft_1: 0,
-      ft_2: 0,
+      home: 0,
+      draw: 0,
+      away: 0,
       number_of_lines: 0,
    };
    {

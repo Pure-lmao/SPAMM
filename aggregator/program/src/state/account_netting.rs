@@ -4,7 +4,10 @@ use pinocchio::{AccountView, error::ProgramError, hint::unlikely};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
-   helpers::calc_potential_profit, readers::{self, read_i64_pair_unchecked, read_u8_unchecked, read_u32_le_unchecked}, state::{EventId, MarketId, Sport}, writers::{self, write_i64_le_unchecked, write_i64_pair_unchecked, write_netting_line_unchecked, write_u8_unchecked}
+   helpers::calc_potential_profit,
+   readers::{self, read_i64_pair_unchecked, read_u8_unchecked, read_u32_le_unchecked},
+   state::{EventId, MarketId, Sport},
+   writers::{self, write_i64_le_unchecked, write_i64_pair_unchecked, write_netting_line_unchecked, write_u8_unchecked},
 };
 
 pub const NETTING_PDA_SEED: &[u8] = b"netting";
@@ -15,15 +18,16 @@ pub struct NettingPdaDataHeader {
    pub discriminator: u8,
    pub bump: u8,
    pub event_id: EventId,
-   pub ft_0: i64,
-   pub ft_1: i64,
-   pub ft_2: i64,
+   pub home: i64,
+   pub draw: i64,
+   pub away: i64,
    pub number_of_lines: u8,
 }
 
 
 #[derive(Copy, Clone, ZeroPod)]
 pub struct NettingLine {
+   pub period: u8,
    pub mkt: u32,
    pub outcome_0: i64,
    pub outcome_1: i64,
@@ -39,8 +43,11 @@ pub const NETTING_ACCOUNT_ALLOC_LEN: usize =
    NETTING_HEADER_LEN + NETTING_DEFAULT_LINE_CAPACITY * NETTING_LINE_LEN;
 
 const NETTING_DISC_OFFSET: usize = offset_of!(NettingPdaDataHeader, discriminator);
-const NETTING_FT_OFFSET: usize = offset_of!(NettingPdaDataHeader, ft_0);
+const NETTING_FT_OFFSET: usize = offset_of!(NettingPdaDataHeader, home);
 const NETTING_NUMBER_OF_LINES_OFFSET: usize = offset_of!(NettingPdaDataHeader, number_of_lines);
+
+const NETTING_LINE_PERIOD_OFFSET: usize = offset_of!(NettingLine, period);
+const NETTING_LINE_MKT_OFFSET: usize = offset_of!(NettingLine, mkt);
 
 /// `number_of_lines` from account data must not exceed table capacity, and the buffer must be at
 /// least the size allocated by `create_netting_account` so line indices stay in-bounds.
@@ -58,27 +65,34 @@ pub(crate) fn ensure_netting_lines_view(
    Ok(())
 }
 
-/// Binary search on lines sorted by `mkt`. Returns `Ok(index)` if `lines[index].mkt == mkt`,
-/// otherwise `Err(insertion_index)` where a new line with `mkt` would belong.
+/// Binary search on lines sorted by `(period, mkt)` ascending. Returns `Ok(index)` if that key
+/// exists, otherwise `Err(insertion_index)` where a new line would belong.
 #[inline(always)]
 pub(crate) fn find_netting_line_or_insertion(
    data: &[u8],
    lines_start: usize,
    number_of_lines: usize,
+   period: u8,
    mkt: u32,
 ) -> Result<usize, usize> {
    let mut lo = 0usize;
    let mut hi = number_of_lines;
+   let key = (period, mkt);
    while lo < hi {
       let mid = lo + ((hi - lo) / 2);
       let line_offset = lines_start + (mid * NETTING_LINE_LEN);
-      if unlikely(line_offset + 4 > data.len()) {
+      if unlikely(line_offset + NETTING_LINE_LEN > data.len()) {
          return Err(lo);
       }
-      let this_mkt = unsafe { read_u32_le_unchecked(data.as_ptr(), line_offset) };
-      if this_mkt < mkt {
+      let this_period = unsafe {
+         read_u8_unchecked(data.as_ptr(), line_offset + NETTING_LINE_PERIOD_OFFSET)
+      };
+      let this_mkt =
+         unsafe { read_u32_le_unchecked(data.as_ptr(), line_offset + NETTING_LINE_MKT_OFFSET) };
+      let this_key = (this_period, this_mkt);
+      if this_key < key {
          lo = mid + 1;
-      } else if this_mkt > mkt {
+      } else if this_key > key {
          hi = mid;
       } else {
          return Ok(mid);
@@ -87,14 +101,15 @@ pub(crate) fn find_netting_line_or_insertion(
    Err(lo)
 }
 
-/// Shifts sorted lines to open a slot at `insertion_idx`, writes `mkt` and zero outcomes, increments
-/// `number_of_lines`. Call only when `mkt` is absent (`find_netting_line_or_insertion` returned
-/// `Err(insertion_idx)`).
+/// Shifts sorted lines to open a slot at `insertion_idx`, writes `(period, mkt)` and zero outcomes,
+/// increments `number_of_lines`. Call only when the key is absent (`find_netting_line_or_insertion`
+/// returned `Err(insertion_idx)`).
 #[inline(always)]
 pub(crate) fn insert_blank_netting_line_at(
    data: &mut [u8],
    lines_start: usize,
    number_of_lines: usize,
+   period: u8,
    mkt: u32,
    insertion_idx: usize,
 ) -> Result<(), ProgramError> {
@@ -122,6 +137,7 @@ pub(crate) fn insert_blank_netting_line_at(
    unsafe {
       write_netting_line_unchecked(
          data.as_mut_ptr(), insertion_offset, NettingLine {
+            period,
             mkt,
             outcome_0: 0,
             outcome_1: 0,
@@ -135,10 +151,18 @@ pub(crate) fn insert_blank_netting_line_at(
    Ok(())
 }
 
-/// Inserts a new zeroed line for `mkt` in sorted order. Errors if `mkt` already exists, table is
-/// full, or account data is invalid.
+/// Inserts a new zeroed line for `(period, mkt)` in sorted order. Errors if that key already
+/// exists, the table is full, the key is reserved for header-only netting, or account data is invalid.
 #[inline(always)]
-pub fn add_netting_line(data: &mut [u8], mkt: u32) -> Result<(), ProgramError> {
+pub fn add_netting_line(
+   data: &mut [u8],
+   sport: Sport,
+   period: u8,
+   mkt: u32,
+) -> Result<(), ProgramError> {
+   if unlikely(!MarketId::allow_add_netting_line(sport, period, mkt)) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
    if unlikely(data.len() < NETTING_HEADER_LEN || data[NETTING_DISC_OFFSET] != NETTING_PDA_DISCRIMINATOR) {
       return Err(ProgramError::InvalidAccountData);
    }
@@ -146,16 +170,20 @@ pub fn add_netting_line(data: &mut [u8], mkt: u32) -> Result<(), ProgramError> {
       unsafe { read_u8_unchecked(data.as_ptr(), NETTING_NUMBER_OF_LINES_OFFSET) } as usize;
    ensure_netting_lines_view(data, number_of_lines)?;
    let lines_start = NETTING_HEADER_LEN;
-   let insertion_idx = match find_netting_line_or_insertion(data, lines_start, number_of_lines, mkt) {
+   let insertion_idx = match find_netting_line_or_insertion(
+      data, lines_start, number_of_lines, period, mkt,
+   ) {
       Ok(_) => return Err(ProgramError::InvalidAccountData),
       Err(i) => i,
    };
-   insert_blank_netting_line_at(data, lines_start, number_of_lines, mkt, insertion_idx)
+   insert_blank_netting_line_at(
+      data, lines_start, number_of_lines, period, mkt, insertion_idx,
+   )
 }
 
-/// Removes the line with the given `mkt` if present. Fails if no line matches.
+/// Removes the line with the given `(period, mkt)` if present. Fails if no line matches.
 #[inline(always)]
-pub fn remove_netting_line(data: &mut [u8], mkt: u32) -> Result<(), ProgramError> {
+pub fn remove_netting_line(data: &mut [u8], period: u8, mkt: u32) -> Result<(), ProgramError> {
    if unlikely(data.len() < NETTING_HEADER_LEN || data[NETTING_DISC_OFFSET] != NETTING_PDA_DISCRIMINATOR) {
       return Err(ProgramError::InvalidAccountData);
    }
@@ -170,7 +198,9 @@ pub fn remove_netting_line(data: &mut [u8], mkt: u32) -> Result<(), ProgramError
       Some(v) => v,
       None => return Err(ProgramError::ArithmeticOverflow),
    };
-   let idx = match find_netting_line_or_insertion(data, lines_start, number_of_lines, mkt) {
+   let idx = match find_netting_line_or_insertion(
+      data, lines_start, number_of_lines, period, mkt,
+   ) {
       Ok(i) => i,
       Err(_) => return Err(ProgramError::InvalidInstructionData),
    };
@@ -209,20 +239,10 @@ pub fn apply_netting(
    let period = m_id.period;
    let mkt = m_id.mkt;
 
-   if sport == Sport::Soccer && period != 1 {
-      return (false, 0i64);
-   }
-   if sport == Sport::Soccer && (mkt > 0 && mkt < 4) && side == 1 {
-      return (false, 0i64);
-   }
-   if sport != Sport::Soccer && period != 0 {
-      return (false, 0i64);
-   }
-
    let in_100_to_300 = mkt.wrapping_sub(100) <= 200;
    let in_1000_to_2000 = mkt.wrapping_sub(1000) <= 1000;
    let is_valid_netting_mkt = if sport == Sport::Soccer {
-      mkt.wrapping_sub(1) <= 2 || in_100_to_300 || in_1000_to_2000
+      mkt == 1 || mkt == 4 || in_100_to_300 || in_1000_to_2000
    } else {
       mkt == 0 || in_100_to_300 || in_1000_to_2000
    };
@@ -250,8 +270,8 @@ pub fn apply_netting(
       Err(_) => return (false, 0i64),
    };
 
-   if sport == Sport::Soccer && mkt.wrapping_sub(1) <= 2 {
-      let outcome_index = (mkt - 1) as usize;
+   if sport == Sport::Soccer && mkt == 1 {
+      let outcome_index = side as usize;
       let mut ft = [0i64; 3];
       for (i, value) in ft.iter_mut().enumerate() {
          let start = NETTING_FT_OFFSET + (i * 8);
@@ -320,18 +340,26 @@ pub fn apply_netting(
    }
    let lines_start = NETTING_HEADER_LEN;
 
-   let line_idx = match find_netting_line_or_insertion(data, lines_start, number_of_lines, mkt) {
+   let line_idx = match find_netting_line_or_insertion(
+      data, lines_start, number_of_lines, period, mkt,
+   ) {
       Ok(idx) => idx,
-      Err(insertion_idx) => match insert_blank_netting_line_at(
-         data,
-         lines_start,
-         number_of_lines,
-         mkt,
-         insertion_idx,
-      ) {
-         Ok(()) => insertion_idx,
-         Err(_) => return (false, 0i64),
-      },
+      Err(insertion_idx) => {
+         if unlikely(!MarketId::allow_add_netting_line(sport, period, mkt)) {
+            return (false, 0i64);
+         }
+         match insert_blank_netting_line_at(
+            data,
+            lines_start,
+            number_of_lines,
+            period,
+            mkt,
+            insertion_idx,
+         ) {
+            Ok(()) => insertion_idx,
+            Err(_) => return (false, 0i64),
+         }
+      }
    };
 
    let line_offset = lines_start + (line_idx * NETTING_LINE_LEN);
@@ -392,5 +420,6 @@ fn max3(a: i64, b: i64, c: i64) -> i64 {
    if best > 0 { best } else { 0 }
 }
 
-const _: () = assert!(NETTING_LINE_LEN == 20);
+// `NettingLine` packed on-chain size (period u8 + mkt u32 + outcome_0 i64 + outcome_1 i64).
+const _: () = assert!(NETTING_LINE_LEN == 21);
 const _: () = assert!(NETTING_HEADER_LEN == 40);
