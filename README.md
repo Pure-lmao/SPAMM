@@ -1,6 +1,6 @@
 # Overview
 
-A Sports Programmatic Automated Market Maker (SPAMM) is a program that offers quotes for bets on sports markets. SPAMMs are inspired by propAMMs and their ability to offer better spreads than Binance. Why can't bettors get better odds than on sportsbooks? As SPAMMs compete for flow, they odds they offer will improve and eventually beat sportsbooks. By aggregating these offers, bettors will have access to great odds via a single transaction.
+A Sports Programmatic Automated Market Maker (SPAMM) is a program that offers quotes for bets on sports markets. SPAMMs are inspired by propAMMs and their ability to offer better spreads than Binance. Why can't bettors get better odds than on sportsbooks? As SPAMMs compete for flow, the odds they offer will improve and eventually beat sportsbooks. By aggregating these offers, bettors will have access to great odds via a single transaction.
 
 This is the SPAMM Aggregator program and framework. The framework defines what a SPAMM must do to be compliant with the aggregator and how to integrate with the aggregator.
 The aggregator is responsible for filling user bets with offers from the integrated SPAMMs. The aggregator API is responsible for providing event and market ids. Each SPAMM is responsible for offering quotes on whatever markets they wish. Any client can call each SPAMM's get_quote function to get the offer, then build a tx to fill the bet with the 5 best quotes. The aggregator will then call get_quote again to get the best execution-time offers and fill the bet with the quotes in order of best to worst odds. 
@@ -23,15 +23,7 @@ Contact pure_lmao on X/Discord/Telegram if you are interested in this idea and y
 When this framework description uses "MUST" the program MUST adhere to the requirement. If "should" is used, it is a recommendation.
 
 ## Overview
-A SPAMM program is a program which complies with this framework and offers quotes for bets to the aggregator on sports markets. It should take advantage of low CU oracle account updates in order to land odds/state updates at the top of the block, before compute-heavy bet filling transactions.
-- Each mm MUST have a Config PDA account (owned by mm).
-- Each mm MUST have a Quote Buffer account (owned by mm).
-- Each mm MUST have a token account with the authority of the mm Config PDA account.
-- Each mm MUST have a Encumbrance PDA account (owned by aggregator).
-- Each mm MUST have a Liability Token Account with the authority of the mm Encumbrance PDA account.
-- Each event MUST have an Event State PDA account (owned by mm).
-- Each event may have a Liability Netting PDA account (owned by aggregator).
-- Each market MUST have an Market Data PDA account (owned by mm, not read by the aggregator).
+A SPAMM program is a program which complies with this framework and offers quotes for bets to the aggregator on sports markets. It should take advantage of low CU oracle account updates in order to land odds/state updates at the top of the block, before compute-heavy bet filling transactions. 
 
 ## Get_Quote function
 The get_quote function is called by the RPC to get the price to build the tx for the user then again by the aggregator when filling the bet to get best odds at execution-time (no spoofing!). The function MUST return data using sol_set_return_data.
@@ -111,17 +103,17 @@ struct FillQuoteIxData {
    amount_to_fill: u64,
    odds_scaled: u32,
    market_id: MarketId,
-   side: u8, // two-outcome markets: 0 or 1; soccer mkt 1 or 5: 0, 1, or 2
+   side: u8,
    event_state_hash: [u8; 32],
    event_state_sequence: u16,
    amount_to_send: u64,
 }
 ```
-The function should then validate the quote matches the quote buffer data as proof the transaction is not spoofed.
+The function should then validate the quote matches the quote buffer data as proof the call to the function is not spoofed - it must have been preceded by a valid get_quote invocation. This avoids having to do an expensive re-computation of the quote.
 
-The function MUST then transfer the amount_to_send to the liability token account. This is the amount of funds required to cover the net liability of the position. It will be <= `amount_to_fill * (odds_scaled - ODDS_SCALE)` (the user potential profit). If the new liability ends up being negative due to odds liability netting, the amount can be 0.
+The function MUST then transfer the amount_to_send to the liability token account. This is the amount of funds required to cover the net liability of the position. It will be <= the user potential profit (`amount_to_fill * (odds_scaled - ODDS_SCALE)`). If the new liability ends up being negative due to liability netting, the amount can be 0.
 
-The is_used field in the quote buffer MUST be set to 1 to indicate the quote has been filled and cannot be reused without being reset by the get_quote function.
+The is_used field in the quote buffer MUST be set to 1 to indicate the quote has been filled and cannot be reused without being reset by a valid invocation of the get_quote function.
 During this function, you can change your Config PDA and Market Data PDA data if you wish.
 
 ## Config PDA
@@ -131,15 +123,20 @@ It contains the following data:
 struct Config {
    discriminator: u8 = 1,
    bump: u8,
-   admin: Address, // used for interacting with THIS program for non-quoting functions
+   admin: Address, // used for interacting with the aggreagtor program for non-quoting functions
    //...anything else you want
+   // for example
+   global_risk_limit: u64,
+   global_risk: u64, // updated on fill_quote
+   favourable_bettors: [Address; N], // read on get_quote to safely offer them a 5% bonus odds to increase chance of being filled, knowing they are losing bettors
+   smart_bettors: [Adrress; N], // read on get_quote to reduce odds, knowing that fills are usually unfavourable from these bettors
 }
 ```
 
 ## Event Liability Netting PDA
 The event liability netting PDA is a PDA owned by the aggregator. It MUST be of the seeds `["netting", mm_program_address, event_id]`.
 
-It is created by the auth signer of the mm program calling the create_netting_account function.
+It is created by the admin of the mm program calling the create_netting_account function.
 
 See the Liability Netting section below for more details.
 
@@ -150,9 +147,29 @@ struct MarketData {
    discriminator: u8 = 0,
    bump: u8,
    // anything else you want
+   // e.g.
+   // calculate the odds you want to offer offchain and just list them 
+   last_update: i64, //ensure each new update is greater than the last so old txs cant land late
+   odds0: u33, // updated in oracle hot path
+   odds1: u32, // updated in oracle hot path
+   position0: i64, // updated on fill_quote
+   position1: i64 // updated on fill_quote
+
+   // or skew from midpoint
+   last_valid_timestamp: i64, // oracle hot path
+   midpoint_odds: u32, // oracle hot path
+   liability: i64, // on fill_quote
+   market_risk_grade: u8 // set on init_market
+
+   // or per-update inventory 
+   slot: u64, // oracle hot path
+   odds0: u32, // oracle hot path
+   odds1: u32, // oracle hot path
+   remaining0: // reset on oracle hot path then decrement on fill_quote
+   remaining1: // reset on oracle hot path then decrement on fill_quote
 }
 ```
-It MUST have the seeds `["market_data", market_id]` using the wire `MarketId` bytes (the aggregator hashes `mkt` exactly as supplied). Soccer full-time 1×2 uses **`mkt` 1** with **`side`** 0 = home, 1 = draw, 2 = away. Soccer NOT-home / NOT-draw / NOT-away uses **`mkt` 5** with **`side`** 0, 1, or 2 for those three outcomes. On every other market **`side`** MUST be **0** or **1**; **`side` 2** is only valid when **`mkt`** is **1** or **5**. The account can contain any data that you want to store for the market. The aggregator verifies the Market Data PDA exists with the expected seed. You should perform additional checks as needed such as the sequence and data validation.
+It MUST have the seeds `["market_data", market_id]` using the wire `MarketId` bytes. The account can contain any data that you want to store for the market. The aggregator verifies the Market Data PDA exists with the expected seed. You should perform additional checks as needed such as the sequence and data validation.
 
 It is recommended you use something like Doppler (https://github.com/blueshift-gg/doppler) for 21 CU updates and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_quote function.
 
@@ -181,7 +198,7 @@ The sequence is incremented by 1 for each new state. The inital state has a sequ
 
 An activity being cancelled refers to when the data feed updates to show the activity has happened and then reverted, NOT when the activity is pending. This is to allow reverting bets which are placed at odds which should not have existed.
 
-For example, if the state is 1-0 "1H", with sequence of 3 and the data feed updates to show a goal is scored, the state should be updated to 1-1 "1H" with sequence of 4. If the data feed then updates to show the goal is cancelled, the state should be updated to 1-0 "1H" with sequence of 5. Any bets with a sequence of 4 are invalid and will be rolled back.
+For example, if the state is 1-0 "1H", with sequence of 3 (1 - inital state of pregame, 2 - event started, 3 - first goal scored) and the data feed updates to show a goal is scored, the state should be updated to 1-1 "1H" with sequence of 4. If the data feed then updates to show the goal is cancelled, the state should be updated to 1-0 "1H" with sequence of 5. Any bets with a sequence of 4 are invalid and will be rolled back.
 
 The event state hash and sequence of a market maker event PDA must match the aggregator API state hash and sequence which is used to construct the fill tx for the user or the market maker is considered to not be in sync and won't be used to fill bets.
 
@@ -286,14 +303,14 @@ The user bet flow is as follows:
 
 
 ## Liability Netting
-Liability netting is a feature in major pre-game markets (FT (soccer), ML (non-soccer), Spread, Totals) to allow you to gain more capital efficiency by netting liabilities on opposing outcomes and returning excess funds to your token account. It is NOT available in live markets due to the chance of a bet being rolled back due to an invalid event state change which makes the netting invalid. It does NOT consider the whole event position; spread and total style netting is tracked per `(period, market)` line (see below), while the main win market uses the header `home` / `draw` / `away` fields. For soccer, that header applies to **`mkt` 1** (1×2) and **`mkt` 5** (NOT-home / NOT-draw / NOT-away), each with **`side`** 0, 1, or 2 selecting which column is updated.
+Liability netting is a feature in major pre-game markets (FT, BTTS (soccer), ML (non-soccer), Spread, Totals) to allow you to gain more capital efficiency by netting liabilities on opposing outcomes and returning excess funds to your token account. It is NOT available in live markets due to the chance of a bet being rolled back due to an invalid event state change which makes the netting invalid. It does NOT consider the whole event position; spread and total style netting is tracked per `(period, market)` line, while the main win market uses the header `home` / `draw` / `away` fields. For soccer, that header applies to **`mkt` 1, `period` 1** (1X2). For non-soccer, it applies to **`mkt` 0, `period` 0** (ML) (the `draw` value is left at 0).
 This requires you to have created a liability netting PDA for the event via create_netting_account. This PDA should be a PDA owned by THIS program. It MUST be of the seeds `["netting", mm_program_address, event_id]`.
 
-The account is initiated with the win market and 10 blank lines (for spreads and totals). They are auto-populated each time a bet of a valid market is filled. Additionally, you can add a line to the netting account by calling the add_line_to_netting_account function with the `event_id`, `period`, and `mkt` to be added. This should be done when you want to specify the lines you intend on quoting or expect to be popular.
+The account is initiated with the win market and 10 blank lines. They are auto-populated each time a bet of a valid market is filled. Additionally, you can add a line to the netting account by calling the add_line_to_netting_account function with the `event_id`, `period`, and `mkt` to be added. This should be done when you want to specify the lines you intend on quoting or expect to be popular.
 
 You can remove a line from the netting account by calling the remove_line_from_netting_account function with the `event_id`, `period`, and `mkt` to be removed. This should be done when you no longer want that line to be netted in favour of adding a more popular line.
 
-Spread/total lines in account data are stored in sorted order by `period` ascending, then `mkt` ascending. Each line is 21 bytes (packed): `period` (u8), `mkt` (u32 little-endian), `outcome_0` (i64 LE), `outcome_1` (i64 LE). 
+Spread/total lines in account data are stored in sorted order by `period` ascending, then `mkt` ascending. Each line is 21 bytes (packed): `period` (u8), `mkt` (u32 little-endian), `outcome_0` (i64 LE), `outcome_1` (i64 LE). Both Teams To Score **`mkt` 4** and any period ML **`mkt` 0, `period` 2, etc** can also be netted. Half-time 1X2 **`mkt` 4, `period` 2** can NOT be netted. 
 
 When a bet is on a market that is eligible for liability netting, the profit is paid back to the mm liability token account owned by the aggregator, not the mm token account owned by the mm program. This is so that offsetting funds are still accessible to the mm program for paying winning bettors. Your total outstanding liability is tracked by a PDA and any excess funds can be withdrawn by calling the withdraw_from_liability_account function.
 
@@ -331,7 +348,7 @@ Accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
-| 0 | aggregator admin | writable, signer | Set as initial authority in config pda |
+| 0 | aggregator admin | writable, signer | Set as initial admin in config pda |
 | 1 | config pda | writable | Must be uninitialized. |
 | 2 | mm list pda | writable | Must be uninitialized. |
 | 3 | system program | readonly | Must be the system program |
@@ -447,7 +464,7 @@ Accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
-| 0 | aggregator admin | writable, signer | Must match config authority |
+| 0 | aggregator admin | writable, signer | Must match config admin |
 | 1 | config pda | readonly | |
 | 1+N | bet pda (×`N`) | writable |  |
 
@@ -526,7 +543,7 @@ Accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
-| 0 | mm admin | writable, signer | MM authority |
+| 0 | mm admin | writable, signer | Must match MM admin in MM Config PDA |
 | 1 | mm program | readonly, executable | |
 | 2 | mm config pda | readonly | |
 | 3 | netting pda | writable | |
@@ -551,7 +568,7 @@ Accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
-| 0 | mm admin | writable, signer | MM authority |
+| 0 | mm admin | writable, signer | Must match MM admin in MM Config PDA |
 | 1 | mm program | readonly, executable | |
 | 2 | mm config pda | readonly | |
 | 3 | netting pda | writable | |
@@ -574,7 +591,7 @@ Accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
-| 0 | mm admin | writable, signer | MM authority |
+| 0 | mm admin | writable, signer | Must match MM admin in MM Config PDA |
 | 1 | mm config pda | readonly | |
 | 2 | mm program | readonly, executable | |
 | 3 | netting pda | writable | Will be closed; rent to admin |
@@ -598,7 +615,7 @@ Accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
-| 0 | mm authority | writable, signer | Must be the MM admin in the MM Config PDA |
+| 0 | mm authority | writable, signer | Must match MM admin in MM Config PDA |
 | 1 | mm program | readonly | Must be executable (a program) |
 | 2 | mm config pda | readonly | |
 | 3 | mm encumbrance pda | writable | |
@@ -640,7 +657,7 @@ Accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
-| 0 | aggregator admin | writable, signer | Must match config authority |
+| 0 | aggregator admin | writable, signer | Must match MM admin in MM Config PDA |
 | 1 | config pda | readonly | |
 | 2 | pda | writable | Any program-owned PDA to close |
 
