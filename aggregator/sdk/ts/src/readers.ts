@@ -19,6 +19,8 @@ import {
    getBetPda,
    getConfigPda,
    getEventStatePda,
+   getAta,
+   getMmConfigPda,
    getMmEncumbrancePda,
    getMmListPda,
    getMmQuoteBufferPda,
@@ -170,11 +172,30 @@ export async function readAccountDataRaw(rpc: Rpc<SolanaRpcApi>, address: Addres
 }
 
 /**
- * SPL token account balance via `getTokenAccountBalance` (fractional units as `bigint`).
+ * SPL token account balance via RPC `getTokenAccountBalance` (fractional units as `bigint`).
  */
-export async function readTokenAccountBalance(rpc: Rpc<SolanaRpcApi>, tokenAccount: Address): Promise<bigint> {
-   const res = await rpc.getTokenAccountBalance(tokenAccount).send();
+export async function getTokenAccountBalance(rpc: Rpc<SolanaRpcApi>, account: Address): Promise<bigint> {
+   const res = await rpc.getTokenAccountBalance(account).send();
    return BigInt(res.value.amount);
+}
+
+/**
+ * Liability vault ATA balance for an MM program (ATA owner = MM encumbrance PDA on the aggregator).
+ * Same ATA derivation as `getWithdrawFromLiabilityAccountIx` / `settleFillerAccountRow` in `instructions.ts`.
+ */
+export async function getMmLiabilityAtaBalance(rpc: Rpc<SolanaRpcApi>, mmProgramId: Address): Promise<bigint> {
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgramId);
+   const liabilityAta = await getAta(mmEncumbrancePda);
+   return getTokenAccountBalance(rpc, liabilityAta);
+}
+
+/**
+ * MM collateral token ATA balance (ATA owner = MM config PDA on the MM program).
+ */
+export async function getMmTokenAtaBalance(rpc: Rpc<SolanaRpcApi>, mmProgramId: Address): Promise<bigint> {
+   const [mmConfigPda] = await getMmConfigPda(mmProgramId);
+   const mmTokenAta = await getAta(mmConfigPda);
+   return getTokenAccountBalance(rpc, mmTokenAta);
 }
 
 export async function getMmListData(rpc: Rpc<SolanaRpcApi>): Promise<MmListPdaData> {

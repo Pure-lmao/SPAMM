@@ -1,5 +1,5 @@
 import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport } from 'spamm-market-maker-sdk';
-import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getEventHash, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx } from 'spamm-aggregator-sdk';
+import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getEventHash, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from 'utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
@@ -167,6 +167,18 @@ async function getQuote() {
 // getQuote().catch(console.error);
 
 // getMmQuoteBufferData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
+
+async function withdrawFreeBalance() {
+   const balance = await getMmLiabilityAtaBalance(clients.rpc, MARKET_MAKER_PROGRAM_ID);
+   const encumbrance = await getMmEncumbranceData(clients.rpc, MARKET_MAKER_PROGRAM_ID);
+   const withdrawAmount = balance - encumbrance.encumbrance;
+   const withdrawIx = await getWithdrawFromLiabilityAccountIx(withdrawAmount, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const txResult = await sendAndConfirmInstructions([withdrawIx], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// withdrawFreeBalance().catch(console.error);
+
+// getMmTokenAtaBalance(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
 async function forceClosePda(pda: Address) {
    const ix = await getForceClosePdaIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, pda);
