@@ -6,7 +6,7 @@ import {
    type KeyPairSigner,
    type ReadonlyUint8Array,
 } from '@solana/kit';
-import { getMmConfigPda, MARKET_MAKER_PROGRAM_ID } from 'spamm-market-maker-sdk';
+import { getMmConfigPda, getMmQuoteBufferPda, MARKET_MAKER_PROGRAM_ID } from 'spamm-market-maker-sdk';
 const addressEncoder = getAddressEncoder();
 
 function convertAddressToArray(address: Address): ReadonlyUint8Array {
@@ -19,11 +19,9 @@ function formatAddressAsRustNewFromArrayBody(address: Address): string {
    return `${Array.from(bytes, b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')},`;
 }
 
-// const [mmConfig] = await getMmConfigPda(MARKET_MAKER_PROGRAM_ID);
-// console.log(mmConfig);
-const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile('admin_keypair.json');
-// console.log(formatAddressAsRustNewFromArrayBody(ADMIN_SIGNER.address));
-
+const [mmConfig] = await getMmConfigPda(MARKET_MAKER_PROGRAM_ID);
+console.log(mmConfig);
+console.log(formatAddressAsRustNewFromArrayBody(mmConfig));
 
 
 const pkString = '';

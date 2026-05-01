@@ -19,12 +19,12 @@
 //!
 //! Return data (`sol_set_return_data`): **12** bytes — `max_amount` (u64 LE), `odds_scaled` (u32 LE).
 
-use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError, hint::unlikely};
+use pinocchio::{AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
-use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state, verify_mm_config_pda, verify_quote_buffer};
+use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state};
 use zeropod::ZeroPodFixed;
 
-use crate::constants::MAX_QUOTE_STAKE_UNITS;
+use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, QUOTE_BUFFER_PDA};
 use crate::state::{GetQuoteIxPayload, GetQuoteReturnWire};
 use spamm_aggregator::state::mm_quote::MM_QUOTE_BUFFER_DISCRIMINATOR;
 use spamm_aggregator::state::{MarketId, Sport, MMQuoteBuffer, MM_QUOTE_BUFFER_LEN};
@@ -63,12 +63,12 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    let event_state_hash = parsed_data.event_state_hash;
 
-   if unlikely(!verify_quote_buffer(mm_quote_buffer, program_id)) {
+   if unlikely(!address_eq(mm_quote_buffer.address(), &QUOTE_BUFFER_PDA)) {
       log!("get_quote: quote buffer invalid");
       return Err(ProgramError::InvalidAccountData);
    }
 
-   if unlikely(!verify_mm_config_pda(mm_config_pda, program_id)) {
+   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
       log!("get_quote: mm config pda invalid");
       return Err(ProgramError::InvalidSeeds);
    }

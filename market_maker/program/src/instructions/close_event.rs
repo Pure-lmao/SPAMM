@@ -39,7 +39,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    verify_signer(auth)?;
    verify_system_program(system_program)?;
-   verify_mm_config_auth(auth, config_pda, program_id)?;
+   verify_mm_config_auth(auth, config_pda)?;
 
    if unlikely(!event_state_pda.owned_by(program_id)) {
       log!("close_event: event state must be owned by this program");

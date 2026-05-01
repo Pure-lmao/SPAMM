@@ -48,6 +48,13 @@ impl EventId {
    pub const WIRE_SIZE: usize = <Self as ZeroPodFixed>::SIZE;
 
    #[inline(always)]
+   pub fn eq(&self, other: &Self) -> bool {
+      self.event == other.event
+      && self.league == other.league
+      && self.sport == other.sport
+   }
+
+   #[inline(always)]
    pub fn to_zc(self) -> EventIdZc {
       EventIdZc {
          event: self.event.into(),
@@ -102,6 +109,15 @@ impl MarketId {
    #[inline(always)]
    pub fn is_pregame(&self) -> bool {
       self.is_pregame
+   }
+
+   #[inline(always)]
+   pub fn eq(&self, other: &Self) -> bool {
+      self.event_id.eq(&other.event_id)
+      && self.player == other.player
+      && self.mkt == other.mkt
+      && self.period == other.period
+      && self.is_pregame == other.is_pregame
    }
 
    #[inline(always)]

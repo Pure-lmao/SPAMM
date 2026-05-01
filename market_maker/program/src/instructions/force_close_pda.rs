@@ -17,7 +17,7 @@ use spamm_aggregator::helpers::{close_pda_return_rent, verify_signer, verify_sys
 use crate::mm_helpers::{verify_mm_config_auth};
 
 
-pub fn process(program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
+pub fn process(_program_id: &Address, accounts: &mut [AccountView]) -> ProgramResult {
    let [
       authority,
       config_pda,
@@ -29,7 +29,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView]) -> ProgramRes
    };
 
    verify_signer(&authority)?;
-   verify_mm_config_auth(&authority, config_pda, program_id)?;
+   verify_mm_config_auth(&authority, config_pda)?;
    verify_system_program(&system_program)?;
 
    close_pda_return_rent(pda, authority)?;

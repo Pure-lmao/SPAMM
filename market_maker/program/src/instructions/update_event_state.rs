@@ -30,7 +30,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    let event_id = parsed.event_id;
 
    verify_signer(feepayer)?;
-   verify_mm_config_auth(feepayer, config_pda, program_id)?;
+   verify_mm_config_auth(feepayer, config_pda)?;
 
    let mut zc = verify_event_state_pda(event_state_pda, program_id, &event_id)?;
    zc.sequence = parsed.sequence.into();

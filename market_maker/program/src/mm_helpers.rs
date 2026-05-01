@@ -5,64 +5,24 @@ use pinocchio::address::{Address, address_eq};
 use pinocchio::error::ProgramError;
 use pinocchio::hint::unlikely;
 use pinocchio::ProgramResult;
-use spamm_aggregator::readers::read_u8_unchecked;
 use spamm_aggregator::state::mm_account_config::{
-   MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET,
+   MM_CONFIG_PDA_ADMIN_OFFSET,
 };
 use spamm_aggregator::state::{
    EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData,
-   EventStateDataZc, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_QUOTE_BUFFER_LEN, MarketId,
+   EventStateDataZc, MarketId,
 };
 use zeropod::ZeroPodFixed;
 
-use crate::constants::{MM_MARKET_DATA_PDA_SEED, MM_QUOTE_BUFFER_SEED};
-
-/// Quote buffer: single PDA per program ([`MM_QUOTE_BUFFER_SEED`]), fixed [`MM_QUOTE_BUFFER_LEN`].
-#[inline(always)]
-pub fn verify_quote_buffer(quote_buffer: &AccountView, program_id: &Address) -> bool {
-   if unlikely(!address_eq(quote_buffer.owner(), program_id)) {
-      return false;
-   }
-   let quote_buffer_data = match quote_buffer.try_borrow() {
-      Ok(data) => data,
-      Err(_) => return false,
-   };
-   if unlikely(quote_buffer_data.len() != MM_QUOTE_BUFFER_LEN) {
-      return false;
-   }
-   let (expected, _) = Address::find_program_address(&[MM_QUOTE_BUFFER_SEED], program_id);
-   if unlikely(!address_eq(quote_buffer.address(), &expected)) {
-      return false;
-   }
-   true
-}
-
-/// MM `["config"]` PDA: must match [`Address::derive_address`] (same check as aggregator CPIs use).
-#[inline(always)]
-pub fn verify_mm_config_pda(mm_config: &AccountView, program_id: &Address) -> bool {
-   if unlikely(!address_eq(mm_config.owner(), program_id)) {
-      return false;
-   }
-   if unlikely(mm_config.data_len() < MM_ACCOUNT_CONFIG_MIN_LEN) {
-      return false;
-   }
-   let stored_bump = unsafe { read_u8_unchecked(mm_config.data_ptr(), MM_CONFIG_PDA_BUMP_OFFSET) };
-   let expected = Address::derive_address(
-      &[MM_ACCOUNT_CONFIG_SEED],
-      Some(stored_bump),
-      program_id,
-   );
-   address_eq(mm_config.address(), &expected)
-}
+use crate::constants::{MM_CONFIG_PDA, MM_MARKET_DATA_PDA_SEED};
 
 /// MM config PDA `["config"]` under `program_id`; `feepayer` must match `admin`.
 #[inline(always)]
 pub fn verify_mm_config_auth(
    feepayer: &AccountView,
    config_pda: &AccountView,
-   program_id: &Address,
 ) -> Result<(), ProgramError> {
-   if unlikely(!verify_mm_config_pda(config_pda, program_id)) {
+   if unlikely(!address_eq(config_pda.address(), &MM_CONFIG_PDA)) {
       return Err(ProgramError::InvalidSeeds);
    }
 

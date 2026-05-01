@@ -43,7 +43,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    verify_signer(feepayer)?;
    verify_system_program(system_program)?;
-   verify_mm_config_auth(feepayer, config_pda, program_id)?;
+   verify_mm_config_auth(feepayer, config_pda)?;
 
    if unlikely(
       event_state_pda.lamports() > 0 || event_state_pda.data_len() > 0,
