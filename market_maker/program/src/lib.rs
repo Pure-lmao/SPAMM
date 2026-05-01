@@ -12,40 +12,22 @@ use core::{
 };
 
 use pinocchio::{
-   account::AccountView,
-   entrypoint::deserialize,
-   error::ProgramError,
-   ProgramResult, MAX_TX_ACCOUNTS,
+   MAX_TX_ACCOUNTS, ProgramResult, account::AccountView, entrypoint::deserialize, error::ProgramError
 };
 use pinocchio_log::log;
 
 pub use constants::ID;
 
-const UPDATE_ORACLE_IX_DISCRIMINATOR: u8 = 0;
+use doppler;
 
 pinocchio::no_allocator!();
 
 #[no_mangle]
 pub unsafe extern "C" fn entrypoint(input: *mut u8) -> u64 {
-   if unsafe { doppler::read::<u64>(input, 0) } == 0x2 {
-      let account_data_len = unsafe { doppler::read::<u64>(input, 0x28B8) };
-      let instruction_offset =
-         ((0x28c0 + account_data_len as usize + 0x2800 + 0x7) & !0x7) + 0x10;
-
-      if unsafe { doppler::read::<u8>(input, instruction_offset) } == UPDATE_ORACLE_IX_DISCRIMINATOR {
-         let instruction_len =
-            unsafe { doppler::read::<u64>(input, instruction_offset - 8) } as usize;
-         let oracle_data_size = instruction_len - 5;
-         let instruction_sequence_offset = instruction_offset + 0x1;
-
-         doppler::prelude::Admin::check(input);
-         doppler::prelude::Oracle::check_and_update(
-            oracle_data_size,
-            instruction_sequence_offset,
-            input,
-         );
-         return 0;
-      }
+   if doppler::read::<u64>(input, 0) == 0x2 {
+      doppler::prelude::Admin::check(input);
+      doppler::prelude::Oracle::<[u32; 3]>::check_and_update(input);
+      return 0;
    }
 
    match deserialize_and_route(input) {

@@ -1,33 +1,39 @@
-// Account 1 data starts at 0x28c0
-const ACCOUNT_1_DATA_START: usize = 0x28c0;
+//! Oracle account / ix payload layout inside the BPF loader input buffer.
+//!
+//! **Account data** (oracle account): `[discriminator u8][bump u8][sequence u64][payload T]`
+//! starting at `ACCOUNT_DATA_BASE` (`0x28c0`), matching the SPAMM oracle account layout.
+//!
+//! **Instruction data**: `[discriminator u8][sequence u64][payload T]` starting at `IX_DATA_BASE`
+//! (`0x50e8`), i.e. one ix byte before the original doppler “sequence at `0x50e0`” layout.
 
-// MODIFIED FROM ORIGINAL TO ADD BUMP TO LAYOUT.
-// Code *should* be updated to use the new layout but not tested.
+/// Start of this oracle account’s data in the serialized buffer (`RuntimeAccount` payload).
+const ACCOUNT_DATA_BASE: usize = 0x28c0;
 
-// Account layout: {
-//   discriminator: u8,
-//   bump: u8,
-//   sequence: u64,
-//   OracleData: [u8; N]
-// }
-const ORACLE_SEQUENCE: usize = ACCOUNT_1_DATA_START + 0x02;
+/// After account `discriminator` + `bump`: `sequence: u64`.
+const ORACLE_SEQUENCE: usize = ACCOUNT_DATA_BASE + 2;
 
-pub struct Oracle;
+/// Immediately after `sequence: u64`: `payload: T`.
+const ORACLE_PAYLOAD: usize = ORACLE_SEQUENCE + 8;
 
-impl Oracle {
+/// First byte of this instruction’s data (discriminator).
+const IX_DATA_BASE: usize = 0x50e8;
+
+pub struct Oracle<T: Sized + Copy>(core::marker::PhantomData<T>);
+
+impl<T: Sized + Copy> Oracle<T> {
+   /// After ix discriminator: `sequence: u64`.
+   const IX_SEQUENCE: usize = IX_DATA_BASE + 1;
+
+   /// After `sequence: u64`: `payload: T` (does **not** depend on `size_of::<T>()` for the offset).
+   const IX_PAYLOAD: usize = IX_DATA_BASE + 1 + 8;
+
    /// # Safety
    ///
-   /// The caller must ensure that `ptr` is a valid pointer to a memory region
-   /// that is properly aligned and large enough to hold the data being read or written.
-   /// Additionally, the memory region must not be accessed concurrently by other threads.
+   /// `ptr` must point at the VM input buffer from the BPF loader, with valid regions for all reads/writes.
    #[inline(always)]
-   pub unsafe fn check_and_update(oracle_data_size: usize, instruction_sequence_offset: usize, ptr: *mut u8) {
-      // Instruction: discriminator (1) + sequence (4) + oracle_data (N)
-      // Account: sequence (4) + OracleData (N)
-      // Single write: copy sequence + oracle_data directly (consecutive in both)
-      
+   pub unsafe fn check_and_update(ptr: *mut u8) {
       let current_sequence = crate::read::<u32>(ptr, ORACLE_SEQUENCE);
-      let new_sequence = crate::read::<u32>(ptr, instruction_sequence_offset);
+      let new_sequence = crate::read::<u32>(ptr, Self::IX_SEQUENCE);
 
       if new_sequence <= current_sequence {
          #[cfg(target_os = "solana")]
@@ -36,7 +42,8 @@ impl Oracle {
          }
       }
 
-      let sequence_and_data_src = crate::read_bytes(ptr, instruction_sequence_offset);
-      crate::write_bytes(ptr, ORACLE_SEQUENCE, sequence_and_data_src, 2 + oracle_data_size);
+      let new_payload = crate::read::<T>(ptr, Self::IX_PAYLOAD);
+      crate::write(ptr, ORACLE_SEQUENCE, new_sequence);
+      crate::write(ptr, ORACLE_PAYLOAD, new_payload);
    }
 }

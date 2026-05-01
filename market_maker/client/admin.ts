@@ -130,7 +130,7 @@ async function initMarket() {
 // initMarket().catch(console.error);
 
 async function updateOracle() {
-   const sequence = 2n;
+   const sequence = 33n;
    const odds0 = 20n*ODDS_SCALE/10n;
    const odds1 = 20n*ODDS_SCALE/10n;
    const odds2 = 20n*ODDS_SCALE/10n;
