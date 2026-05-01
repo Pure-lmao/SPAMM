@@ -25,7 +25,9 @@ import {
    type RpcSubscriptions,
    type SolanaRpcSubscriptionsApi,
    type Rpc,
-   type SolanaRpcApi
+   type SolanaRpcApi,
+   getBase64EncodedWireTransaction,
+   type Base64EncodedDataResponse
 } from '@solana/kit';
 
 /** HTTP RPC URL (env `SOLANA_RPC_URL` or devnet default). */
@@ -132,4 +134,20 @@ export async function sendAndConfirmInstructions(
       signers,
    });
    return sendAndConfirmSignedTransaction(clients, signedTransaction);
+}
+
+export async function simulateTransaction(
+   rpc: RpcClients['rpc'],
+   instructions: readonly Instruction[],
+   signers: readonly KeyPairSigner[],
+): Promise<Base64EncodedDataResponse | undefined> {
+   const transaction = await buildSignV0Transaction(rpc, {
+      feePayer: signers[0]!,
+      instructions,
+      signers,
+   });
+   const encodedTransaction = getBase64EncodedWireTransaction(transaction)
+   const simulation = await rpc.simulateTransaction(encodedTransaction, {encoding: 'base64', sigVerify: false}).send();
+   console.log(simulation.value);
+   return simulation.value.returnData?.data;
 }

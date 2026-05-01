@@ -48,6 +48,8 @@ import {
 
 import {
    BetResult,
+   MM_RETURN_DATA_LEN,
+   MmReturnData,
    Sport,
    type AddLineToNettingIxData,
    type BetAccountData,
@@ -489,6 +491,18 @@ export const encodeMmListPdaData = (list: MmListPdaData): Uint8Array => {
    return out;
 };
 
+export const getMmReturnDataDecoder = (): Decoder<MmReturnData> =>
+   getStructDecoder([
+      ['maxAmount', getU64Decoder()],
+      ['oddsScaled', getU32BigintDecoder()],
+   ]);
+
+export const getMmReturnDataEncoder = (): Encoder<MmReturnData> =>
+   getStructEncoder([
+      ['maxAmount', getU64Encoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+   ]);
+
 export const getFillBetIxDataEncoder = (): Encoder<FillBetIxData> =>
    getStructEncoder([
       ['betId', getU64Encoder()],
@@ -751,6 +765,13 @@ export function decodeGetQuoteIxData(data: ReadonlyUint8Array): GetQuoteIxData {
       throw new RangeError(`get_quote wire len ${data.length}`);
    }
    return getGetQuoteIxDataDecoder().decode(new Uint8Array(data));
+}
+
+export function decodeMmReturnData(data: ReadonlyUint8Array): MmReturnData {
+   if (data.length !== MM_RETURN_DATA_LEN) {
+      throw new RangeError(`mm return data len ${data.length}`);
+   }
+   return getMmReturnDataDecoder().decode(new Uint8Array(data));
 }
 
 /** Full CPI payload to SPAMM `fill_quote` (first byte = `MM_FILL_QUOTE_IX_DISCRIMINATOR` in `instructions.ts`). */

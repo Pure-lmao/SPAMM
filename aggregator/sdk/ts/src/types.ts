@@ -22,6 +22,7 @@ export const MM_MARKET_DATA_PDA_MIN_LEN = 2;
 export const MM_LIST_HEADER_LEN = 3;
 export const GET_QUOTE_IX_WIRE_LEN = 75;
 export const FILL_QUOTE_IX_WIRE_LEN = 83;
+export const MM_RETURN_DATA_LEN = 12;
 
 /** Wire `u8` (`state/ids.rs`). */
 export enum Sport {
@@ -190,6 +191,11 @@ export type MmAccountConfig = {
    discriminator: number;
    bump: number;
    admin: Address;
+};
+
+export type MmReturnData = {
+   maxAmount: bigint;
+   oddsScaled: bigint;
 };
 
 export type FillBetIxData = {
