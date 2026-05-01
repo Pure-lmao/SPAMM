@@ -1,5 +1,5 @@
 import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport } from 'spamm-market-maker-sdk';
-import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getEventHash, getMmGetQuoteIx } from 'spamm-aggregator-sdk';
+import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getEventHash, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from 'utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
@@ -44,7 +44,36 @@ async function initEvent() {
 }
 // initEvent().catch(console.error);
 // getEventStateData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId).then(console.log).catch(console.error);
+
 // getNettingAccountData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId).then(console.log).catch(console.error);
+async function addLineToNettingAccount() {
+   const ix = await getAddLineToNettingAccountIx(
+      eventId,
+      1, 4, 
+      ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
+   );
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// addLineToNettingAccount().catch(console.error);
+
+async function removeLineFromNettingAccount() {
+   const ix = await getRemoveLineFromNettingAccountIx(
+      eventId,
+      1, 4, 
+      ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
+   );
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// removeLineFromNettingAccount().catch(console.error);
+
+async function closeNettingAccount() {
+   const ix = await getCloseNettingAccountIx(eventId, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// closeNettingAccount().catch(console.error);
 
 async function updateEventState(sport: Sport, eventId: EventId, sequence: number, timePeriod: string, gameInfo: {
    homeScore?: number,
