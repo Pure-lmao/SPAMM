@@ -289,43 +289,37 @@ fn handle_filler(
       amount_to_user_from_filler_liability_token_account, //user profit
       amount_to_filler_from_bet_ata, // bet ata -> mm token (non-netted stake / mm take)
       amount_to_liability_token_account_from_bet_ata, // bet ata -> liability (netted pool)
-      encumbrance_adjustment // to be added to the encumbrance pda data
-   ): (u64, u64, u64, i64) = match bet_result {
+   ): (u64, u64, u64) = match bet_result {
       BetResult::Won => {
          let user_profit = calc_potential_profit(filler.amount, filler.odds_scaled)?;
 
-         (user_profit, 0, 0, -filler.encumbrance_delta)
+         (user_profit, 0, 0)
       },
       BetResult::Lost => {
          if filler.is_potentially_netted {
-            (0, 0, filler.amount, -filler.encumbrance_delta)
+            (0, 0, filler.amount)
          } else {
-            (0, filler.amount, 0, -filler.encumbrance_delta)
+            (0, filler.amount, 0)
          }
       },
       BetResult::HalfWon => {
          let half_amount = filler.amount.checked_div(2).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
-         
-         let user_profit = calc_potential_profit(half_amount, filler.odds_scaled)?;
-         let release_i64 = if filler.is_potentially_netted {
-            user_profit.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?
-         } else {
-            filler.encumbrance_delta
-         };
 
-         (user_profit, 0, 0, -release_i64)
+         let user_profit = calc_potential_profit(half_amount, filler.odds_scaled)?;
+
+         (user_profit, 0, 0)
       },
       BetResult::HalfLost => {
          let half_amount = filler.amount.checked_div(2).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
 
          if filler.is_potentially_netted {
-            (0, 0, half_amount, -filler.encumbrance_delta)
+            (0, 0, half_amount)
          } else {
-            (0, half_amount, 0, -filler.encumbrance_delta)
+            (0, half_amount, 0)
          }
       },
       BetResult::Push | BetResult::Cancelled | BetResult::RolledBack => {
-         (0, 0, 0, -filler.encumbrance_delta)
+         (0, 0, 0)
       }
       BetResult::Pending => {
          log!("settle_bet: bet result is pending");
@@ -372,10 +366,10 @@ fn handle_filler(
       ).invoke_signed(bet_account_signer)?;
    }
 
-   if encumbrance_adjustment != 0 {
+   if filler.encumbrance_delta != 0 {
       let mut encumbrance = get_encumbrance(&mm_encumbrance_pda)?;
       encumbrance = encumbrance
-         .checked_add(encumbrance_adjustment)
+         .checked_sub(filler.encumbrance_delta)
          .ok_or_else(|| ProgramError::ArithmeticOverflow)?;
 
       unsafe {

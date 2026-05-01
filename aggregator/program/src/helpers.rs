@@ -468,8 +468,9 @@ pub fn safe_close_ata(
       ).invoke_signed(signers)?;
    }
 
-   CloseAccount::new(ata, lamport_dest, authority)
-   .invoke_signed(signers)?;
+   CloseAccount::new(
+      ata, lamport_dest, authority
+   ).invoke_signed(signers)?;
 
    Ok(())
 }
