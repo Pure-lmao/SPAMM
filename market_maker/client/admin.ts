@@ -1,0 +1,149 @@
+import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport } from 'spamm-market-maker-sdk';
+import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getEventHash, getMmGetQuoteIx } from 'spamm-aggregator-sdk';
+import { loadKeypairSignerFromJsonFile } from 'utils';
+import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
+import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
+
+const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile('./admin_keypair.json');
+const clients = createRpcClients();
+
+
+async function initProgram() {
+   const ix = await getInitProgramIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// initProgram().catch(console.error);
+
+async function registerMM() {
+   const ix = await getRegisterMmIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// registerMM().catch(console.error);
+
+// getMmEncumbranceData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
+// getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
+
+const sport = 1 as Sport;
+const league = 1;
+const event = 1n;
+const eventId = {
+   sport,
+   league,
+   event,
+} as EventId;
+async function initEvent() {
+   const eventStateIx = await getInitEventIx(ADMIN_SIGNER.address, eventId, MARKET_MAKER_PROGRAM_ID);
+   const nettingPdaIx = await getCreateNettingAccountIx(eventId, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const txResult = await sendAndConfirmInstructions([
+      eventStateIx, 
+      nettingPdaIx
+   ], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// initEvent().catch(console.error);
+// getEventStateData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId).then(console.log).catch(console.error);
+// getNettingAccountData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId).then(console.log).catch(console.error);
+
+async function updateEventState(sport: Sport, eventId: EventId, sequence: number, timePeriod: string, gameInfo: {
+   homeScore?: number,
+   awayScore?: number,
+   homeReds?: number,
+   awayReds?: number,
+}) {
+   const hash = await getEventHash(sport, timePeriod, gameInfo)
+   const eventStateIx = await getUpdateEventStateIx(
+      ADMIN_SIGNER.address,
+      MARKET_MAKER_PROGRAM_ID,
+      eventId,
+      1,
+      hash,
+   );
+   const txResult = await sendAndConfirmInstructions([eventStateIx], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// updateEventState(
+//    1 as Sport, eventId, 1, "PG", { homeScore: 0, awayScore: 0, homeReds: 0, awayReds: 0 }
+// ).catch(console.error);
+
+async function closeEvent() {
+   const closeEventIx = await getCloseEventIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, eventId);
+   const closeNettingPdaIx = await getCloseNettingAccountIx(eventId, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const txResult = await sendAndConfirmInstructions([
+      closeEventIx, 
+      closeNettingPdaIx
+   ], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// closeEvent().catch(console.error);
+
+const period = 1;
+const mkt = 1;
+const player = 0n;
+const marketId = {
+   eventId,
+   player,
+   mkt,
+   period,
+   isPregame: true,
+} as MarketId;
+const oracleBody = new Uint8Array([
+   ...getU32Encoder().encode(20n*ODDS_SCALE/10n), //odds0 = 2.0
+   ...getU32Encoder().encode(19n*ODDS_SCALE/10n), //odds1 = 1.9
+   ...getU32Encoder().encode(21n*ODDS_SCALE/10n), //odds2 = 2.1
+]);
+async function initMarket() {
+   const marketDataIx = await getInitMarketIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, oracleBody);
+   const txResult = await sendAndConfirmInstructions([marketDataIx], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// initMarket().catch(console.error);
+
+async function updateOracle() {
+   const sequence = 2n;
+   const odds0 = 20n*ODDS_SCALE/10n;
+   const odds1 = 20n*ODDS_SCALE/10n;
+   const odds2 = 20n*ODDS_SCALE/10n;
+   const marketDataIx = await getUpdateOracleIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
+      marketId, sequence, odds0, odds1, odds2
+   );
+   const txResult = await sendAndConfirmInstructions([marketDataIx], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// updateOracle().catch(console.error);
+// getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId).then(console.log).catch(console.error);
+
+const returnDataDecoder = getMmReturnDataDecoder();
+async function getQuote() {
+   const quote = await getMmGetQuoteIx(
+      {
+         amount: 1n * 10n * 6n,
+         minOddsScaled: 20n*ODDS_SCALE/10n,
+         side: 0,
+         eventStateHash: await getEventHash(sport, "PG", { homeScore: 0, awayScore: 0, homeReds: 0, awayReds: 0 }),
+         eventStateSequence: 1,
+         marketId,
+      },
+      MARKET_MAKER_PROGRAM_ID,
+      ADMIN_SIGNER.address,
+   );
+   const returnData = await simulateTransaction(clients.rpc, [quote], [ADMIN_SIGNER]);
+   if (!returnData) {
+      throw new Error("No return data");
+   }
+   const parsedReturnData = returnDataDecoder.decode(Buffer.from(...returnData));
+   console.log(parsedReturnData);
+}
+// getQuote().catch(console.error);
+
+// getMmQuoteBufferData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
+
+async function forceClosePda(pda: Address) {
+   const ix = await getForceClosePdaIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, pda);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// forceClosePda("HfnP5EfpT7F32uUHJtPhuf2MpTndi7sJozCbUj9FcyHo" as Address).catch(console.error);
+
+

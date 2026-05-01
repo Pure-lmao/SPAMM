@@ -19,6 +19,7 @@ pub struct MMQuote<'a> {
 
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct MMQuoteBuffer {
    pub discriminator: u8,
    pub is_used: u8,
@@ -43,7 +44,7 @@ impl MMQuoteBuffer {
          discriminator: self.discriminator,
          is_used: self.is_used,
          user_address: self.user_address,
-         market_id: self.market_id.to_zc(false),
+         market_id: self.market_id.to_zc(),
          side: self.side,
          max_amount: self.max_amount.into(),
          odds_scaled: self.odds_scaled.into(),
@@ -65,6 +66,7 @@ impl MMQuoteBuffer {
    }
 }
 
+#[repr(C)]
 pub struct QuoteData {
    _max_amount: u64,
    _odds_scaled: u32,

@@ -6,6 +6,7 @@ use spamm_aggregator::state::{FillQuoteIxData, MarketId};
 /// Fill-quote instruction payload (bytes after the router discriminator in `lib.rs`), matching
 /// `FillQuoteIxData` minus `instruction_discriminator`.
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct FillQuoteIxPayload {
    pub amount_to_fill: u64,
    pub odds_scaled: u32,

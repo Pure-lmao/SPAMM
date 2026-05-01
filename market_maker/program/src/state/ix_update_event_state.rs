@@ -1,0 +1,42 @@
+use core::result::Result;
+
+use pinocchio::error::ProgramError;
+use spamm_aggregator::state::EventId;
+
+/// Bytes after the router `u8` in `spamm_market_maker::lib.rs` (not including that discriminator).
+///
+/// Wire layout:
+/// - `event_id` ([`EventId::WIRE_SIZE`] bytes)
+/// - `sequence` (`u16`, LE)
+/// - `state_hash` (32 bytes)
+pub const UPDATE_EVENT_STATE_IX_DATA_LEN: usize = EventId::WIRE_SIZE + 2 + 32;
+
+#[repr(C)]
+pub struct UpdateEventStateIxPayload {
+   pub event_id: EventId,
+   pub sequence: u16,
+   pub state_hash: [u8; 32],
+}
+
+impl UpdateEventStateIxPayload {
+   pub const WIRE_SIZE: usize = UPDATE_EVENT_STATE_IX_DATA_LEN;
+
+   pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
+      if data.len() != Self::WIRE_SIZE {
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      let event_id = EventId::decode(&data[..EventId::WIRE_SIZE])
+         .ok_or(ProgramError::InvalidInstructionData)?;
+      let b = EventId::WIRE_SIZE;
+      let sequence = u16::from_le_bytes([data[b], data[b + 1]]);
+      let mut state_hash = [0u8; 32];
+      state_hash.copy_from_slice(
+         &data[EventId::WIRE_SIZE + 2..EventId::WIRE_SIZE + 2 + 32],
+      );
+      Ok(Self {
+         event_id,
+         sequence,
+         state_hash,
+      })
+   }
+}

@@ -45,7 +45,7 @@ export enum BetResult {
 }
 
 export type EventId = {
-   eventId: bigint;
+   event: bigint;
    league: number;
    sport: Sport;
 };
@@ -243,4 +243,5 @@ export type DecodedAggregatorInstruction =
    | { kind: 'removeLineFromNettingAccount'; data: RemoveLineFromNettingIxData }
    | { kind: 'closeNettingAccount'; eventId: EventId }
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint }
+   | { kind: 'writeArbitraryData'; data: Uint8Array }
    | { kind: 'forceClosePda' };

@@ -101,6 +101,8 @@ The function MUST take the following accounts:
 | 3 | MM Quote Buffer | writable | |
 | 4 | MM Token Account | writable | |
 | 5 | MM Liability Token Account | writable |  |
+| 6 | Mint | readonly | |
+| 7 | Token Program | readonly | |
 
 The function MUST take the following data:
 ```rust
@@ -152,7 +154,7 @@ struct MarketData {
 ```
 It MUST have the seeds `["market_data", market_id]` using the wire `MarketId` bytes (the aggregator hashes `mkt` exactly as supplied). Soccer full-time 1×2 uses **`mkt` 1** with **`side`** 0 = home, 1 = draw, 2 = away. Soccer NOT-home / NOT-draw / NOT-away uses **`mkt` 5** with **`side`** 0, 1, or 2 for those three outcomes. On every other market **`side`** MUST be **0** or **1**; **`side` 2** is only valid when **`mkt`** is **1** or **5**. The account can contain any data that you want to store for the market. The aggregator verifies the Market Data PDA exists with the expected seed. You should perform additional checks as needed such as the sequence and data validation.
 
-It is recommended you use something like Doppler (https://github.com/blueshift-gg/doppler) and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). It has 21 CU updates, or 49 if you include the update authority key in the account. You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_quote function.
+It is recommended you use something like Doppler (https://github.com/blueshift-gg/doppler) for 21 CU updates and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_quote function.
 
 ## Event State PDA
 Event State PDA MUST have the following structure:
@@ -186,38 +188,40 @@ The event state hash and sequence of a market maker event PDA must match the agg
 The state hash is constructed based on data which varies by sport:
 (P prefix meaning "pre-")
 ```rust
-soccer: (
+soccer (sport_id = 1): (
    home_team_score as u8, 
    away_team_score as u8, 
    home_team_red_cards as u8, 
    away_team_red_cards as u8, 
    "PG"|"1H"|"HT"|"2H"|"PET"|"1ET"|"HTET"|"2ET"|"PPen"|"Pen" as str
 )
-ice_hockey: (
-   home_team_score as u8, 
-   away_team_score as u8, 
-   "PG"|"1P"|"P2P"|"2P"|"P3P"|"P3"|"POT"|"OT"|"PSO"|"SO" as str
-)
-american_football: (
+
+american_football (sport_id = 2): (
    home_team_score as u8, 
    away_team_score as u8, 
    "PG"|"1Q"|"P2Q"|"2Q"|"HT"|"3Q"|"P4Q"|"POT"|"OT" as str
 )
 
-basketball: (
+baseball (sport_id = 3): (
+   home_team_score as u8, 
+   away_team_score as u8, 
+   "PG"|"T1"|"B1"|"P2"|"T2"|"B2"|"P3"... as str
+)
+
+basketball (sport_id = 4): (
    //score is omitted as constant updates would be excessive
    "PG"|"1Q"|"P2Q"|"2Q"|"HT"|"3Q"|"P4Q"|"POT"|"OT"|"POTx"|"OTx" as str
    //where x > 1 of the double/triple overtimes
 )
 
-baseball: (
+ice_hockey (sport_id = 5): (
    home_team_score as u8, 
    away_team_score as u8, 
-   "PG"|"T1"|"B1"|"P2"|"T2"|"B2"|"P3"... as str
+   "PG"|"1P"|"P2P"|"2P"|"P3P"|"P3"|"POT"|"OT"|"PSO"|"SO" as str
 )
 ```
 
-The hash is constructed as `sha256(sport_name || state_tuple) => [u8; 32]`.
+The hash is constructed as `sha256(sport_id || state_tuple) => [u8; 32]`.
 
 ## Accounts at a Glance
 | Account | Discriminator | Seed | Notes |
@@ -408,21 +412,22 @@ Accounts (fixed prefix):
 | 5 | config pda | readonly | Aggregator config |
 | 6 | mint | readonly | |
 | 7 | token program | readonly | |
-| 8 | system program | readonly | |
+| 8 | associated token program | readonly | |
+| 9 | system program | readonly | |
 
 Per MM (currently 5 max):
 
 | Offset | Account | Role | Notes |
 |--------|---------|------|-------|
-| 9+0*N | mm program | readonly | Must be executable (a program) |
-| 9+1*N | mm config pda | writable | Writable for `fill_quote` CPI |
-| 9+2*N | mm event state pda | readonly |  |
-| 9+3*N | mm market data pda | writable | Writable for `fill_quote` CPI |
-| 9+4*N | mm quote buffer | writable |  |
-| 9+5*N | mm encumbrance pda | writable |  |
-| 9+6*N | mm liability token account | writable | |
-| 9+7*N | mm token account | writable | |
-| 9+8*N | mm netting pda | writable | Must match expected but can be uninitialized |
+| 10+0*N | mm program | readonly | Must be executable (a program) |
+| 10+1*N | mm config pda | writable | Writable for `fill_quote` CPI |
+| 10+2*N | mm event state pda | readonly |  |
+| 10+3*N | mm market data pda | writable | Writable for `fill_quote` CPI |
+| 10+4*N | mm quote buffer | writable |  |
+| 10+5*N | mm encumbrance pda | writable |  |
+| 10+6*N | mm liability token account | writable | |
+| 10+7*N | mm token account | writable | |
+| 10+8*N | mm netting pda | writable | Must match expected but can be uninitialized |
 
 This is called by a user to place a bet.
 
@@ -603,6 +608,28 @@ Accounts:
 | 7 | token program | readonly | |
 
 This is called by the SPAMM admin to withdraw excess funds from the liability token account.
+
+### write_arbitrary_data
+Discriminator: 254
+
+Data:
+
+```rust
+struct WriteArbitraryDataIxData {
+   discriminator: u8, // 254
+   data: [u8; N], // N = number of bytes to write
+}
+```
+
+Accounts:
+
+| Index | Account | Role | Notes |
+|-------|---------|------|-------|
+| 0 | aggregator admin | writable, signer | Must match config authority |
+| 1 | config pda | readonly | |
+| 2 | account | writable | Any program-owned account to write to |
+
+This is called by the aggregator admin to write arbitrary data to a PDA on devnet. 
 
 ### force_close_pda
 Discriminator: 255

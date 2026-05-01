@@ -9,27 +9,27 @@ pub mod ids;
 
 pub use account_bet::{
    BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED,
-   BetAccountData, BetFiller,
+   BetAccountData, BetAccountDataZc, BetFiller, BetFillerZc,
 };
 pub use account_netting::{
    add_netting_line, remove_netting_line,
    NETTING_ACCOUNT_ALLOC_LEN,
    NETTING_HEADER_LEN, NETTING_LINE_LEN, NETTING_PDA_DISCRIMINATOR,
-   NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, NettingLine,
-   NettingPdaDataHeader,
+   NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, NettingLine, NettingLineZc,
+   NettingPdaDataHeader, NettingPdaDataHeaderZc,
 };
 
 pub use mm_account_config::{
-   MmAccountConfig, MM_ACCOUNT_CONFIG_DISCRIMINATOR, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED,
+   MmAccountConfig, MmAccountConfigZc, MM_ACCOUNT_CONFIG_DISCRIMINATOR, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED,
 };
 pub use mm_quote::{
-   MM_QUOTE_BUFFER_LEN, MMQuote, MMQuoteBuffer,
+   MM_QUOTE_BUFFER_LEN, MMQuote, MMQuoteBuffer, MMQuoteBufferZc,
 };
-pub use mm_get_quote::{GetQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR};
-pub use mm_fill_quote::{FillQuoteIxData, FILL_QUOTE_IX_DISCRIMINATOR};
+pub use mm_get_quote::{GetQuoteIxData, GetQuoteIxDataZc, GET_QUOTE_IX_DISCRIMINATOR};
+pub use mm_fill_quote::{FillQuoteIxData, FillQuoteIxDataZc, FILL_QUOTE_IX_DISCRIMINATOR};
 pub use ids::{EventId, MarketId, Sport};
 pub use other::{
    CONFIG_PDA_DISCRIMINATOR, CONFIG_PDA_LEN,
    EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED,
-   ConfigPdaData, EventStateData, MM_LIST_HEADER_LEN, MM_LIST_PDA_DISCRIMINATOR,
+   ConfigPdaData, ConfigPdaDataZc, EventStateData, EventStateDataZc, MM_LIST_HEADER_LEN, MM_LIST_PDA_DISCRIMINATOR,
 };

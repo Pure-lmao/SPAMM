@@ -3,7 +3,7 @@
 //!
 //! Accounts **(6)** (aggregator order):
 //! 0. `user`
-//! 1. `mm_oracle_pda` — unused here (reserved for future oracle checks)
+//! 1. `mm_market_data_pda` — unused here (reserved for future market-data checks)
 //! 2. `mm_config_pda`
 //! 3. `mm_quote_buffer`
 //! 4. `mm_token_account` — SPL authority must be the config PDA (`init_program`)
@@ -36,11 +36,14 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    let [
       user,
-      _mm_oracle_pda,
+      _mm_market_data_pda,
       mm_config_pda,
       mm_quote_buffer,
       mm_token_account,
       liability_account,
+      _mint,
+      _token_program,
+
    ] = accounts else {
       log!("fill_quote: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
@@ -197,7 +200,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
 #[inline(always)]
 fn same_market_id(a: &MarketId, b: &MarketId) -> bool {
-   a.event_id.event_id == b.event_id.event_id
+   a.event_id.event == b.event_id.event
       && a.event_id.league == b.event_id.league
       && a.event_id.sport == b.event_id.sport
       && a.player == b.player

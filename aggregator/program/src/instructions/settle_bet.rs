@@ -289,18 +289,16 @@ fn handle_filler(
       amount_to_user_from_filler_liability_token_account, //user profit
       amount_to_filler_from_bet_ata, // bet ata -> mm token (non-netted stake / mm take)
       amount_to_liability_token_account_from_bet_ata, // bet ata -> liability (netted pool)
-      encumbrance_adjustment
+      encumbrance_adjustment // to be added to the encumbrance pda data
    ): (u64, u64, u64, i64) = match bet_result {
       BetResult::Won => {
          let user_profit = calc_potential_profit(filler.amount, filler.odds_scaled)?;
 
-         // MM margin for this leg sits in the liability vault at fill time (netted or not).
          (user_profit, 0, 0, -filler.encumbrance_delta)
       },
       BetResult::Lost => {
          if filler.is_potentially_netted {
-            let stake_i64: i64 = filler.amount.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
-            (0, 0, filler.amount, stake_i64 - filler.encumbrance_delta)
+            (0, 0, filler.amount, -filler.encumbrance_delta)
          } else {
             (0, filler.amount, 0, -filler.encumbrance_delta)
          }
@@ -310,7 +308,7 @@ fn handle_filler(
          
          let user_profit = calc_potential_profit(half_amount, filler.odds_scaled)?;
          let release_i64 = if filler.is_potentially_netted {
-            user_profit as i64
+            user_profit.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?
          } else {
             filler.encumbrance_delta
          };
@@ -319,12 +317,9 @@ fn handle_filler(
       },
       BetResult::HalfLost => {
          let half_amount = filler.amount.checked_div(2).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
-         let mm_half_profit = calc_potential_profit(half_amount, filler.odds_scaled)?;
 
          if filler.is_potentially_netted {
-            let half_i64: i64 = half_amount.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
-            let mmh_i64: i64 = mm_half_profit.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
-            (0, 0, half_amount, half_i64 - mmh_i64)
+            (0, 0, half_amount, -filler.encumbrance_delta)
          } else {
             (0, half_amount, 0, -filler.encumbrance_delta)
          }

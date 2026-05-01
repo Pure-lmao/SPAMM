@@ -8,7 +8,8 @@
 //! 3. `mm_token_account` (writable, empty) — ATA created with authority = config PDA
 //! 4. `mint` (readonly)
 //! 5. `token_program` (readonly)
-//! 6. `system_program` (readonly)
+//! 6. `associated_token_program` (readonly)
+//! 7. `system_program` (readonly)
 //!
 //! Instruction `data`: [`InitProgramIxPayload`] — `admin` pubkey (must equal `feepayer`; example policy).
 
@@ -23,9 +24,10 @@ use pinocchio_log::log;
 use pinocchio_associated_token_account::instructions::Create as CreateAssociatedTokenAccount;
 use pinocchio_system::instructions::CreateAccount;
 
+use spamm_aggregator::helpers::verify_associated_token_program;
 use spamm_aggregator::helpers::{get_rent_local, verify_signer, verify_system_program, verify_token_program};
 use spamm_aggregator::state::{
-   MmAccountConfig, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_ACCOUNT_CONFIG_DISCRIMINATOR,
+   MmAccountConfigZc, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_ACCOUNT_CONFIG_DISCRIMINATOR,
    MM_QUOTE_BUFFER_LEN,
 };
 
@@ -43,6 +45,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       token_account,
       mint,
       token_program,
+      associated_token_program,
       system_program,
    ] = accounts else {
       log!("init_program: accounts mismatch");
@@ -52,6 +55,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    verify_signer(feepayer)?;
    verify_system_program(system_program)?;
    verify_token_program(token_program)?;
+   verify_associated_token_program(associated_token_program)?;
 
    // Example MM: single admin pays setup; avoids arbitrary `admin` in data without that key signing.
    if unlikely(!address_eq(feepayer.address(), &parsed.admin)) {
@@ -102,13 +106,13 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    {
       let mut data = config_pda.try_borrow_mut()?;
-      let initial = MmAccountConfig {
-         discriminator: MM_ACCOUNT_CONFIG_DISCRIMINATOR,
-         bump: config_bump,
-         admin: parsed.admin,
+      let initial = MmAccountConfigZc {
+         discriminator: MM_ACCOUNT_CONFIG_DISCRIMINATOR.into(),
+         bump: config_bump.into(),
+         admin: parsed.admin.into(),
       };
       unsafe {
-         core::ptr::write(data.as_mut_ptr().cast::<MmAccountConfig>(), initial);
+         core::ptr::write(data.as_mut_ptr().cast::<MmAccountConfigZc>(), initial);
       }
    }
 

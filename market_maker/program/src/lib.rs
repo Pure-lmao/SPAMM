@@ -23,7 +23,7 @@ pub use constants::ID;
 
 const UPDATE_ORACLE_IX_DISCRIMINATOR: u8 = 0;
 
-
+pinocchio::no_allocator!();
 
 #[no_mangle]
 pub unsafe extern "C" fn entrypoint(input: *mut u8) -> u64 {

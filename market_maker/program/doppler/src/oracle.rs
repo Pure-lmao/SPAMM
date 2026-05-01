@@ -10,7 +10,6 @@ const ACCOUNT_1_DATA_START: usize = 0x28c0;
 //   sequence: u64,
 //   OracleData: [u8; N]
 // }
-// Sequence offset: 0x28c0 + 0x02 = 0x28c1
 const ORACLE_SEQUENCE: usize = ACCOUNT_1_DATA_START + 0x02;
 
 pub struct Oracle;
@@ -23,7 +22,7 @@ impl Oracle {
    /// Additionally, the memory region must not be accessed concurrently by other threads.
    #[inline(always)]
    pub unsafe fn check_and_update(oracle_data_size: usize, instruction_sequence_offset: usize, ptr: *mut u8) {
-      // Instruction: discriminator (1) + sequence (4) + oracle_data (N, no Vec length prefix)
+      // Instruction: discriminator (1) + sequence (4) + oracle_data (N)
       // Account: sequence (4) + OracleData (N)
       // Single write: copy sequence + oracle_data directly (consecutive in both)
       
@@ -38,6 +37,6 @@ impl Oracle {
       }
 
       let sequence_and_data_src = crate::read_bytes(ptr, instruction_sequence_offset);
-      crate::write_bytes(ptr, ORACLE_SEQUENCE, sequence_and_data_src, 4 + oracle_data_size);
+      crate::write_bytes(ptr, ORACLE_SEQUENCE, sequence_and_data_src, 2 + oracle_data_size);
    }
 }

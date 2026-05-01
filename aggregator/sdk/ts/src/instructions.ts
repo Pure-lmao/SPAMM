@@ -1,5 +1,5 @@
 import { AccountRole, type Instruction } from '@solana/instructions';
-import type { Address } from '@solana/kit';
+import { type Address } from '@solana/kit';
 
 import {
    AGGREGATOR_PROGRAM_ID,
@@ -50,6 +50,7 @@ export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 7;
 export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 8;
 export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 9;
 export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 10;
+export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
 export const MM_GET_QUOTE_IX_DISCRIMINATOR = 5;
@@ -97,38 +98,38 @@ async function settleFillerAccountRow(
 }
 
 /**
- * **`init_program`** — one-time setup of aggregator config PDA and MM list PDA (rent paid by authority).
+ * **`init_program`** — one-time setup of aggregator config PDA and MM list PDA (rent paid by admin).
  *
  * **Rust:** `aggregator::instructions::init_program::process` (`INIT_PROGRAM_IX_DISCRIMINATOR` = 0). Router data: empty after discriminator.
  *
- * @param authority - **TS:** `Address` — writable signer, becomes config authority. **Rust:** `authority` (`AccountView`, writable signer).
- * @returns **`Promise<Instruction>`** — `programAddress` = {@link AGGREGATOR_PROGRAM_ID}; `data` = single-byte discriminator only. Accounts: authority, config PDA, MM list PDA, system program (derived PDAs use seeds from helpers / on-chain constants).
+ * @param admin - **TS:** `Address` — writable signer, becomes config admin. **Rust:** `admin` (`AccountView`, writable signer).
+ * @returns **`Promise<Instruction>`** — `programAddress` = {@link AGGREGATOR_PROGRAM_ID}; `data` = single-byte discriminator only. Accounts: admin, config PDA, MM list PDA, system program (derived PDAs use seeds from helpers / on-chain constants).
  */
-export async function getInitProgramIx(authority: Address): Promise<Instruction> {
+export async function getInitProgramIx(admin: Address): Promise<Instruction> {
    const [configPda] = await getConfigPda();
    const [mmListPda] = await getMmListPda();
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [ws(authority), rw(configPda), rw(mmListPda), ro(SYSTEM_PROGRAM_ID)],
+      accounts: [ws(admin), rw(configPda), rw(mmListPda), ro(SYSTEM_PROGRAM_ID)],
       data: encodeAggregatorInstructionData({ kind: 'initProgram' }),
    };
 }
 
 /**
- * **`change_config_status`** — pause (0) or unpause (1) the aggregator; must be config authority.
+ * **`change_config_status`** — pause (0) or unpause (1) the aggregator; must be config admin.
  *
  * **Rust:** `aggregator::instructions::change_config_status::process` (`CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR` = 1). Payload: one `u8` status after discriminator.
- *
+ * 
+ * @param admin - **TS:** `Address` — signer matching config admin. **Rust:** `auth` (signer).
  * @param status - **TS:** `0 | 1` — 0 = paused, 1 = unpaused. **Rust:** `u8` written to config at status offset.
- * @param authority - **TS:** `Address` — signer matching config authority. **Rust:** `auth` (signer).
  * @returns **`Promise<Instruction>`** — `programAddress` = aggregator; `data` = `[discriminator, status]`.
  */
-export async function getChangeConfigStatusIx(status: 0 | 1, authority: Address): Promise<Instruction> {
+export async function getChangeConfigStatusIx(admin: Address, status: 0 | 1): Promise<Instruction> {
    validateChangeConfigStatus(status);
    const [configPda] = await getConfigPda();
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [rs(authority), rw(configPda)],
+      accounts: [rs(admin), rw(configPda)],
       data: encodeAggregatorInstructionData({ kind: 'changeConfigStatus', status }),
    };
 }
@@ -138,7 +139,7 @@ export async function getChangeConfigStatusIx(status: 0 | 1, authority: Address)
  *
  * **Rust:** `aggregator::instructions::register_mm::process` (`REGISTER_MM_IX_DISCRIMINATOR` = 2). No payload after router discriminator.
  *
- * @param mmAdmin - **TS:** `Address` — MM admin / authority (writable signer). **Rust:** `mm_admin` (writable signer), verified against MM config PDA.
+ * @param mmAdmin - **TS:** `Address` — MM admin (writable signer). **Rust:** `mm_admin` (writable signer), verified against MM config PDA.
  * @param mmProgram - **TS:** `Address` — executable MM program id. **Rust:** `mm_program` (`Pubkey` / `Address`).
  * @returns **`Promise<Instruction>`** — eleven account metas (admin, MM program, MM config, encumbrance, liability ATA, aggregator config, MM list, token + ATA programs, mint, system). Mint and token program addresses match the SDK `constants` module.
  */
@@ -163,9 +164,9 @@ export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Pro
          rw(mmLiabilityAta),
          ro(configPda),
          rw(mmListPda),
+         ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
-         ro(MINT_ID),
          ro(SYSTEM_PROGRAM_ID),
       ],
       data: encodeAggregatorInstructionData({ kind: 'registerMm' }),
@@ -181,7 +182,7 @@ export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Pro
  * @param feepayer - **TS:** `Address` — writable signer paying rent and fees. **Rust:** `feepayer` (writable signer).
  * @param user - **TS:** `Address` — bet owner (readonly signer). **Rust:** `user` (signer).
  * @param mmPrograms - **TS:** `readonly Address[]` — one MM program id per quote leg (1..=MAX_NUMBER_OF_MMS). **Rust:** repeated 9-account MM slice per program (`mm_program` … `mm_netting_pda`). Quote buffer PDA derived per MM in TS (`mm_quote_buffer` seed on MM program).
- * @returns **`Promise<Instruction>`** — base 9 accounts + 9×N MM accounts; `data` = router discriminator + encoded `fill`. **Note:** mint / token / system program addresses are taken from constants in TS builders.
+ * @returns **`Promise<Instruction>`** — base 10 accounts + 9×N MM accounts; `data` = router discriminator + encoded `fill`. **Note:** mint / token / system program addresses are taken from constants in TS builders.
  */
 export async function getFillBetIx(
    fill: FillBetIxData,
@@ -206,6 +207,7 @@ export async function getFillBetIx(
       ro(configPda),
       ro(MINT_ID),
       ro(SPL_TOKEN_PROGRAM_ID),
+      ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSTEM_PROGRAM_ID),
    ];
    const perMarketMakerAccounts: { address: Address; role: AccountRole }[] = [];
@@ -302,18 +304,18 @@ export async function getMmGetQuoteIx(
 }
 
 /**
- * **`grade_bets`** — authority sets `BetResult` on many bet PDAs (no token movement).
+ * **`grade_bets`** — admin sets `BetResult` on many bet PDAs (no token movement).
  *
  * **Rust:** `aggregator::instructions::grade_bets::process` (`GRADE_BETS_IX_DISCRIMINATOR` = 4). Data: one `u8` result per bet account (`data.len() == bet_accounts.len()`).
  *
+ * @param admin - **TS:** `Address` — config admin signer. **Rust:** `admin` (signer).
  * @param betResults - **TS:** `Uint8Array` — one byte per bet, valid graded `BetResult` discriminant. **Rust:** `&[u8]` same length as bet accounts.
- * @param authority - **TS:** `Address` — config authority signer. **Rust:** `authority` (signer).
  * @param betAccounts - **TS:** `readonly Address[]` — bet PDA addresses (writable). **Rust:** `bet_accounts @ ..` slice.
  * @returns **`Promise<Instruction>`** — `data` = discriminator + raw `betResults` bytes. Config PDA is readonly second account.
  */
 export async function getGradeBetsIx(
+   admin: Address,
    betResults: Uint8Array,
-   authority: Address,
    betAccounts: readonly Address[],
 ): Promise<Instruction> {
    validateGradeBetResults(betResults, 'betResults');
@@ -323,7 +325,7 @@ export async function getGradeBetsIx(
    const [configPda] = await getConfigPda();
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [rs(authority), ro(configPda), ...betAccounts.map((address) => rw(address))],
+      accounts: [rs(admin), ro(configPda), ...betAccounts.map((address) => rw(address))],
       data: encodeAggregatorInstructionData({ kind: 'gradeBets', betResults }),
    };
 }
@@ -339,9 +341,9 @@ export async function getGradeBetsIx(
  * @returns **`Promise<Instruction>`** — 9 fixed accounts + 5×5 filler accounts (blank filler uses system program placeholders for the five MM-related slots). **Note:** filler rows must match `bet`’s `filler0`..`filler4` for correct encumbrance/ATA metas.
  */
 export async function getSettleBetIx(
-   bet: BetAccountData,
    signer: Address,
    betPda: Address,
+   bet: BetAccountData,
 ): Promise<Instruction> {
    validatePositiveU64(bet.betId, 'bet.betId');
    const user = bet.owner;
@@ -495,13 +497,13 @@ export async function getCloseNettingAccountIx(
  * **Rust:** `aggregator::instructions::withdraw_from_liability_account::process` (`WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR` = 10). Data: `amount: u64` (LE) after discriminator.
  *
  * @param amount - **TS:** `bigint` — must fit `u64` and be > 0 where enforced. **Rust:** `u64` read from ix data.
- * @param mmAuthority - **TS:** `Address` — MM admin signer. **Rust:** `mm_authority` (writable signer).
+ * @param mmAdmin - **TS:** `Address` — MM admin signer. **Rust:** `mm_admin` (writable signer).
  * @param mmProgram - **TS:** `Address`. **Rust:** `mm_program_account`.
  * @returns **`Promise<Instruction>`** — seven accounts + mint + token program (see Rust module docstring). Liability and MM token ATAs are derived in TS.
  */
 export async function getWithdrawFromLiabilityAccountIx(
    amount: bigint,
-   mmAuthority: Address,
+   mmAdmin: Address,
    mmProgram: Address,
 ): Promise<Instruction> {
    validatePositiveU64(amount, 'amount');
@@ -517,7 +519,7 @@ export async function getWithdrawFromLiabilityAccountIx(
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
-         ws(mmAuthority),
+         ws(mmAdmin),
          ro(mmProgram),
          rw(mmConfigPda),
          rw(mmEncumbrancePda),
@@ -534,27 +536,36 @@ export async function getWithdrawFromLiabilityAccountIx(
 }
 
 /**
- * **`force_close_pda`** — dev-only: authority closes an arbitrary PDA owned by the aggregator program and recovers rent.
+ * **`force_close_pda`** — dev-only: admin closes an arbitrary PDA owned by the aggregator program and recovers rent.
  *
  * **Rust:** `aggregator::instructions::force_close_pda::process` (`FORCE_CLOSE_PDA_IX_DISCRIMINATOR` = 255). No instruction data after discriminator.
  *
- * @param authority - **TS:** `Address` — config authority (writable signer). **Rust:** `authority` (writable signer).
+ * @param admin - **TS:** `Address` — config admin (writable signer). **Rust:** `admin` (writable signer).
  * @param pda - **TS:** `Address` — PDA to close. **Rust:** `pda` (writable).
- * @returns **`Promise<Instruction>`** — four accounts: authority, config PDA (readonly), target PDA, system program. **Note:** production deployments should gate or omit this ix.
+ * @returns **`Promise<Instruction>`** — four accounts: admin, config PDA (readonly), target PDA, system program. **Note:** production deployments should gate or omit this ix.
  */
-export async function getForceClosePdaIx(authority: Address, pda: Address): Promise<Instruction> {
+export async function getForceClosePdaIx(admin: Address, pda: Address): Promise<Instruction> {
    const [configPda] = await getConfigPda();
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [ws(authority), ro(configPda), rw(pda), ro(SYSTEM_PROGRAM_ID)],
+      accounts: [ws(admin), ro(configPda), rw(pda), ro(SYSTEM_PROGRAM_ID)],
       data: encodeAggregatorInstructionData({ kind: 'forceClosePda' }),
+   };
+}
+
+export async function getWriteArbitraryDataIx(admin: Address, account: Address, data: Uint8Array): Promise<Instruction> {
+   const [configPda] = await getConfigPda();
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [ws(admin), ro(configPda), rw(account)],
+      data: encodeAggregatorInstructionData({ kind: 'writeArbitraryData', data }),
    };
 }
 
 /** Tagged router input: wire-ish fields and addresses in one object per `kind`. */
 export type AggregatorInstructionInput =
-   | { kind: 'initProgram'; authority: Address }
-   | { kind: 'changeConfigStatus'; status: 0 | 1; authority: Address }
+   | { kind: 'initProgram'; admin: Address }
+   | { kind: 'changeConfigStatus'; status: 0 | 1; admin: Address }
    | { kind: 'registerMm'; mmAdmin: Address; mmProgram: Address }
    | {
         kind: 'fillBet';
@@ -566,7 +577,7 @@ export type AggregatorInstructionInput =
    | {
         kind: 'gradeBets';
         betResults: Uint8Array;
-        authority: Address;
+        admin: Address;
         betAccounts: readonly Address[];
      }
    | { kind: 'settleBet'; bet: BetAccountData; signer: Address; betPda: Address }
@@ -588,8 +599,8 @@ export type AggregatorInstructionInput =
         mmProgram: Address;
      }
    | { kind: 'closeNettingAccount'; eventId: EventId; admin: Address; mmProgram: Address }
-   | { kind: 'withdrawFromLiabilityAccount'; amount: bigint; mmAuthority: Address; mmProgram: Address }
-   | { kind: 'forceClosePda'; authority: Address; pda: Address };
+   | { kind: 'withdrawFromLiabilityAccount'; amount: bigint; mmAdmin: Address; mmProgram: Address }
+   | { kind: 'forceClosePda'; admin: Address; pda: Address };
 
 export type AggregatorInstructionKind = AggregatorInstructionInput['kind'];
 
@@ -604,17 +615,17 @@ export type AggregatorInstructionKind = AggregatorInstructionInput['kind'];
 export async function getInstructionIx(input: AggregatorInstructionInput): Promise<Instruction> {
    switch (input.kind) {
       case 'initProgram':
-         return getInitProgramIx(input.authority);
+         return getInitProgramIx(input.admin);
       case 'changeConfigStatus':
-         return getChangeConfigStatusIx(input.status, input.authority);
+         return getChangeConfigStatusIx(input.admin, input.status);
       case 'registerMm':
          return getRegisterMmIx(input.mmAdmin, input.mmProgram);
       case 'fillBet':
          return getFillBetIx(input.fill, input.feepayer, input.user, input.mmPrograms);
       case 'gradeBets':
-         return getGradeBetsIx(input.betResults, input.authority, input.betAccounts);
+         return getGradeBetsIx(input.admin, input.betResults, input.betAccounts);
       case 'settleBet':
-         return getSettleBetIx(input.bet, input.signer, input.betPda);
+         return getSettleBetIx(input.signer, input.betPda, input.bet);
       case 'createNettingAccount':
          return getCreateNettingAccountIx(input.eventId, input.mmAdmin, input.mmProgram);
       case 'addLineToNettingAccount':
@@ -636,9 +647,9 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
       case 'closeNettingAccount':
          return getCloseNettingAccountIx(input.eventId, input.admin, input.mmProgram);
       case 'withdrawFromLiabilityAccount':
-         return getWithdrawFromLiabilityAccountIx(input.amount, input.mmAuthority, input.mmProgram);
+         return getWithdrawFromLiabilityAccountIx(input.amount, input.mmAdmin, input.mmProgram);
       case 'forceClosePda':
-         return getForceClosePdaIx(input.authority, input.pda);
+         return getForceClosePdaIx(input.admin, input.pda);
       default: {
          const _exhaustive: never = input;
          throw new Error(`unknown instruction: ${String(_exhaustive)}`);

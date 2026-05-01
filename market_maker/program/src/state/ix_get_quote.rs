@@ -6,6 +6,7 @@ use spamm_aggregator::state::{GetQuoteIxData, MarketId};
 /// Get-quote instruction payload (bytes after the router discriminator in `lib.rs`), matching
 /// `GetQuoteIxData` minus `instruction_discriminator`
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct GetQuoteIxPayload {
    pub amount: u64,
    pub odds_scaled: u32,

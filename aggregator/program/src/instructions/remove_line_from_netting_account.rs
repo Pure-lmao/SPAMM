@@ -51,6 +51,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct RemoveLineFromLiabilityNettingIxData {
    pub event_id: EventId,
    pub period: u8,

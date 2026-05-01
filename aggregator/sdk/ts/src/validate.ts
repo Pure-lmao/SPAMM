@@ -83,7 +83,7 @@ export function validateSportEnum(sport: Sport, label = 'sport'): void {
 }
 
 export function validateEventId(e: EventId, label = 'eventId'): void {
-   validateU64(e.eventId, `${label}.eventId`);
+   validateU64(e.event, `${label}.event`);
    validateU32Number(e.league, `${label}.league`);
    validateSportEnum(e.sport, `${label}.sport`);
 }

@@ -2,22 +2,20 @@ use core::result::Result;
 
 use pinocchio::account::AccountView;
 use pinocchio::address::{Address, address_eq};
-use pinocchio::cpi::Signer;
 use pinocchio::error::ProgramError;
 use pinocchio::hint::unlikely;
 use pinocchio::ProgramResult;
-use pinocchio_system::instructions::Transfer;
 use spamm_aggregator::readers::read_u8_unchecked;
 use spamm_aggregator::state::mm_account_config::{
    MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET,
 };
 use spamm_aggregator::state::{
    EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData,
-   MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_QUOTE_BUFFER_LEN, MarketId,
+   EventStateDataZc, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_QUOTE_BUFFER_LEN, MarketId,
 };
 use zeropod::ZeroPodFixed;
 
-use crate::constants::{MM_QUOTE_BUFFER_SEED, ORACLE_SEED};
+use crate::constants::{MM_MARKET_DATA_PDA_SEED, MM_QUOTE_BUFFER_SEED};
 
 /// Quote buffer: single PDA per program ([`MM_QUOTE_BUFFER_SEED`]), fixed [`MM_QUOTE_BUFFER_LEN`].
 #[inline(always)]
@@ -86,25 +84,76 @@ pub fn find_event_state_pda(program_id: &Address, event_id: &EventId) -> (Addres
    Address::find_program_address(&seeds, program_id)
 }
 
-/// Oracle PDA: `["oracle", market_id_wire]`, with `MarketId` wire bytes from `to_zc` (see `get_quote`).
 #[inline(always)]
-pub fn find_oracle_pda(program_id: &Address, market_id: &MarketId) -> (Address, u8) {
+pub fn verify_event_state_pda(
+   event_state_pda: &AccountView,
+   program_id: &Address,
+   event_id: &EventId,
+) -> Result<EventStateDataZc, ProgramError> {
+   if unlikely(!address_eq(event_state_pda.owner(), program_id)) {
+      return Err(ProgramError::InvalidAccountOwner);
+   }
+
+   let event_state_data = match event_state_pda.try_borrow() {
+      Ok(data) => data,
+      Err(_) => return Err(ProgramError::InvalidAccountData),
+   };
+
+   if unlikely(event_state_data.len() != EVENT_STATE_LEN) {
+      return Err(ProgramError::InvalidAccountData);
+   }
+
+   let state = match EventStateData::from_bytes(&event_state_data) {
+      Ok(s) => s,
+      Err(_) => return Err(ProgramError::InvalidAccountData),
+   };
+
+   if unlikely(state.discriminator != EVENT_STATE_DISCRIMINATOR) {
+      return Err(ProgramError::InvalidAccountData);
+   }
+
+   let event_id_wire = event_id.as_wire_bytes();
+   let expected_pda = Address::derive_address(
+      &[EVENT_STATE_SEED, event_id_wire.as_slice()],
+      Some(state.bump),
+      program_id,
+   );
+
+   if unlikely(!address_eq(event_state_pda.address(), &expected_pda)) {
+      return Err(ProgramError::InvalidSeeds);
+   }
+
+   let wire_event_id = EventId::from_zc(&state.event_id).ok_or(ProgramError::InvalidAccountData)?;
+   if unlikely(
+      wire_event_id.event != event_id.event
+         || wire_event_id.league != event_id.league
+         || wire_event_id.sport != event_id.sport,
+   ) {
+      return Err(ProgramError::InvalidAccountData);
+   }
+
+   Ok(*state)
+}
+
+/// Market-data PDA: `["market_data", market_id_wire]`, with `MarketId` wire bytes from `to_zc` (see `get_quote`).
+#[inline(always)]
+pub fn find_market_data_pda(program_id: &Address, market_id: &MarketId) -> (Address, u8) {
    let mut market_wire = [0u8; MarketId::WIRE_SIZE];
-   let zc = market_id.to_zc(true);
+   let zc = market_id.to_zc();
    unsafe {
       core::ptr::write(market_wire.as_mut_ptr().cast(), zc);
    }
-   let seeds: [&[u8]; 2] = [ORACLE_SEED, market_wire.as_slice()];
+   let seeds: [&[u8]; 2] = [MM_MARKET_DATA_PDA_SEED, market_wire.as_slice()];
    Address::find_program_address(&seeds, program_id)
 }
 
 #[inline(always)]
-pub fn mm_oracle_pda_ok(oracle: &AccountView, program_id: &Address, market_id: &MarketId) -> bool {
-   if unlikely(!address_eq(oracle.owner(), program_id)) {
+pub fn mm_market_data_pda_ok(market_data: &AccountView, program_id: &Address, market_id: &MarketId) -> bool {
+   if unlikely(!address_eq(market_data.owner(), program_id)) {
       return false;
    }
-   let (expected, _) = find_oracle_pda(program_id, market_id);
-   address_eq(oracle.address(), &expected)
+   let (expected, _) = find_market_data_pda(program_id, market_id);
+   address_eq(market_data.address(), &expected)
 }
 
 /// Event state PDA `["event_state", event_id]`, plus sequence and hash.
@@ -156,7 +205,7 @@ pub fn verify_event_state(
       return false;
    }
 
-   if unlikely(state.event_id.event_id != event_id.event_id
+   if unlikely(state.event_id.event != event_id.event
       || state.event_id.league != event_id.league
       || state.event_id.sport != event_id.sport)
    {
@@ -171,16 +220,11 @@ pub fn verify_event_state(
 pub fn close_pda_return_rent(
    pda: &mut AccountView,
    recipient: &mut AccountView,
-   signers: &[Signer],
 ) -> ProgramResult {
-   let lamports = pda.lamports();
-   if lamports > 0 {
-      Transfer {
-         from: pda,
-         to: recipient,
-         lamports,
-      }
-      .invoke_signed(signers)?;
-   }
+   let dest_lamports = recipient.lamports();
+   let pda_lamports = pda.lamports();
+
+   pda.set_lamports(0);
+   recipient.set_lamports(dest_lamports + pda_lamports);
    pda.close()
 }

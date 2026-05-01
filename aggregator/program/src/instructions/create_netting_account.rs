@@ -19,7 +19,7 @@ use crate::{
    ID,
    helpers::{get_rent_local, verify_mm_admin, verify_mm_program_executable, verify_signer, verify_system_program},
    state::{
-      EventId, NETTING_ACCOUNT_ALLOC_LEN, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_SEED, NettingPdaDataHeader
+      EventId, NETTING_ACCOUNT_ALLOC_LEN, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_SEED, account_netting::NettingPdaDataHeaderZc
    },
 };
 
@@ -94,20 +94,20 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    }
    .invoke_signed(&signers)?;
 
-   let header = NettingPdaDataHeader {
+   let header = NettingPdaDataHeaderZc {
       discriminator: NETTING_PDA_DISCRIMINATOR,
       bump,
-      event_id,
-      home: 0,
-      draw: 0,
-      away: 0,
+      event_id: event_id.to_zc(),
+      home: 0i64.into(),
+      draw: 0i64.into(),
+      away: 0i64.into(),
       number_of_lines: 0,
    };
    {
       let mut acc_data = netting_pda.try_borrow_mut()?;
       unsafe {
          core::ptr::write(
-            acc_data.as_mut_ptr().cast::<NettingPdaDataHeader>(),
+            acc_data.as_mut_ptr().cast::<NettingPdaDataHeaderZc>(),
             header,
          );
       }

@@ -1,5 +1,5 @@
 {
-  "name": "spamm-client",
+  "name": "spamm-aggregator-client",
   "module": "index.ts",
   "type": "module",
   "devDependencies": {

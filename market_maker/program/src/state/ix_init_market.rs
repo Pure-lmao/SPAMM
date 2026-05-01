@@ -7,7 +7,8 @@ use spamm_aggregator::state::MarketId;
 pub const INIT_MARKET_IX_DATA_MIN_LEN: usize = MarketId::WIRE_SIZE;
 
 /// Decoded from variable-length instruction data: `market_id` wire (26) then the oracle **body** bytes
-/// (copied to the account after the `u64` sequence prefix; body length sets account `space = 8 + n`).
+/// (copied to the account after the 8-byte oracle header; body length sets account `space = 8 + n`).
+#[repr(C)]
 pub struct InitMarketIxPayload<'a> {
    pub market_id: MarketId,
    pub oracle_body: &'a [u8],

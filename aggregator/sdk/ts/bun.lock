@@ -3,7 +3,7 @@
   "configVersion": 1,
   "workspaces": {
     "": {
-      "name": "@spamm/aggregator-sdk",
+      "name": "spamm-aggregator-sdk",
       "dependencies": {
         "@solana/kit": "^6.8.0",
       },

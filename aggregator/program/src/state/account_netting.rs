@@ -14,6 +14,7 @@ pub const NETTING_PDA_SEED: &[u8] = b"netting";
 pub const NETTING_PDA_DISCRIMINATOR: u8 = 5;
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct NettingPdaDataHeader {
    pub discriminator: u8,
    pub bump: u8,
@@ -26,6 +27,7 @@ pub struct NettingPdaDataHeader {
 
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct NettingLine {
    pub period: u8,
    pub mkt: u32,
@@ -42,12 +44,12 @@ pub const NETTING_DEFAULT_LINE_CAPACITY: usize = 10;
 pub const NETTING_ACCOUNT_ALLOC_LEN: usize =
    NETTING_HEADER_LEN + NETTING_DEFAULT_LINE_CAPACITY * NETTING_LINE_LEN;
 
-const NETTING_DISC_OFFSET: usize = offset_of!(NettingPdaDataHeader, discriminator);
-const NETTING_FT_OFFSET: usize = offset_of!(NettingPdaDataHeader, home);
-const NETTING_NUMBER_OF_LINES_OFFSET: usize = offset_of!(NettingPdaDataHeader, number_of_lines);
+const NETTING_DISC_OFFSET: usize = offset_of!(NettingPdaDataHeaderZc, discriminator);
+const NETTING_FT_OFFSET: usize = offset_of!(NettingPdaDataHeaderZc, home);
+const NETTING_NUMBER_OF_LINES_OFFSET: usize = offset_of!(NettingPdaDataHeaderZc, number_of_lines);
 
-const NETTING_LINE_PERIOD_OFFSET: usize = offset_of!(NettingLine, period);
-const NETTING_LINE_MKT_OFFSET: usize = offset_of!(NettingLine, mkt);
+const NETTING_LINE_PERIOD_OFFSET: usize = offset_of!(NettingLineZc, period);
+const NETTING_LINE_MKT_OFFSET: usize = offset_of!(NettingLineZc, mkt);
 
 /// `number_of_lines` from account data must not exceed table capacity, and the buffer must be at
 /// least the size allocated by `create_netting_account` so line indices stay in-bounds.
@@ -363,7 +365,7 @@ pub fn apply_netting(
    };
 
    let line_offset = lines_start + (line_idx * NETTING_LINE_LEN);
-   let side0_offset = line_offset + offset_of!(NettingLine, outcome_0);
+   let side0_offset = line_offset + offset_of!(NettingLineZc, outcome_0);
 
    let (mut side0, mut side1) = unsafe { read_i64_pair_unchecked(data.as_ptr(), side0_offset) };
 
@@ -423,3 +425,5 @@ fn max3(a: i64, b: i64, c: i64) -> i64 {
 // `NettingLine` packed on-chain size (period u8 + mkt u32 + outcome_0 i64 + outcome_1 i64).
 const _: () = assert!(NETTING_LINE_LEN == 21);
 const _: () = assert!(NETTING_HEADER_LEN == 40);
+const _: () = assert!(core::mem::size_of::<NettingPdaDataHeaderZc>() == NETTING_HEADER_LEN);
+const _: () = assert!(core::mem::size_of::<NettingLineZc>() == NETTING_LINE_LEN);

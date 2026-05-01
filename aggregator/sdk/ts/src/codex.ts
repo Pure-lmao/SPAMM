@@ -43,6 +43,7 @@ import {
    REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    SETTLE_BET_IX_DISCRIMINATOR,
    WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR,
+   WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR,
 } from './instructions.js';
 
 import {
@@ -181,14 +182,14 @@ const getBetResultU8Decoder = (): Decoder<BetResult> => transformDecoder(getU8De
 
 export const getEventIdEncoder = (): Encoder<EventId> =>
    getStructEncoder([
-      ['eventId', getU64Encoder()],
+      ['event', getU64Encoder()],
       ['league', getU32Encoder()],
       ['sport', getSportU8Encoder()],
    ]);
 
 export const getEventIdDecoder = (): Decoder<EventId> =>
    getStructDecoder([
-      ['eventId', getU64Decoder()],
+      ['event', getU64Decoder()],
       ['league', getU32Decoder()],
       ['sport', getSportU8Decoder()],
    ]);
@@ -642,6 +643,9 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
       case 'withdrawFromLiabilityAccount': {
          const p = getU64Encoder().encode(ix.amount);
          return concatDiscriminator(WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR, p);
+      }
+      case 'writeArbitraryData': {
+         return concatDiscriminator(WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR, ix.data);
       }
       case 'forceClosePda':
          return new Uint8Array([FORCE_CLOSE_PDA_IX_DISCRIMINATOR]);

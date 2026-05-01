@@ -1,0 +1,19 @@
+use pinocchio::{AccountView, ProgramResult, error::ProgramError};
+use pinocchio_log::log;
+use crate::{helpers::{verify_config_pda, verify_signer}, writers::write_arbitrary_bytes_unchecked};
+
+pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+   let [admin, config_pda, data_pda] = accounts else {
+      log!("write_arbitrary_data: accounts mismatch");
+      return Err(ProgramError::NotEnoughAccountKeys);
+   };
+
+   verify_signer(&admin)?;
+   verify_config_pda(&config_pda, true)?;
+
+   unsafe {
+      write_arbitrary_bytes_unchecked(data_pda.data_mut_ptr(), 0, data);
+   }
+
+   Ok(())
+}

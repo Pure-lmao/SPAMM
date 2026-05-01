@@ -6,6 +6,7 @@ use crate::state::MarketId;
 pub const FILL_QUOTE_IX_DISCRIMINATOR: u8 = 6;
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct FillQuoteIxData {
    pub instruction_discriminator: u8,
    pub amount_to_fill: u64,
@@ -26,7 +27,7 @@ impl FillQuoteIxData {
          instruction_discriminator: self.instruction_discriminator,
          amount_to_fill: self.amount_to_fill.into(),
          odds_scaled: self.odds_scaled.into(),
-         market_id: self.market_id.to_zc(false),
+         market_id: self.market_id.to_zc(),
          side: self.side,
          event_state_hash: self.event_state_hash,
          event_state_sequence: self.event_state_sequence.into(),

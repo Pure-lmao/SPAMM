@@ -4,4 +4,5 @@ This directory is a modified version of the `doppler` crate from:
 - Path in upstream: `doppler/` (library crate)
 
 The modifications are:
-- Added a bump to the account layout.
+- Account layout: `discriminator` + `bump` + `u32` sequence + oracle payload (aligned `u32` sequence).
+- Doppler `update_oracle` ix: `discriminator` + `u32` sequence + payload.

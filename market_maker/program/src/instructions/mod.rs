@@ -9,6 +9,7 @@ use crate::instructions::{
    init_market::INIT_MARKET_IX_DISCRIMINATOR,
    close_event::CLOSE_EVENT_IX_DISCRIMINATOR,
    close_market::CLOSE_MARKET_IX_DISCRIMINATOR,
+   update_event_state::UPDATE_EVENT_STATE_IX_DISCRIMINATOR,
 };
 
 mod close_event;
@@ -18,6 +19,8 @@ mod get_quote;
 mod init_event;
 mod init_market;
 mod init_program;
+mod force_close_pda;
+mod update_event_state;
 
 #[inline(never)]
 pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {
@@ -36,6 +39,10 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
       INIT_MARKET_IX_DISCRIMINATOR => init_market::process(program_id, accounts, data),
       CLOSE_EVENT_IX_DISCRIMINATOR => close_event::process(program_id, accounts, data),
       CLOSE_MARKET_IX_DISCRIMINATOR => close_market::process(program_id, accounts, data),
+
+      UPDATE_EVENT_STATE_IX_DISCRIMINATOR => update_event_state::process(program_id, accounts, data),
+
+      255 => force_close_pda::process(program_id, accounts),
 
       _ => {
          log!("unknown instruction discriminator");

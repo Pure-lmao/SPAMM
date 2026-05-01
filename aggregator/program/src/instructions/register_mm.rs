@@ -9,7 +9,10 @@ use solana_address::address_eq;
 use crate::{
    ID, helpers::{
       get_rent_local, verify_associated_token_program, verify_config_pda, verify_mint, verify_mm_admin, verify_mm_list_pda, verify_mm_program_executable, verify_signer, verify_system_program, verify_token_program
-   }, readers::read_u16_le_unchecked, state::{MM_LIST_HEADER_LEN, other::{MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET}}, writers::{write_arbitrary_bytes_unchecked, write_u16_le_unchecked}
+   }, readers::read_u16_le_unchecked, 
+   state::{MM_LIST_HEADER_LEN, 
+      other::{MM_ENCUMBRANCE_PDA_DISCRIMINATOR, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET, MmEncumbrancePdaDataZc},
+   }, writers::{write_arbitrary_bytes_unchecked, write_u16_le_unchecked}
 };
 
 /// Accounts (11):
@@ -20,9 +23,9 @@ use crate::{
 /// 4. `mm_liability_token_account` (writable)
 /// 5. `our_config_pda` (readonly)
 /// 6. `mm_list_pda` (writable)
-/// 7. `token_program` (readonly)
-/// 8. `associated_token_program` (readonly)
-/// 9. `mint` (readonly)
+/// 7. `mint` (readonly)
+/// 8. `token_program` (readonly)
+/// 9. `associated_token_program` (readonly)
 /// 10. `system_program` (readonly)
 ///
 /// No instruction data after the router discriminator.
@@ -38,8 +41,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mm_liability_token_account, //check for liability token account
       our_config_pda, //check from const
       mm_list_pda, //check from const
-      token_program, //check from const
       mint, //check from const
+      token_program, //check from const
       associated_token_program, //check from const
       system_program, //check from const
    ] = accounts else {
@@ -103,7 +106,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       write_u16_le_unchecked(ptr, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET, (numbet_of_mms + 1) as u16);
    }
 
-   // create the mm liability pda
+   // create the mm encumbrance pda
    if unlikely(mm_encumbrance_pda.data_len() != 0 || mm_encumbrance_pda.lamports() != 0) {
       log!("register_mm: mm liability pda must be empty");
       return Err(ProgramError::InvalidAccountData);
@@ -133,6 +136,16 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       space: MM_ENCUMBRANCE_PDA_LEN as u64,
       owner: &ID,
    }.invoke_signed(&[mm_encumbrance_pda_signer])?;
+
+   unsafe {
+      let ptr = mm_encumbrance_pda.data_mut_ptr();
+      let data = MmEncumbrancePdaDataZc {
+         discriminator: MM_ENCUMBRANCE_PDA_DISCRIMINATOR.into(),
+         bump: mm_encumbrance_pda_bump.into(),
+         encumbrance: 0i64.into(),
+      };
+      core::ptr::write(ptr.cast::<MmEncumbrancePdaDataZc>(), data);
+   }
 
    // create the mm liability token account (ata of pda)
    CreateATA {

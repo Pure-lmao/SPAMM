@@ -47,11 +47,10 @@ use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token::instructions::Transfer;
 use crate::{ID, 
    constants::MAX_NUMBER_OF_MMS, 
-   helpers::{calc_potential_profit, get_rent_local, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
+   helpers::{calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
    parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data, parse_quote_data}, 
    state::{
-      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::apply_netting, 
-      other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED}
+      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::apply_netting, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED}
    }, writers::write_i64_le_unchecked,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
@@ -68,6 +67,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       config_pda, //verified by verify_config_pda
       mint, //verified by verify_mint
       token_program, //verified by equ const
+      associated_token_program, //verified by equ const
       system_program, //verified by equ const
       mm_accounts @ ..,
    ] = accounts else {
@@ -84,6 +84,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_signer(&feepayer)?;
    verify_signer(&user)?;
    verify_token_program(&token_program)?;
+   verify_associated_token_program(&associated_token_program)?;
    verify_system_program(&system_program)?;
    verify_mint(&mint)?;
    verify_token_account(true, user_ata, user, mint, token_program)?;
@@ -143,6 +144,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          &mm_program_account,
       );
       if !is_valid_mm_config_pda {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid mm config pda");
          continue;
       }
 
@@ -151,6 +154,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          mm_program_account,
       );
       if !is_valid_quote_buffer {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid quote buffer");
          continue;
       }
 
@@ -160,6 +165,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          &market_id,
       );
       if !is_valid_market_data_pda {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid market data pda");
          continue;
       }
 
@@ -171,6 +178,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_program, 
       )?;
       if !is_valid_mm_token_account {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid mm token account");
          continue;
       }
 
@@ -178,6 +187,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          mm_encumbrance_pda,
          &mm_program_account,
       ) else {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid encumbrance pda");
          continue;
       };
 
@@ -189,6 +200,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_program, 
       )?;
       if !is_valid_mm_liability_token_account {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid mm liability token account");
          continue;
       }
 
@@ -200,6 +213,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          &event_state_sequence,
       );
       if !is_valid_event_state {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid event state");
          continue;
       }
 
@@ -209,6 +224,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          &market_id.event_id,
       );
       if !is_valid_mm_netting_pda {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid mm netting pda");
          continue;
       }
 
@@ -222,8 +239,16 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          event_state_hash,
          event_state_sequence,
       };
+
+      #[cfg(feature = "log")]
+      log!("fill_bet: get quote ix amount: {}", get_quote_ix_data.amount);
+      #[cfg(feature = "log")]
+      log!("fill_bet: get quote ix odds scaled: {}", get_quote_ix_data.odds_scaled);
+
       let mut get_quote_ix_buf = [0u8; GetQuoteIxData::WIRE_LEN];
       let Ok(()) = get_quote_ix_data.write_wire(&mut get_quote_ix_buf) else {
+         #[cfg(feature = "log")]
+         log!("fill_bet: invalid get quote ix data");
          continue;
       };
       let get_quote_ix_accounts = [
@@ -248,20 +273,32 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             mm_quote_buffer.as_ref(),
          ],
       ) else {
+         #[cfg(feature = "log")]
+         log!("fill_bet: failed to invoke get quote ix");
          continue;
       };
 
       let mut max_amount = 0;
       let mut odds_scaled = 0;
       let Some(return_data) = get_return_data() else {
+         #[cfg(feature = "log")]
+         log!("fill_bet: no return data");
          continue;
       };
+
       if likely(address_eq(return_data.program_id(), &mm_program_account.address())) {
          match parse_quote_data(return_data.as_slice()) {
             Ok(parsed) => (max_amount, odds_scaled) = parsed,
-            Err(_) => continue,
+            Err(_) => {
+               #[cfg(feature = "log")]
+               log!("fill_bet: invalid return data");
+               continue;
+            },
          }
       }
+
+      #[cfg(feature = "log")]
+      log!("fill_bet: max_amount: {}, odds_scaled: {}", max_amount, odds_scaled);
 
       if max_amount == 0 && odds_scaled == 0 {
          continue;
@@ -307,7 +344,11 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let mut bet_fillers = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
    for quote in valid_quotes.iter() {
       let remaining_amount = amount - filled_amount;
+      #[cfg(feature = "log")]
+      log!("fill_bet: remaining amount: {}", remaining_amount);
       if remaining_amount == 0 {
+         #[cfg(feature = "log")]
+         log!("fill_bet: remaining amount is 0, breaking out of loop");
          break;
       }
       let amount_to_fill = if quote.max_amount > remaining_amount {
@@ -316,6 +357,9 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          quote.max_amount
       };
 
+      #[cfg(feature = "log")]
+      log!("fill_bet: amount to fill: {}", amount_to_fill);
+
       // we know the amount to fill is > 0 because the quote amount of 0 is filtered out
       // and if the remaining amount is = 0 then we already broke out of the loop
 
@@ -323,18 +367,24 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       let Ok(mm_liability_account_balance_before) =
          get_token_account_balance(quote.mm_liability_token_account)
       else {
+         #[cfg(feature = "log")]
+         log!("fill_bet: failed to get mm liability account balance before");
          continue;
       };
 
       let Ok(mm_liability_account_balance_i64): Result<i64, _> =
          mm_liability_account_balance_before.try_into()
       else {
+         #[cfg(feature = "log")]
+         log!("fill_bet: failed to convert mm liability account balance before to i64");
          continue;
       };
 
       let mm_encumbrance_pda = &mut mm_accounts[quote.encumbrance_pda_index];
 
       let Ok(outstanding_liability) = get_encumbrance(&mm_encumbrance_pda) else {
+         #[cfg(feature = "log")]
+         log!("fill_bet: failed to get encumbrance");
          continue;
       };
 
@@ -356,6 +406,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       };
 
       let Ok(gross_margin_u64) = calc_potential_profit(amount_to_fill, quote.odds_scaled) else {
+         #[cfg(feature = "log")]
+         log!("fill_bet: failed to calc potential profit");
          continue;
       };
       let gross_margin_i64: i64 = match gross_margin_u64.try_into() {
@@ -413,6 +465,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          InstructionAccount::new(quote.mm_quote_buffer.address(), true, false),
          InstructionAccount::new(quote.mm_token_account.address(), true, false),
          InstructionAccount::new(quote.mm_liability_token_account.address(), true, false),
+         InstructionAccount::new(mint.address(), false, false),
+         InstructionAccount::new(token_program.address(), false, false),
       ];
 
       let fill_quote_invoke_accounts = [
@@ -422,6 +476,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          quote.mm_quote_buffer.as_ref(),
          quote.mm_token_account.as_ref(),
          quote.mm_liability_token_account.as_ref(),
+         mint.as_ref(),
+         token_program.as_ref(),
       ];
 
       let fill_quote_ix = InstructionView {
@@ -598,6 +654,7 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 /// Fill-bet instruction payload (bytes after the router `Instruction` discriminator in `lib.rs`).
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct FillBetIxData {
    pub bet_id: u64,
    pub market_id: MarketId,

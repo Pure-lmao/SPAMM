@@ -93,7 +93,7 @@ pub fn verify_mm_market_data_pda(mm_market_data_pda: &AccountView, mm_program_ac
    let bump = unsafe { 
       read_u8_unchecked(mm_market_data_pda.data_ptr(), MM_MARKET_DATA_PDA_BUMP_OFFSET) };
    let mut market_wire = [0u8; MarketId::WIRE_SIZE];
-   let zc = market_id.to_zc(true);
+   let zc = market_id.to_zc();
    unsafe {
       core::ptr::write(market_wire.as_mut_ptr().cast(), zc);
    }
@@ -404,10 +404,14 @@ pub fn verify_mm_admin(admin: &AccountView, mm_program_account: &AccountView, co
 
 pub fn verify_mm_encumbrance_pda(mm_encumbrance_pda: &AccountView, mm_program_account: &AccountView) -> Option<u8> {
    if unlikely(!address_eq(mm_encumbrance_pda.owner(), &ID)) {
+      #[cfg(feature = "log")]
+      log!("verify_mm_encumbrance_pda: encumbrance pda must be owned by the program");
       return None;
    }
 
    if unlikely(mm_encumbrance_pda.data_len() != MM_ENCUMBRANCE_PDA_LEN) {
+      #[cfg(feature = "log")]
+      log!("verify_mm_encumbrance_pda: encumbrance pda data length is invalid");
       return None;
    }
 
@@ -424,6 +428,8 @@ pub fn verify_mm_encumbrance_pda(mm_encumbrance_pda: &AccountView, mm_program_ac
    );
 
    if unlikely(!address_eq(mm_encumbrance_pda.address(), &expected_address)) {
+      #[cfg(feature = "log")]
+      log!("verify_mm_encumbrance_pda: encumbrance pda address does not match seeds");
       return None;
    }
 

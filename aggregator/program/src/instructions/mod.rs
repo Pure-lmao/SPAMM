@@ -28,7 +28,7 @@ mod settle_bet;
 mod change_config_status;
 mod force_close_pda;
 mod withdraw_from_liability_account;
-
+mod write_arbitrary_data;
 pub use fill_bet::FillBetIxData;
 
 #[inline(never)]
@@ -52,6 +52,7 @@ pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResu
 
       WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR => withdraw_from_liability_account::process(accounts, data),
 
+      254 => write_arbitrary_data::process(accounts, data),
       255 => force_close_pda::process(accounts),
       _ => {
          log!("unknown instruction discriminator: {}", d);

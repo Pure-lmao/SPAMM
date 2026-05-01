@@ -37,8 +37,9 @@ impl Sport {
 }
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct EventId {
-   pub event_id: u64,
+   pub event: u64,
    pub league: u32,
    pub sport: Sport,
 }
@@ -49,7 +50,7 @@ impl EventId {
    #[inline(always)]
    pub fn to_zc(self) -> EventIdZc {
       EventIdZc {
-         event_id: self.event_id.into(),
+         event: self.event.into(),
          league: self.league.into(),
          sport: self.sport.into(),
       }
@@ -58,7 +59,7 @@ impl EventId {
    #[inline(always)]
    pub fn from_zc(z: &EventIdZc) -> Option<Self> {
       Some(Self {
-         event_id: z.event_id.get(),
+         event: z.event.get(),
          league: z.league.get(),
          sport: Sport::try_from_wire_byte(z.sport.get())?,
       })
@@ -86,6 +87,7 @@ impl EventId {
 }
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct MarketId {
    pub event_id: EventId,
    pub player: u64,
@@ -103,7 +105,7 @@ impl MarketId {
    }
 
    #[inline(always)]
-   pub fn to_zc(self, _for_seed: bool) -> MarketIdZc {
+   pub fn to_zc(self) -> MarketIdZc {
       MarketIdZc {
          event_id: self.event_id.to_zc(),
          player: self.player.into(),

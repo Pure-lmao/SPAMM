@@ -9,13 +9,13 @@
 //! Instruction `data`: `event_id` (same as `init_event`)
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, address::address_eq, cpi::Seed, cpi::Signer,
+   AccountView, Address, ProgramResult, address::address_eq,
    error::ProgramError, hint::unlikely,
 };
 use pinocchio_log::log;
 use spamm_aggregator::helpers::{verify_signer, verify_system_program};
 use spamm_aggregator::readers::read_u8_unchecked;
-use spamm_aggregator::state::{EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED};
+use spamm_aggregator::state::{EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN};
 
 use crate::mm_helpers::{close_pda_return_rent, find_event_state_pda, verify_mm_config_auth};
 use crate::state::InitEventIxPayload;
@@ -64,14 +64,5 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       log!("close_event: bump mismatch");
       return Err(ProgramError::InvalidAccountData);   }
 
-   let event_id_wire = event_id.as_wire_bytes();
-   let b = [bump];
-   let signers_seeds = [
-      Seed::from(EVENT_STATE_SEED),
-      Seed::from(event_id_wire.as_slice()),
-      Seed::from(&b as &[u8]),
-   ];
-   let signers = [Signer::from(&signers_seeds)];
-
-   close_pda_return_rent(event_state_pda, auth, &signers)
+   close_pda_return_rent(event_state_pda, auth)
 }

@@ -25,6 +25,8 @@ pub fn process_instruction(
    instructions::dispatch(*discriminator, data, accounts)
 }
 
+pinocchio::nostd_panic_handler!();
+
 #[cfg(feature = "bpf-entrypoint")]
 mod bpf_entrypoint {
    use pinocchio::{AccountView, Address, ProgramResult};
@@ -32,7 +34,6 @@ mod bpf_entrypoint {
 
    pinocchio::program_entrypoint!(process_instruction);
    pinocchio::no_allocator!();
-   pinocchio::nostd_panic_handler!();
 
    fn process_instruction(
       _program_id: &Address,
@@ -42,3 +43,4 @@ mod bpf_entrypoint {
       route_instruction(accounts, instruction_data)
    }
 }
+

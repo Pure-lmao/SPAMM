@@ -52,6 +52,7 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 use crate::state::EventId;
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct AddLineToLiabilityNettingIxData {
    pub event_id: EventId,
    pub period: u8,

@@ -13,6 +13,8 @@ crate-type = ["cdylib", "lib"]
 default = ["bpf-entrypoint"]
 # Disable when consuming this crate as a library (avoids duplicate entrypoint symbols).
 bpf-entrypoint = []
+# Enables `pinocchio_log::log!` call sites gated by `#[cfg(feature = "log")]`.
+log = []
 # Mollusk SBF integration tests (`program/tests/*`). Requires `app_specific_delegated_vaults.so` in `target/deploy/`.
 test-sbf = []
 

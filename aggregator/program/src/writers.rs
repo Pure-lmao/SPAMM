@@ -1,6 +1,6 @@
 use core::ptr::write_unaligned;
 
-use crate::state::NettingLine;
+use crate::state::{NettingLine, NettingLineZc};
 
 #[inline(always)]
 pub unsafe fn write_u8_unchecked(ptr: *mut u8, offset: usize, value: u8) {
@@ -30,8 +30,14 @@ pub unsafe fn write_i64_le_unchecked(ptr: *mut u8, offset: usize, value: i64) {
 pub unsafe fn write_netting_line_unchecked(
    ptr: *mut u8, offset: usize, value: NettingLine
 ) {
-   // SAFETY: caller guarantees `offset..offset+size_of::<NettingLine>()` is in-bounds.
-   unsafe { write_unaligned(ptr.add(offset) as *mut NettingLine, value) };
+   let zc = NettingLineZc {
+      period: value.period,
+      mkt: value.mkt.into(),
+      outcome_0: value.outcome_0.into(),
+      outcome_1: value.outcome_1.into(),
+   };
+   // SAFETY: caller guarantees `offset..offset+NETTING_LINE_LEN` is in-bounds (`NettingLineZc` wire size).
+   unsafe { write_unaligned(ptr.add(offset) as *mut NettingLineZc, zc) };
 }
 
 #[inline(always)]

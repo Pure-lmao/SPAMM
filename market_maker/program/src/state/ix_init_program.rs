@@ -7,6 +7,7 @@ pub const INIT_PROGRAM_IX_DATA_LEN: usize = 32;
 
 /// Wire layout (minus the outer instruction discriminator):
 /// - `admin: [u8; 32]`
+#[repr(C)]
 pub struct InitProgramIxPayload {
    pub admin: Address,
 }

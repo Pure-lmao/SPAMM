@@ -10,6 +10,7 @@ pub const BET_ACCOUNT_SEED: &[u8] = b"bet";
 pub const BET_ACCOUNT_DISCRIMINATOR: u8 = 1;
 
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct BetFiller {
    pub mm_address: Address,
    pub amount: u64,
@@ -50,6 +51,7 @@ impl BetResult {
 /// Account body layout. [`zeropod`](https://github.com/blueshift-gg/zeropod) does not support
 /// `[T; N]` validation for nested `T`, so MM filler slots are five named fields instead of an array.
 #[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct BetAccountData {
    pub discriminator: u8,
    pub bump: u8,
@@ -95,7 +97,7 @@ impl BetAccountData {
          owner: self.owner,
          feepayer: self.feepayer,
          bet_id: self.bet_id.into(),
-         market_id: self.market_id.to_zc(false),
+         market_id: self.market_id.to_zc(),
          side: self.side,
          amount: self.amount.into(),
          payout: self.payout.into(),

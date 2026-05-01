@@ -17,7 +17,9 @@ use pinocchio_system::instructions::CreateAccount;
 
 use spamm_aggregator::helpers::get_rent_local;
 use spamm_aggregator::helpers::{verify_signer, verify_system_program};
-use spamm_aggregator::state::{EventStateData, EVENT_STATE_LEN, EVENT_STATE_SEED, EVENT_STATE_DISCRIMINATOR};
+use spamm_aggregator::state::{
+   EventStateDataZc, EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED,
+};
 
 use crate::mm_helpers::{find_event_state_pda, verify_mm_config_auth};
 
@@ -83,16 +85,16 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
          log!("init_event: event state data short");
          return Err(ProgramError::InvalidAccountData);
       }
-      let initial = EventStateData {
+      let initial = EventStateDataZc {
          discriminator: EVENT_STATE_DISCRIMINATOR,
-         event_id,
          bump,
-         sequence: 1,
+         event_id: event_id.to_zc(),
+         sequence: 1u16.into(),
          state_hash: [0u8; 32],
       };
       unsafe {
          core::ptr::write(
-            data.as_mut_ptr().cast::<EventStateData>(),
+            data.as_mut_ptr().cast::<EventStateDataZc>(),
             initial,
          );
       }

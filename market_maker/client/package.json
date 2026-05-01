@@ -1,0 +1,16 @@
+{
+  "name": "spamm-market-maker-client",
+  "module": "index.ts",
+  "type": "module",
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  },
+  "dependencies": {
+    "@solana/kit": "^6.8.0",
+    "spamm-market-maker-sdk": "file:../sdk/ts",
+    "spamm-aggregator-sdk": "file:../../aggregator/sdk/ts"
+  }
+}

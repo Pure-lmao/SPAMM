@@ -8,6 +8,7 @@ pub const INIT_EVENT_IX_DATA_LEN: usize = EventId::WIRE_SIZE;
 
 /// Wire layout (minus the outer instruction discriminator):
 /// - `event_id` (`EventId::WIRE_SIZE` bytes)
+#[repr(C)]
 pub struct InitEventIxPayload {
    pub event_id: EventId,
 }

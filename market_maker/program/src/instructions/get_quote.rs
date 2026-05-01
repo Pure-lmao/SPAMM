@@ -1,10 +1,10 @@
 //! CPI entry used by the aggregator (and RPC) to read a quote for one MM.
-//! Validates PDAs, event state, oracle layout, writes the quote buffer, sets return data (matches
+//! Validates PDAs, event state, market-data layout, writes the quote buffer, sets return data (matches
 //! [`spamm_aggregator::state::GetQuoteIxData`] wire after the router byte).
 //!
 //! Accounts **(5)** — must match aggregator CPI account order:
 //! 0. `user`
-//! 1. `mm_oracle_pda` — [`crate::mm_helpers::find_oracle_pda`]; layout `[u64 seq LE][u32 odds…]` (`init_market`)
+//! 1. `mm_market_data_pda` — [`crate::mm_helpers::find_market_data_pda`]; layout `[disc u8][bump u8][pad u8;2][u32 seq LE][u32 odds…]` (`init_market`)
 //! 2. `event_state_pda` — [`crate::mm_helpers::verify_event_state`]
 //! 3. `mm_config_pda` — MM `["config"]` PDA (validated; unused for pricing)
 //! 4. `mm_quote_buffer` — single program PDA [`crate::constants::MM_QUOTE_BUFFER_SEED`]
@@ -21,7 +21,7 @@
 
 use pinocchio::{AccountView, Address, ProgramResult, error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
-use crate::mm_helpers::{mm_oracle_pda_ok, verify_event_state, verify_mm_config_pda, verify_quote_buffer};
+use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state, verify_mm_config_pda, verify_quote_buffer};
 use zeropod::ZeroPodFixed;
 
 use crate::constants::MAX_QUOTE_STAKE_UNITS;
@@ -34,7 +34,7 @@ pub const GET_QUOTE_IX_DISCRIMINATOR: u8 = 5;
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       user,
-      mm_oracle_pda,
+      mm_market_data_pda,
       event_state_pda,
       mm_config_pda,
       mm_quote_buffer,
@@ -84,28 +84,28 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::InvalidAccountData);
    }
 
-   if unlikely(!mm_oracle_pda_ok(mm_oracle_pda, program_id, &market_id)) {
-      log!("get_quote: oracle pda invalid");
+   if unlikely(!mm_market_data_pda_ok(mm_market_data_pda, program_id, &market_id)) {
+      log!("get_quote: market data pda invalid");
       return Err(ProgramError::InvalidSeeds);
    }
 
-   let oracle_data = mm_oracle_pda.try_borrow()?;
-   if unlikely(oracle_data.len() < 8) {
-      log!("get_quote: oracle data too short (need sequence u64 + body)");
+   let market_data = mm_market_data_pda.try_borrow()?;
+   if unlikely(market_data.len() < 8) {
+      log!("get_quote: market data too short (need 8-byte oracle header + body)");
       return Err(ProgramError::InvalidAccountData);
    }
-   // Oracle: [u64 sequence LE][body]; odds start at byte 8 (`init_market`).
-   let body = &oracle_data[8..];
+   // Market data: [disc][bump][u32 seq][body]; odds start at byte 6 (`init_market`).
+   let body = &market_data[6..];
    let odds_scaled = if soccer_mkt_is_three_outcome_1x2_or_double_chance(&market_id) {
       if unlikely(body.len() < 12) {
-         log!("get_quote: oracle body needs 3 outcomes (3 x u32)");
+         log!("get_quote: market data body needs 3 outcomes (3 x u32)");
          return Err(ProgramError::InvalidAccountData);
       }
       u32_le_at(body, side as usize)
          .ok_or(ProgramError::InvalidAccountData)?
    } else {
       if unlikely(body.len() < 8) {
-         log!("get_quote: oracle body needs 2 outcomes (2 x u32)");
+         log!("get_quote: market data body needs 2 outcomes (2 x u32)");
          return Err(ProgramError::InvalidAccountData);
       }
       u32_le_at(body, side as usize)
@@ -113,6 +113,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    };
 
    let max_amount = MAX_QUOTE_STAKE_UNITS;
+   log!("get_quote: max_amount: {}, odds_scaled: {}", max_amount, odds_scaled);
    set_get_quote_return_data(max_amount, odds_scaled)?;
 
    let quote = MMQuoteBuffer {
@@ -137,7 +138,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    Ok(())
 }
 
-/// Soccer full-time 3-way (`mkt` 1) and NOT-home / NOT-draw / NOT-away (`mkt` 5): three `u32` odds in the oracle body; `side` picks the word.
+/// Soccer Full-Time (`mkt` 1) and Double Chance (`mkt` 5): three `u32` odds in the market-data body; `side` picks the word.
 #[inline(always)]
 fn soccer_mkt_is_three_outcome_1x2_or_double_chance(m: &MarketId) -> bool {
    m.event_id.sport == Sport::Soccer && matches!(m.mkt, 1 | 5)
