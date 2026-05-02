@@ -853,3 +853,6 @@ The **aggregator API** is responsible for providing **event and market ids** and
 Since the aggregator **checks quotes at execution-time** and only selects the **best valid quotes**, **spoofing** quote responses to the client at the tx-building stage is **pointless**.
 
 Everyone must trust that the **aggregator program** will **not** be upgraded to a **malicious version** that will steal the funds in **pending bets** and the **liability token accounts**.
+
+### Token
+There is no token. I'm only saying this because I have had people made a token claiming to be a previous project and hopefully this stops it happening here. 
