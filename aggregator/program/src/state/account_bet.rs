@@ -77,7 +77,7 @@ pub const BET_RESULT_OFFSET: usize = 152;
 
 impl BetFiller {
    #[inline(always)]
-   fn to_zc(self) -> BetFillerZc {
+   pub(crate) fn to_zc(self) -> BetFillerZc {
       BetFillerZc {
          mm_address: self.mm_address,
          amount: self.amount.into(),
@@ -143,7 +143,7 @@ impl BetAccountData {
          payout: zc.payout.get(),
          event_state_sequence: zc.event_state_sequence.get(),
          event_state_hash: zc.event_state_hash,
-         result: BetResult::from_u8(zc.result.get()) ,
+         result: BetResult::from_u8(zc.result.get()),
          filler_0: BetFiller {
             mm_address: zc.filler_0.mm_address,
             amount: zc.filler_0.amount.get(),

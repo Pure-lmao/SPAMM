@@ -26,9 +26,14 @@ export const ODDS_SCALE = 10000n;
 /** `constants::MAX_NUMBER_OF_MMS` */
 export const MAX_NUMBER_OF_MMS = 5;
 
+/** `constants::MAX_PARLAY_LEGS` */
+export const MAX_PARLAY_LEGS = 5;
+
 export const CONFIG_PDA_SEED = 'config' as const;
 export const MM_LIST_PDA_SEED = 'mm_list' as const;
 export const BET_ACCOUNT_SEED = 'bet' as const;
+/** Parlay bet PDA first seed (`aggregator::state::account_parlay_bet::PARLAY_BET_ACCOUNT_SEED`). */
+export const PARLAY_BET_ACCOUNT_SEED = 'parlay' as const;
 export const NETTING_PDA_SEED = 'netting' as const;
 export const MM_ENCUMBRANCE_PDA_SEED = 'encumbrance' as const;
 export const MM_ACCOUNT_CONFIG_SEED = 'config' as const;
@@ -37,3 +42,6 @@ export const MM_MARKET_DATA_PDA_SEED = 'market_data' as const;
 
 /** MM program quote buffer PDA (single account per MM program; see `market_maker` `init_program`). */
 export const MM_QUOTE_BUFFER_SEED = 'mm_quote_buffer' as const;
+
+/** MM program parlay quote buffer PDA (`market_maker::constants::MM_PARLAY_QUOTE_BUFFER_SEED`). */
+export const MM_PARLAY_QUOTE_BUFFER_SEED = 'mm_parlay_quote_buffer' as const;

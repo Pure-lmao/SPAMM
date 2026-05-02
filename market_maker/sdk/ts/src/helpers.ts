@@ -5,6 +5,7 @@ import {
    MINT_ID,
    MM_ACCOUNT_CONFIG_SEED,
    MM_MARKET_DATA_PDA_SEED,
+   MM_PARLAY_QUOTE_BUFFER_SEED,
    MM_QUOTE_BUFFER_SEED,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    SPL_TOKEN_PROGRAM_ID,
@@ -26,6 +27,15 @@ export async function getMmQuoteBufferPda(mmProgramId: Address): Promise<readonl
    return await getProgramDerivedAddress({
       programAddress: mmProgramId,
       seeds: [MM_QUOTE_BUFFER_SEED],
+   });
+}
+
+export async function getMmParlayQuoteBufferPda(
+   mmProgramId: Address,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: mmProgramId,
+      seeds: [MM_PARLAY_QUOTE_BUFFER_SEED],
    });
 }
 

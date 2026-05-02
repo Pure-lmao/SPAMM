@@ -34,7 +34,7 @@ pub const MM_LIST_PDA_NUMBER_OF_MMS_OFFSET: usize = 1;
 const _: () = assert!(MM_LIST_HEADER_LEN == 3);
 
 pub const EVENT_STATE_SEED: &[u8] = b"event_state";
-pub const EVENT_STATE_DISCRIMINATOR: u8 = 3;
+pub const EVENT_STATE_DISCRIMINATOR: u8 = 4;
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
@@ -64,7 +64,7 @@ pub const MM_MARKET_DATA_PDA_BUMP_OFFSET: usize = 1;
 
 
 pub const MM_ENCUMBRANCE_PDA_SEED: &[u8] = b"encumbrance";
-pub const MM_ENCUMBRANCE_PDA_DISCRIMINATOR: u8 = 4;
+pub const MM_ENCUMBRANCE_PDA_DISCRIMINATOR: u8 = 5;
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
 pub struct MmEncumbrancePdaData {

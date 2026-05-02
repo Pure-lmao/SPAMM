@@ -20,7 +20,7 @@ parsers::{get_encumbrance, get_token_account_balance},
 readers::read_u64_le_unchecked, state::other::MM_ENCUMBRANCE_PDA_SEED};
 
 
-pub const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR: u8 = 10;
+pub const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR: u8 = 100;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 

@@ -25,11 +25,11 @@ use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state};
 use zeropod::ZeroPodFixed;
 
 use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, QUOTE_BUFFER_PDA};
+use crate::instructions::quote_helpers::odds_from_market_data_body;
 use crate::state::{GetQuoteIxPayload, GetQuoteReturnWire};
 use spamm_aggregator::state::mm_quote::MM_QUOTE_BUFFER_DISCRIMINATOR;
-use spamm_aggregator::state::{MarketId, Sport, MMQuoteBuffer, MM_QUOTE_BUFFER_LEN};
-
-pub const GET_QUOTE_IX_DISCRIMINATOR: u8 = 5;
+use spamm_aggregator::state::{MMQuoteBuffer, MM_QUOTE_BUFFER_LEN};
+pub use spamm_aggregator::state::GET_QUOTE_IX_DISCRIMINATOR;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -96,24 +96,11 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    }
    // Market data: [disc][bump][u32 seq][body]; odds start at byte 6 (`init_market`).
    let body = &market_data[6..];
-   let odds_scaled = if soccer_mkt_is_three_outcome_1x2_or_double_chance(&market_id) {
-      if unlikely(body.len() < 12) {
-         log!("get_quote: market data body needs 3 outcomes (3 x u32)");
-         return Err(ProgramError::InvalidAccountData);
-      }
-      u32_le_at(body, side as usize)
-         .ok_or(ProgramError::InvalidAccountData)?
-   } else {
-      if unlikely(body.len() < 8) {
-         log!("get_quote: market data body needs 2 outcomes (2 x u32)");
-         return Err(ProgramError::InvalidAccountData);
-      }
-      u32_le_at(body, side as usize)
-         .ok_or(ProgramError::InvalidAccountData)?
-   };
+   let odds_scaled = odds_from_market_data_body(&market_id, body, side)?;
 
    let max_amount = MAX_QUOTE_STAKE_UNITS;
-   log!("get_quote: max_amount: {}, odds_scaled: {}", max_amount, odds_scaled);
+   log!("get_quote: max_amount: {}, odds_scaled: {} (min_odds_scaled {})", 
+      max_amount, odds_scaled, parsed_data.odds_scaled);
    set_get_quote_return_data(max_amount, odds_scaled)?;
 
    let quote = MMQuoteBuffer {
@@ -136,19 +123,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    quote.write_wire(&mut buf)?;
 
    Ok(())
-}
-
-/// Soccer Full-Time (`mkt` 1) and Double Chance (`mkt` 5): three `u32` odds in the market-data body; `side` picks the word.
-#[inline(always)]
-fn soccer_mkt_is_three_outcome_1x2_or_double_chance(m: &MarketId) -> bool {
-   m.event_id.sport == Sport::Soccer && matches!(m.mkt, 1 | 5)
-}
-
-#[inline(always)]
-fn u32_le_at(slice: &[u8], word_index: usize) -> Option<u32> {
-   let off = word_index.checked_mul(4)?;
-   let b: [u8; 4] = slice.get(off..off + 4)?.try_into().ok()?;
-   Some(u32::from_le_bytes(b))
 }
 
 #[inline(always)]

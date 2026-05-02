@@ -1,5 +1,14 @@
 import { ODDS_SCALE } from './constants.js';
-import { Sport, type EventId, type GetQuoteIxData, type MarketId } from './types.js';
+import {
+   MAX_PARLAY_LEGS,
+   Sport,
+   type EventId,
+   type FillParlayQuoteIxData,
+   type GetQuoteIxData,
+   type GetQuoteParlayIxData,
+   type MarketId,
+   type ParlayLegWire,
+} from './types.js';
 
 const U8_MAX = 255;
 export const U16_MAX = 65535;
@@ -105,6 +114,48 @@ export function validateGetQuoteIxData(data: GetQuoteIxData, label = 'getQuote')
    if (data.eventStateHash.byteLength !== 32) {
       throw new RangeError(`${label}.eventStateHash must be 32 bytes`);
    }
+}
+
+export function validateParlayLegWire(leg: ParlayLegWire, label: string): void {
+   validateMarketId(leg.marketId, `${label}.marketId`);
+   validateBetSide(leg.side, leg.marketId.mkt, `${label}.side`);
+   validateU16(leg.eventStateSequence, `${label}.eventStateSequence`);
+   if (leg.eventStateSequence === 0) {
+      throw new RangeError(`${label}.eventStateSequence must be > 0`);
+   }
+   if (leg.eventStateHash.byteLength !== 32) {
+      throw new RangeError(`${label}.eventStateHash must be 32 bytes`);
+   }
+}
+
+export function validateGetQuoteParlayIxData(ix: GetQuoteParlayIxData, label = 'getQuoteParlay'): void {
+   validatePositiveU64(ix.amount, `${label}.amount`);
+   validateOdds(ix.oddsScaled, `${label}.oddsScaled`);
+   validateU8(ix.numLegs, `${label}.numLegs`);
+   if (ix.numLegs < 2 || ix.numLegs > MAX_PARLAY_LEGS) {
+      throw new RangeError(`${label}.numLegs must be in [2, ${MAX_PARLAY_LEGS}]`);
+   }
+   if (ix.legs.length !== ix.numLegs) {
+      throw new RangeError(`${label}.legs.length must equal numLegs`);
+   }
+   for (let i = 0; i < ix.legs.length; i++) {
+      validateParlayLegWire(ix.legs[i]!, `${label}.legs[${i}]`);
+   }
+   for (let i = 0; i < ix.legs.length; i++) {
+      for (let j = i + 1; j < ix.legs.length; j++) {
+         const ei = ix.legs[i]!.marketId.eventId;
+         const ej = ix.legs[j]!.marketId.eventId;
+         if (ei.event === ej.event && ei.league === ej.league && ei.sport === ej.sport) {
+            throw new RangeError(`${label}: parlay legs must be on distinct events`);
+         }
+      }
+   }
+}
+
+export function validateFillParlayQuoteIxData(ix: FillParlayQuoteIxData, label = 'fillParlayQuote'): void {
+   validatePositiveU64(ix.amountToFill, `${label}.amountToFill`);
+   validateOdds(ix.oddsScaled, `${label}.oddsScaled`);
+   validateU64(ix.amountToSend, `${label}.amountToSend`);
 }
 
 export function validateOdds(odds: bigint, label = 'odds'): void {

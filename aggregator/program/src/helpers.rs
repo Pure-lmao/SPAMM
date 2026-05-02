@@ -15,7 +15,7 @@ use crate::{
    parsers::get_token_account_balance,
    readers::{read_address_unchecked, read_u8_unchecked},
    state::{
-      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, MM_ACCOUNT_CONFIG_SEED, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
+      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, MM_ACCOUNT_CONFIG_SEED, MM_QUOTE_BUFFER_LEN, MM_PARLAY_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
          CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_STATUS_OFFSET, MM_ENCUMBRANCE_PDA_BUMP_OFFSET, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED
       }
    },
@@ -288,6 +288,23 @@ pub fn verify_quote_buffer(
    }
 
    return true;
+}
+
+/// Parlay quote buffer: MM-owned PDA with [`MM_PARLAY_QUOTE_BUFFER_LEN`] bytes (see `mm_parlay_quote`).
+#[inline(always)]
+pub fn verify_parlay_quote_buffer(
+   quote_buffer: &AccountView,
+   mm_program_account: &AccountView
+) -> bool {
+   if unlikely(!address_eq(quote_buffer.owner(), mm_program_account.address())) {
+      return false;
+   }
+
+   if unlikely(quote_buffer.data_len() != MM_PARLAY_QUOTE_BUFFER_LEN) {
+      return false;
+   }
+
+   true
 }
 
 pub fn verify_event_state(

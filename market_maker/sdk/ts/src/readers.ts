@@ -7,10 +7,25 @@ import {
    decodeEventStateData,
    decodeMmAccountConfig,
    decodeMmOracleMarketData,
+   decodeMmParlayQuoteBuffer,
    decodeMmQuoteBuffer,
 } from './codex.js';
-import { getEventStatePda, getMmConfigPda, getMmMarketDataPda, getMmQuoteBufferPda } from './helpers.js';
-import type { EventId, EventStateData, MarketId, MmAccountConfig, MmOracleMarketData, MmQuoteBuffer } from './types.js';
+import {
+   getEventStatePda,
+   getMmConfigPda,
+   getMmMarketDataPda,
+   getMmParlayQuoteBufferPda,
+   getMmQuoteBufferPda,
+} from './helpers.js';
+import type {
+   EventId,
+   EventStateData,
+   MarketId,
+   MmAccountConfig,
+   MmOracleMarketData,
+   MmParlayQuoteBuffer,
+   MmQuoteBuffer,
+} from './types.js';
 
 export type ProgramAccountRaw = Readonly<{
    address: Address;
@@ -112,6 +127,18 @@ export async function getMmQuoteBufferData(rpc: Rpc<SolanaRpcApi>, mmProgramId: 
    return decodeMmQuoteBuffer(raw);
 }
 
+export async function getMmParlayQuoteBufferData(
+   rpc: Rpc<SolanaRpcApi>,
+   mmProgramId: Address,
+): Promise<MmParlayQuoteBuffer> {
+   const [addr] = await getMmParlayQuoteBufferPda(mmProgramId);
+   const raw = await readAccountDataRaw(rpc, addr);
+   if (raw === null) {
+      throw new Error('MM parlay quote buffer account not found');
+   }
+   return decodeMmParlayQuoteBuffer(raw);
+}
+
 export async function getMmEventStateData(
    rpc: Rpc<SolanaRpcApi>,
    mmProgramId: Address,
@@ -132,7 +159,6 @@ export async function getMmMarketData(
 ): Promise<MmOracleMarketData> {
    const [addr] = await getMmMarketDataPda(mmProgramId, marketId);
    const raw = await readAccountDataRaw(rpc, addr);
-   console.log(raw)
    if (raw === null) {
       throw new Error('MM market data account not found');
    }

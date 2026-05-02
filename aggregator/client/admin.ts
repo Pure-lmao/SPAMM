@@ -1,4 +1,4 @@
-import { getBetPda, getChangeConfigStatusIx, getEventHash, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getWriteArbitraryDataIx } from "spamm-aggregator-sdk";
+import { getBetPda, getChangeConfigStatusIx, getEventHash, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getParlayBetPda, getWriteArbitraryDataIx } from "spamm-aggregator-sdk";
 import { loadKeypairSignerFromJsonFile } from "utils";
 import { sendAndConfirmInstructions } from "./txSend.ts"
 import type { Address } from "@solana/kit";
@@ -26,17 +26,19 @@ async function gradeBets(bets: Address[], results: Uint8Array) {
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-// gradeBets([
-//    (await getBetPda(USER_SIGNER.address, 1n))[0],
-//    // (await getBetPda(USER_SIGNER.address, 2n))[0],
-// ], new Uint8Array([2])).catch(console.error);
+gradeBets([
+   (await getParlayBetPda(USER_SIGNER.address, 10n))[0],
+   (await getParlayBetPda(USER_SIGNER.address, 11n))[0],
+], new Uint8Array([1, 2])).catch(console.error);
+
 
 async function forceClosePda(pda: Address) {
    const ix = await getForceClosePdaIx(ADMIN_SIGNER.address, pda);
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-// forceClosePda("Bn6sY4UfrjK9qArranJRa6fqmZhhDet9T1wRoEwRAajm" as Address).catch(console.error);
+// const [parlayPda] = await getParlayBetPda(USER_SIGNER.address, 2n);
+// forceClosePda(parlayPda).catch(console.error);
 
 async function writeArbitraryData(
    account: Address,

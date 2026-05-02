@@ -6,8 +6,10 @@ use crate::instructions::{
    change_config_status::CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR,
    register_mm::REGISTER_MM_IX_DISCRIMINATOR,
    fill_bet::FILL_BET_IX_DISCRIMINATOR,
+   fill_parlay::FILL_PARLAY_IX_DISCRIMINATOR,
    grade_bets::GRADE_BETS_IX_DISCRIMINATOR,
    settle_bet::SETTLE_BET_IX_DISCRIMINATOR,
+   settle_parlay::SETTLE_PARLAY_IX_DISCRIMINATOR,
    create_netting_account::CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    add_line_to_netting_account::ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR, 
    remove_line_from_netting_account::REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR,
@@ -18,6 +20,8 @@ use crate::instructions::{
 
 mod init_program;
 mod fill_bet;
+mod fill_helpers;
+mod fill_parlay;
 mod create_netting_account;
 mod close_netting_account;
 mod remove_line_from_netting_account;
@@ -25,11 +29,13 @@ mod add_line_to_netting_account;
 mod register_mm;
 mod grade_bets;
 mod settle_bet;
+mod settle_parlay;
 mod change_config_status;
 mod force_close_pda;
 mod withdraw_from_liability_account;
 mod write_arbitrary_data;
 pub use fill_bet::FillBetIxData;
+pub use fill_parlay::FillParlayIxData;
 
 #[inline(never)]
 pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {
@@ -41,8 +47,10 @@ pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResu
 
       //bets
       FILL_BET_IX_DISCRIMINATOR => fill_bet::fill_bet(accounts, data),
+      FILL_PARLAY_IX_DISCRIMINATOR => fill_parlay::fill_parlay(accounts, data),
       GRADE_BETS_IX_DISCRIMINATOR => grade_bets::process(accounts, data),
       SETTLE_BET_IX_DISCRIMINATOR => settle_bet::process(accounts),
+      SETTLE_PARLAY_IX_DISCRIMINATOR => settle_parlay::process(accounts),
 
       // netting PDA (per-event netting state)
       CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR => create_netting_account::process(accounts, data),

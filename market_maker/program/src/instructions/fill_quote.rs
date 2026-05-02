@@ -25,7 +25,7 @@ use spamm_aggregator::state::{MM_ACCOUNT_CONFIG_SEED, MMQuoteBuffer, MM_QUOTE_BU
 /// `MMQuoteBuffer::is_used` byte offset in the wire buffer (after `discriminator`).
 const IS_USED_OFFSET: usize = 1;
 
-pub const FILL_QUOTE_IX_DISCRIMINATOR: u8 = 6;
+pub use spamm_aggregator::state::FILL_QUOTE_IX_DISCRIMINATOR;
 
 pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [

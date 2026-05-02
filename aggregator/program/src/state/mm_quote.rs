@@ -17,6 +17,19 @@ pub struct MMQuote<'a> {
    pub mm_liability_token_account: &'a AccountView,
 }
 
+/// Collected MM quote for a parlay fill (no netting PDA).
+pub struct MMQuoteParlay<'a> {
+   pub max_amount: u64,
+   pub odds_scaled: u32,
+   pub mm_address: Address,
+   pub mm_token_account: &'a AccountView,
+   pub mm_parlay_quote_buffer: &'a AccountView,
+   pub mm_config_pda: &'a AccountView,
+   pub encumbrance_pda_index: usize,
+   pub encumbrance_pda_bump: u8,
+   pub mm_liability_token_account: &'a AccountView,
+}
+
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]

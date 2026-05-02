@@ -25,5 +25,6 @@ export const ODDS_SCALE = 10000n;
 
 export const MM_ACCOUNT_CONFIG_SEED = 'config' as const;
 export const MM_QUOTE_BUFFER_SEED = 'mm_quote_buffer' as const;
+export const MM_PARLAY_QUOTE_BUFFER_SEED = 'mm_parlay_quote_buffer' as const;
 export const EVENT_STATE_SEED = 'event_state' as const;
 export const MM_MARKET_DATA_PDA_SEED = 'market_data' as const;

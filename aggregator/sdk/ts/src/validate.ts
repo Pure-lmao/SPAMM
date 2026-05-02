@@ -1,5 +1,14 @@
 import { ODDS_SCALE } from './constants.js';
-import { BetResult, Sport, type EventId, type FillBetIxData, type MarketId } from './types.js';
+import {
+   MAX_PARLAY_LEGS,
+   BetResult,
+   Sport,
+   type EventId,
+   type FillBetIxData,
+   type FillParlayIxData,
+   type MarketId,
+   type ParlayLegWire,
+} from './types.js';
 
 const U8_MAX = 255;
 export const U16_MAX = 65535;
@@ -113,6 +122,77 @@ export function validateFillBetIxData(data: FillBetIxData, label = 'fillBet'): v
    }
    if (data.eventStateHash.byteLength !== 32) {
       throw new RangeError(`${label}.eventStateHash must be 32 bytes`);
+   }
+}
+
+export function validateParlayLegWire(leg: ParlayLegWire, label: string): void {
+   validateMarketId(leg.marketId, `${label}.marketId`);
+   validateBetSide(leg.side, leg.marketId.mkt, `${label}.side`);
+   validateU16(leg.eventStateSequence, `${label}.eventStateSequence`);
+   if (leg.eventStateSequence === 0) {
+      throw new RangeError(`${label}.eventStateSequence must be > 0`);
+   }
+   if (leg.eventStateHash.byteLength !== 32) {
+      throw new RangeError(`${label}.eventStateHash must be 32 bytes`);
+   }
+}
+
+/** Validates fields used by MM `get_quote_parlay` / CPI payload (distinct events, odds hint, legs). */
+export function validateGetQuoteParlayIxData(
+   ix: { amount: bigint; oddsScaled: bigint; numLegs: number; legs: readonly ParlayLegWire[] },
+   label = 'getQuoteParlay',
+): void {
+   validatePositiveU64(ix.amount, `${label}.amount`);
+   validateU32Bigint(ix.oddsScaled, `${label}.oddsScaled`);
+   if (ix.oddsScaled <= ODDS_SCALE) {
+      throw new RangeError(`${label}.oddsScaled must be > ODDS_SCALE (${ODDS_SCALE})`);
+   }
+   validateU8(ix.numLegs, `${label}.numLegs`);
+   if (ix.numLegs < 2 || ix.numLegs > MAX_PARLAY_LEGS) {
+      throw new RangeError(`${label}.numLegs must be in [2, ${MAX_PARLAY_LEGS}]`);
+   }
+   if (ix.legs.length !== ix.numLegs) {
+      throw new RangeError(`${label}.legs.length must equal numLegs`);
+   }
+   for (let i = 0; i < ix.legs.length; i++) {
+      validateParlayLegWire(ix.legs[i]!, `${label}.legs[${i}]`);
+   }
+   for (let i = 0; i < ix.legs.length; i++) {
+      for (let j = i + 1; j < ix.legs.length; j++) {
+         const ei = ix.legs[i]!.marketId.eventId;
+         const ej = ix.legs[j]!.marketId.eventId;
+         if (ei.event === ej.event && ei.league === ej.league && ei.sport === ej.sport) {
+            throw new RangeError(`${label}: parlay legs must be on distinct events`);
+         }
+      }
+   }
+}
+
+export function validateFillParlayIxData(data: FillParlayIxData, label = 'fillParlay'): void {
+   validatePositiveU64(data.betId, `${label}.betId`);
+   validatePositiveU64(data.amount, `${label}.amount`);
+   validateU32Bigint(data.minOddsScaled, `${label}.minOddsScaled`);
+   if (data.minOddsScaled <= ODDS_SCALE) {
+      throw new RangeError(`${label}.minOddsScaled must be > ODDS_SCALE (${ODDS_SCALE})`);
+   }
+   validateU8(data.numLegs, `${label}.numLegs`);
+   if (data.numLegs < 2 || data.numLegs > MAX_PARLAY_LEGS) {
+      throw new RangeError(`${label}.numLegs must be in [2, ${MAX_PARLAY_LEGS}]`);
+   }
+   if (data.legs.length !== data.numLegs) {
+      throw new RangeError(`${label}.legs.length must equal numLegs`);
+   }
+   for (let i = 0; i < data.legs.length; i++) {
+      validateParlayLegWire(data.legs[i]!, `${label}.legs[${i}]`);
+   }
+   for (let i = 0; i < data.legs.length; i++) {
+      for (let j = i + 1; j < data.legs.length; j++) {
+         const ei = data.legs[i]!.marketId.eventId;
+         const ej = data.legs[j]!.marketId.eventId;
+         if (ei.event === ej.event && ei.league === ej.league && ei.sport === ej.sport) {
+            throw new RangeError(`${label}: parlay legs must be on distinct events`);
+         }
+      }
    }
 }
 

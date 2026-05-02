@@ -2,6 +2,11 @@ use pinocchio::Address;
 
 pub const MAX_NUMBER_OF_MMS: usize = 5;
 
+/// Max legs per parlay (quote buffer, fill ix wire, and on-chain parlay bet account).
+pub const MAX_PARLAY_LEGS: usize = 5;
+
+pub const MAX_PARLAY_QUOTE_CPI_ACCOUNTS: usize = 3 + 2 * MAX_PARLAY_LEGS;
+
 pub const ODDS_SCALE: u128 = 10000;
 
 // 5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H

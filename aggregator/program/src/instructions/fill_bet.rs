@@ -38,7 +38,7 @@
 use core::mem::MaybeUninit;
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer, get_return_data, invoke}, error::ProgramError, hint::{likely, unlikely}, instruction::{InstructionAccount, InstructionView}
+   AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer, invoke}, error::ProgramError, hint::unlikely, instruction::{InstructionAccount, InstructionView}
 };
 
 use pinocchio_associated_token_account::instructions::Create;
@@ -48,9 +48,10 @@ use pinocchio_token::instructions::Transfer;
 use crate::{ID, 
    constants::MAX_NUMBER_OF_MMS, 
    helpers::{calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
-   parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data, parse_quote_data}, 
+   instructions::fill_helpers::{parse_quote_return_for_mm, refund_liability_deposit_mismatch},
+   parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data}, 
    state::{
-      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::apply_netting, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED}
+      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::apply_netting, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET}
    }, writers::write_i64_le_unchecked,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
@@ -280,21 +281,8 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
       let mut max_amount = 0;
       let mut odds_scaled = 0;
-      let Some(return_data) = get_return_data() else {
-         #[cfg(feature = "log")]
-         log!("fill_bet: no return data");
-         continue;
-      };
-
-      if likely(address_eq(return_data.program_id(), &mm_program_account.address())) {
-         match parse_quote_data(return_data.as_slice()) {
-            Ok(parsed) => (max_amount, odds_scaled) = parsed,
-            Err(_) => {
-               #[cfg(feature = "log")]
-               log!("fill_bet: invalid return data");
-               continue;
-            },
-         }
+      if let Some(parsed) = parse_quote_return_for_mm(mm_program_account) {
+         (max_amount, odds_scaled) = parsed;
       }
 
       #[cfg(feature = "log")]
@@ -506,20 +494,15 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       };
 
       if unlikely(mm_liability_token_account_increase != amount_to_send) {
-         let mm_encumbrance_pda_bump_seed = &[quote.encumbrance_pda_bump];
-         let mm_encumbrance_pda_signer_seed = [
-            Seed::from(MM_ENCUMBRANCE_PDA_SEED),
-            Seed::from(quote.mm_address.as_ref()),
-            Seed::from(mm_encumbrance_pda_bump_seed)
-         ];
-         let mm_encumbrance_pda_signer = [Signer::from(&mm_encumbrance_pda_signer_seed)];
-         Transfer::new(
+         refund_liability_deposit_mismatch(
+            mm_encumbrance_pda,
+            quote.encumbrance_pda_bump,
+            quote.mm_address,
             quote.mm_liability_token_account,
             quote.mm_token_account,
-            mm_encumbrance_pda,
+            amount_to_send,
             mm_liability_token_account_increase,
-         ).invoke_signed(&mm_encumbrance_pda_signer)?;
-         continue;
+         )?;
       }
       
       unsafe {
@@ -610,12 +593,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       lamports,
       space: BET_ACCOUNT_LEN,
       owner: &ID,
-   }
-   .invoke_signed(&bet_pda_signers)
-   .map_err(|e| {
-      log!("create_user_vault: create account failed");
-      e
-   })?;
+   }.invoke_signed(&bet_pda_signers)?;
 
    // write data to the bet account
    {

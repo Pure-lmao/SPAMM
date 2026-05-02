@@ -17,8 +17,8 @@ use spamm_aggregator::state::EVENT_STATE_LEN;
 use crate::mm_helpers::{verify_event_state_pda, verify_mm_config_auth};
 use crate::state::UpdateEventStateIxPayload;
 
-/// **11** — avoids collision with **`init_market`** (discriminator **8**).
-pub const UPDATE_EVENT_STATE_IX_DISCRIMINATOR: u8 = 11;
+/// **13** — after parlay quote instructions **7** / **8** and lifecycle ix **9**–**12**.
+pub const UPDATE_EVENT_STATE_IX_DISCRIMINATOR: u8 = 13;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [feepayer, config_pda, event_state_pda] = accounts else {

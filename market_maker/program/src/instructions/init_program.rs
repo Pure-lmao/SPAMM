@@ -1,15 +1,16 @@
-//! One-time setup: create `["config"]`, then `["mm_quote_buffer"]`, then the MM collateral ATA whose
-//! **authority is the config PDA** (SPAMM framework README; matches aggregator token checks).
+//! One-time setup: create `["config"]`, then `["mm_quote_buffer"]`, then `["mm_parlay_quote_buffer"]`,
+//! then the MM collateral ATA whose **authority is the config PDA** (SPAMM framework README; matches aggregator token checks).
 //!
-//! Accounts **(7)** — order matters for ATA creation:
+//! Accounts **(9)** — order matters for ATA creation:
 //! 0. `feepayer` (signer)
 //! 1. `config_pda` (writable, empty)
 //! 2. `mm_quote_buffer_pda` (writable, empty)
-//! 3. `mm_token_account` (writable, empty) — ATA created with authority = config PDA
-//! 4. `mint` (readonly)
-//! 5. `token_program` (readonly)
-//! 6. `associated_token_program` (readonly)
-//! 7. `system_program` (readonly)
+//! 3. `mm_parlay_quote_buffer_pda` (writable, empty)
+//! 4. `mm_token_account` (writable, empty) — ATA created with authority = config PDA
+//! 5. `mint` (readonly)
+//! 6. `token_program` (readonly)
+//! 7. `associated_token_program` (readonly)
+//! 8. `system_program` (readonly)
 //!
 //! Instruction `data`: [`InitProgramIxPayload`] — `admin` pubkey (must equal `feepayer`; example policy).
 
@@ -28,10 +29,10 @@ use spamm_aggregator::helpers::verify_associated_token_program;
 use spamm_aggregator::helpers::{get_rent_local, verify_signer, verify_system_program, verify_token_program};
 use spamm_aggregator::state::{
    MmAccountConfigZc, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_ACCOUNT_CONFIG_DISCRIMINATOR,
-   MM_QUOTE_BUFFER_LEN,
+   MM_QUOTE_BUFFER_LEN, MM_PARLAY_QUOTE_BUFFER_LEN,
 };
 
-use crate::constants::MM_QUOTE_BUFFER_SEED;
+use crate::constants::{MM_PARLAY_QUOTE_BUFFER_SEED, MM_QUOTE_BUFFER_SEED};
 use crate::state::InitProgramIxPayload;
 
 pub const INIT_PROGRAM_IX_DISCRIMINATOR: u8 = 1;
@@ -42,6 +43,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       feepayer,
       config_pda,
       mm_quote_buffer_pda,
+      mm_parlay_quote_buffer_pda,
       token_account,
       mint,
       token_program,
@@ -67,7 +69,9 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       config_pda.lamports() > 0
          || config_pda.data_len() != 0
          || mm_quote_buffer_pda.lamports() > 0
-         || mm_quote_buffer_pda.data_len() != 0,
+         || mm_quote_buffer_pda.data_len() != 0
+         || mm_parlay_quote_buffer_pda.lamports() > 0
+         || mm_parlay_quote_buffer_pda.data_len() != 0,
    ) {
       log!("init_program: pda(s) must be empty");
       return Err(ProgramError::InvalidAccountData);
@@ -82,6 +86,12 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    let (buf_addr, buf_bump) = Address::find_program_address(&[MM_QUOTE_BUFFER_SEED], program_id);
    if unlikely(!address_eq(mm_quote_buffer_pda.address(), &buf_addr)) {
       log!("init_program: quote buffer pda invalid");
+      return Err(ProgramError::InvalidSeeds);
+   }
+
+   let (pbuf_addr, pbuf_bump) = Address::find_program_address(&[MM_PARLAY_QUOTE_BUFFER_SEED], program_id);
+   if unlikely(!address_eq(mm_parlay_quote_buffer_pda.address(), &pbuf_addr)) {
+      log!("init_program: parlay quote buffer pda invalid");
       return Err(ProgramError::InvalidSeeds);
    }
 
@@ -133,6 +143,24 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
          owner: program_id,
       }
       .invoke_signed(&signers)?;
+   }
+
+   {
+      let pb = [pbuf_bump];
+      let parlay_signer = [
+         Seed::from(MM_PARLAY_QUOTE_BUFFER_SEED),
+         Seed::from(&pb as &[u8]),
+      ];
+      let signers = [Signer::from(&parlay_signer)];
+
+      let p_space = MM_PARLAY_QUOTE_BUFFER_LEN as u64;
+      CreateAccount {
+         from: feepayer,
+         to: mm_parlay_quote_buffer_pda,
+         lamports: get_rent_local(p_space),
+         space: p_space,
+         owner: program_id,
+      }.invoke_signed(&signers)?;
    }
 
    CreateAssociatedTokenAccount {

@@ -12,6 +12,12 @@ export const MM_QUOTE_BUFFER_LEN = 108;
 export const MM_ACCOUNT_CONFIG_MIN_LEN = 34;
 export const INIT_PROGRAM_IX_DATA_LEN = 32;
 export const GET_QUOTE_IX_WIRE_LEN = 75;
+export const MAX_PARLAY_LEGS = 8;
+export const PARLAY_LEG_WIRE_LEN = 62;
+export const PARLAY_LEG_TABLE_LEN = MAX_PARLAY_LEGS * PARLAY_LEG_WIRE_LEN;
+export const GET_QUOTE_PARLAY_IX_WIRE_LEN = 1 + 8 + 4 + 1 + PARLAY_LEG_TABLE_LEN;
+export const FILL_QUOTE_PARLAY_IX_WIRE_LEN = 21;
+export const MM_PARLAY_QUOTE_BUFFER_LEN = 2 + 32 + 8 + 4 + 1 + PARLAY_LEG_TABLE_LEN;
 
 /** `update_oracle_body` ix payload after discriminator: `u32` sequence + `u32` odds (LE). */
 export const UPDATE_ORACLE_IX_PAYLOAD_LEN_TWO_OUTCOME = 4 + 4 + 4;
@@ -50,6 +56,41 @@ export type MarketId = {
 /** MM quote buffer account (`MM_QUOTE_BUFFER_DISCRIMINATOR`). */
 export const MM_QUOTE_BUFFER_DISCRIMINATOR = 2;
 
+/** MM parlay quote buffer account (`MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR`). */
+export const MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR = 3;
+
+export type ParlayLegWire = {
+   marketId: MarketId;
+   side: number;
+   eventStateSequence: number;
+   eventStateHash: ReadonlyUint8Array;
+};
+
+export type MmParlayQuoteBuffer = {
+   discriminator: number;
+   isUsed: number;
+   userAddress: Address;
+   maxAmount: bigint;
+   oddsScaled: bigint;
+   numLegs: number;
+   legs: readonly ParlayLegWire[];
+};
+
+export type GetQuoteParlayIxData = {
+   instructionDiscriminator: number;
+   amount: bigint;
+   oddsScaled: bigint;
+   numLegs: number;
+   legs: readonly ParlayLegWire[];
+};
+
+export type FillParlayQuoteIxData = {
+   instructionDiscriminator: number;
+   amountToFill: bigint;
+   oddsScaled: bigint;
+   amountToSend: bigint;
+};
+
 export type MmQuoteBuffer = {
    discriminator: number;
    isUsed: number;
@@ -72,7 +113,7 @@ export type MmAccountConfig = {
 };
 
 /** Event state PDA (`EVENT_STATE_DISCRIMINATOR`). */
-export const EVENT_STATE_DISCRIMINATOR = 3;
+export const EVENT_STATE_DISCRIMINATOR = 4;
 
 export type EventStateData = {
    discriminator: number;
@@ -128,6 +169,8 @@ export type DecodedMarketMakerInstruction =
    | { kind: 'updateOracle'; sequence: bigint; odds0: bigint; odds1: bigint; odds2?: bigint }
    | { kind: 'initProgram'; data: InitProgramIxData }
    | { kind: 'getQuote'; data: GetQuoteIxData }
+   | { kind: 'getQuoteParlay'; data: GetQuoteParlayIxData }
+   | { kind: 'fillParlayQuote'; data: FillParlayQuoteIxData }
    | { kind: 'initEvent'; eventId: EventId }
    | { kind: 'initMarket'; marketId: MarketId; oracleBody: Uint8Array }
    | {
@@ -138,4 +181,4 @@ export type DecodedMarketMakerInstruction =
      }
    | { kind: 'closeEvent'; eventId: EventId }
    | { kind: 'closeMarket'; marketId: MarketId }
-   | { kind: 'forceClosePda'; };
+   | { kind: 'forceClosePda' };

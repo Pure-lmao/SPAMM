@@ -1,5 +1,5 @@
 import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport } from 'spamm-market-maker-sdk';
-import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getEventHash, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance } from 'spamm-aggregator-sdk';
+import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getEventHash, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from 'utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
@@ -27,7 +27,7 @@ async function registerMM() {
 
 const sport = 1 as Sport;
 const league = 1;
-const event = 1n;
+const event = 2n;
 const eventId = {
    sport,
    league,
@@ -86,7 +86,7 @@ async function updateEventState(sport: Sport, eventId: EventId, sequence: number
       ADMIN_SIGNER.address,
       MARKET_MAKER_PROGRAM_ID,
       eventId,
-      1,
+      sequence,
       hash,
    );
    const txResult = await sendAndConfirmInstructions([eventStateIx], [ADMIN_SIGNER]);
@@ -130,7 +130,7 @@ async function initMarket() {
 // initMarket().catch(console.error);
 
 async function updateOracle() {
-   const sequence = 33n;
+   const sequence = 1n;
    const odds0 = 20n*ODDS_SCALE/10n;
    const odds1 = 20n*ODDS_SCALE/10n;
    const odds2 = 20n*ODDS_SCALE/10n;
@@ -141,7 +141,7 @@ async function updateOracle() {
    console.log(txResult);
 }
 // updateOracle().catch(console.error);
-// getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId).then(console.log).catch(console.error);
+getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId).then(console.log).catch(console.error);
 
 const returnDataDecoder = getMmReturnDataDecoder();
 async function getQuote() {
@@ -185,6 +185,6 @@ async function forceClosePda(pda: Address) {
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-// forceClosePda("HfnP5EfpT7F32uUHJtPhuf2MpTndi7sJozCbUj9FcyHo" as Address).catch(console.error);
+// forceClosePda((await getEventStatePda(MARKET_MAKER_PROGRAM_ID, eventId))[0]).catch(console.error);
 
 

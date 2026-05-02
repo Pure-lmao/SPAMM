@@ -31,7 +31,7 @@ use crate::{ID, helpers::{calc_potential_profit, close_pda_return_rent, safe_clo
    }, writers::write_i64_le_unchecked
 };
 
-pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 5;
+pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 6;
 
 pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    let [
@@ -209,7 +209,7 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
         BetResult::Push | BetResult::Cancelled | 
         BetResult::RolledBack => bet_data.amount,
       BetResult::Lost => 0,
-      BetResult::HalfLost => bet_data.amount / 2, 
+      BetResult::HalfLost => bet_data.amount / 2,
       BetResult::Pending => {
          log!("settle_bet: bet result is pending");
          return Err(ProgramError::InvalidInstructionData);

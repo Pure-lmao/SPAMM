@@ -22,7 +22,7 @@ use crate::mm_helpers::{close_pda_return_rent, find_market_data_pda, verify_mm_c
 use crate::state::InitMarketIxPayload;
 
 
-pub const CLOSE_MARKET_IX_DISCRIMINATOR: u8 = 10;
+pub const CLOSE_MARKET_IX_DISCRIMINATOR: u8 = 12;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let InitMarketIxPayload { market_id, oracle_body: _ } = InitMarketIxPayload::decode(data)?;

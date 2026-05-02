@@ -10,8 +10,10 @@ import {
    MM_ENCUMBRANCE_PDA_SEED,
    MM_MARKET_DATA_PDA_SEED,
    MM_LIST_PDA_SEED,
+   MM_PARLAY_QUOTE_BUFFER_SEED,
    MM_QUOTE_BUFFER_SEED,
    NETTING_PDA_SEED,
+   PARLAY_BET_ACCOUNT_SEED,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    SPL_TOKEN_PROGRAM_ID,
 } from './constants.js';
@@ -109,6 +111,20 @@ export async function getMmQuoteBufferPda(mmProgramId: Address): Promise<readonl
 }
 
 /**
+ * Derives the **MM parlay quote buffer PDA** (`["mm_parlay_quote_buffer"]` on the **MM program**).
+ *
+ * **Rust:** `MM_PARLAY_QUOTE_BUFFER_SEED` + `find_program_address` on the MM `program_id`.
+ */
+export async function getMmParlayQuoteBufferPda(
+   mmProgramId: Address,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: mmProgramId,
+      seeds: [MM_PARLAY_QUOTE_BUFFER_SEED],
+   });
+}
+
+/**
  * Derives the **per-MM encumbrance PDA** on the **aggregator** program (`["encumbrance", mm_program_id_bytes]`).
  *
  * **Rust:** `MM_ENCUMBRANCE_PDA_SEED` + MM program address bytes under `aggregator::ID` (`verify_mm_encumbrance_pda`).
@@ -184,6 +200,21 @@ export async function getBetPda(user: Address, betId: bigint): Promise<readonly 
    return await getProgramDerivedAddress({
       programAddress: AGGREGATOR_PROGRAM_ID,
       seeds: [BET_ACCOUNT_SEED, addressEncoder.encode(user), encodeBetIdLe(betId)],
+   });
+}
+
+/**
+ * Derives the **parlay bet PDA** on the **aggregator** (`["parlay", user, bet_id_le]`).
+ *
+ * **Rust:** `PARLAY_BET_ACCOUNT_SEED` + user pubkey + `bet_id.to_le_bytes()` under aggregator program id (`fill_parlay`).
+ */
+export async function getParlayBetPda(
+   user: Address,
+   betId: bigint,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      seeds: [PARLAY_BET_ACCOUNT_SEED, addressEncoder.encode(user), encodeBetIdLe(betId)],
    });
 }
 

@@ -3,24 +3,48 @@ import type { Address } from '@solana/kit';
 
 import { MINT_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, SYSTEM_PROGRAM_ID } from './constants.js';
 import {
+   encodeFillParlayQuoteIxData,
    encodeGetQuoteIxData,
+   encodeGetQuoteParlayIxData,
    encodeMarketMakerInstructionData,
+   FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
    GET_QUOTE_IX_DISCRIMINATOR,
+   GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
 } from './codex.js';
 import {
    getAta,
    getEventStatePda,
    getMmConfigPda,
    getMmMarketDataPda,
+   getMmParlayQuoteBufferPda,
    getMmQuoteBufferPda,
 } from './helpers.js';
-import type { EventId, GetQuoteIxData, MarketId } from './types.js';
-import { validateBytes32, validateEventId, validateGetQuoteIxData, validateMarketId, validateOdds, validateU16, validateU32Bigint } from './validate.js';
+import type {
+   EventId,
+   FillParlayQuoteIxData,
+   GetQuoteIxData,
+   GetQuoteParlayIxData,
+   MarketId,
+   ParlayLegWire,
+} from './types.js';
+import {
+   validateBytes32,
+   validateEventId,
+   validateFillParlayQuoteIxData,
+   validateGetQuoteIxData,
+   validateGetQuoteParlayIxData,
+   validateMarketId,
+   validateOdds,
+   validateU16,
+   validateU32Bigint,
+} from './validate.js';
 
 export {
    CLOSE_EVENT_IX_DISCRIMINATOR,
    CLOSE_MARKET_IX_DISCRIMINATOR,
+   FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
    GET_QUOTE_IX_DISCRIMINATOR,
+   GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
    INIT_EVENT_IX_DISCRIMINATOR,
    INIT_MARKET_IX_DISCRIMINATOR,
    INIT_PROGRAM_IX_DISCRIMINATOR,
@@ -41,18 +65,26 @@ export type MmGetQuote = {
    marketId: MarketId;
 };
 
+/** Leg table for MM **`get_quote_parlay`** (matches aggregator `GetQuoteParlayIxData.legs`). */
+export type MmGetQuoteParlay = {
+   amount: bigint;
+   minOddsScaled: bigint;
+   legs: readonly ParlayLegWire[];
+};
+
 const ro = (address: Address) => ({ address, role: AccountRole.READONLY });
 const rw = (address: Address) => ({ address, role: AccountRole.WRITABLE });
 const ws = (address: Address) => ({ address, role: AccountRole.WRITABLE_SIGNER });
 
 /**
- * **`init_program`** — MM config PDA, quote buffer PDA, MM collateral ATA (authority = config PDA).
+ * **`init_program`** — MM config PDA, single-leg quote buffer PDA, parlay quote buffer PDA, MM collateral ATA (authority = config PDA).
  *
  * **Rust:** `market_maker::instructions::init_program` (`INIT_PROGRAM_IX_DISCRIMINATOR` = 1). `admin` in data must equal `feepayer`.
  */
 export async function getInitProgramIx(feepayer: Address, mmProgram: Address): Promise<Instruction> {
    const [configPda] = await getMmConfigPda(mmProgram);
    const [quoteBuf] = await getMmQuoteBufferPda(mmProgram);
+   const [parlayQuoteBuf] = await getMmParlayQuoteBufferPda(mmProgram);
    const mmTokenAta = await getAta(configPda);
    return {
       programAddress: mmProgram,
@@ -60,6 +92,7 @@ export async function getInitProgramIx(feepayer: Address, mmProgram: Address): P
          ws(feepayer),
          rw(configPda),
          rw(quoteBuf),
+         rw(parlayQuoteBuf),
          rw(mmTokenAta),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
@@ -97,7 +130,7 @@ export async function getUpdateOracleIx(auth: Address, mmProgram: Address, marke
 /**
  * **`init_event`** — create `["event_state", event_id]` PDA.
  *
- * **Rust:** `init_event::process` (discriminator 7).
+ * **Rust:** `init_event::process` (discriminator 9).
  */
 export async function getInitEventIx(feepayer: Address, eventId: EventId, mmProgram: Address): Promise<Instruction> {
    validateEventId(eventId, 'eventId');
@@ -113,7 +146,7 @@ export async function getInitEventIx(feepayer: Address, eventId: EventId, mmProg
 /**
  * **`update_event_state`** — set `sequence` and `state_hash` on the event-state PDA (admin).
  *
- * **Rust:** `update_event_state::process` (discriminator **11**).
+ * **Rust:** `update_event_state::process` (discriminator **13**).
  */
 export async function getUpdateEventStateIx(
    feepayer: Address,
@@ -137,7 +170,7 @@ export async function getUpdateEventStateIx(
 /**
  * **`init_market`** — create market-data PDA `["market_data", market_id_wire]`; instruction tail is `market_id` + oracle odds body (8 or 12 bytes).
  *
- * **Rust:** `init_market::process` (discriminator 8).
+ * **Rust:** `init_market::process` (discriminator 10).
  */
 export async function getInitMarketIx(
    feepayer: Address,
@@ -161,7 +194,7 @@ export async function getInitMarketIx(
 /**
  * **`close_event`** — close event-state PDA.
  *
- * **Rust:** `close_event::process` (discriminator 9).
+ * **Rust:** `close_event::process` (discriminator 11).
  */
 export async function getCloseEventIx(auth: Address, mmProgram: Address, eventId: EventId): Promise<Instruction> {
    validateEventId(eventId, 'eventId');
@@ -177,7 +210,7 @@ export async function getCloseEventIx(auth: Address, mmProgram: Address, eventId
 /**
  * **`close_market`** — close market-data PDA for `market_id` (trailing ix bytes ignored on-chain).
  *
- * **Rust:** `close_market::process` (discriminator 10).
+ * **Rust:** `close_market::process` (discriminator 12).
  */
 export async function getCloseMarketIx(auth: Address, mmProgram: Address, marketId: MarketId): Promise<Instruction> {
    validateMarketId(marketId, 'marketId');
@@ -222,6 +255,80 @@ export async function getMmGetQuoteIx(
    };
 }
 
+/**
+ * **`get_quote_parlay`** — MM program; combined parlay quote into parlay quote buffer.
+ *
+ * **Rust:** `get_quote_parlay::process` (`GET_QUOTE_PARLAY_IX_DISCRIMINATOR` = 7).
+ */
+export async function getMmGetQuoteParlayIx(
+   quote: MmGetQuoteParlay,
+   mmProgram: Address,
+   user: Address,
+): Promise<Instruction> {
+   const numLegs = quote.legs.length;
+   const data: GetQuoteParlayIxData = {
+      instructionDiscriminator: GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
+      amount: quote.amount,
+      oddsScaled: quote.minOddsScaled,
+      numLegs,
+      legs: quote.legs,
+   };
+   validateGetQuoteParlayIxData(data, 'quote');
+   const ixData = encodeGetQuoteParlayIxData(data);
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
+   const accounts: { address: Address; role: AccountRole }[] = [
+      ro(user),
+      ro(mmConfigPda),
+      rw(mmParlayQuoteBufferPda),
+   ];
+   for (const leg of quote.legs) {
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, leg.marketId);
+      const [eventStatePda] = await getEventStatePda(mmProgram, leg.marketId.eventId);
+      accounts.push(ro(marketDataPda), ro(eventStatePda));
+   }
+   return {
+      programAddress: mmProgram,
+      accounts,
+      data: ixData,
+   };
+}
+
+/**
+ * **`fill_parlay_quote`** — consume parlay quote buffer (aggregator CPI order). **`liabilityAta`** is the MM liability vault ATA (typically derived with the aggregator encumbrance PDA as owner).
+ *
+ * **Rust:** `fill_parlay_quote::process` (`FILL_QUOTE_PARLAY_IX_DISCRIMINATOR` = 8).
+ */
+export async function getMmFillParlayQuoteIx(
+   params: Omit<FillParlayQuoteIxData, 'instructionDiscriminator'>,
+   mmProgram: Address,
+   user: Address,
+   liabilityAta: Address,
+): Promise<Instruction> {
+   const full: FillParlayQuoteIxData = {
+      instructionDiscriminator: FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
+      ...params,
+   };
+   validateFillParlayQuoteIxData(full, 'fill');
+   const ixData = encodeFillParlayQuoteIxData(full);
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
+   const mmTokenAta = await getAta(mmConfigPda);
+   return {
+      programAddress: mmProgram,
+      accounts: [
+         ro(user),
+         rw(mmConfigPda),
+         rw(mmParlayQuoteBufferPda),
+         rw(mmTokenAta),
+         rw(liabilityAta),
+         ro(MINT_ID),
+         ro(SPL_TOKEN_PROGRAM_ID),
+      ],
+      data: ixData,
+   };
+}
+
 export async function getForceClosePdaIx(auth: Address, mmProgram: Address, pda: Address): Promise<Instruction> {
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    return {
@@ -262,6 +369,14 @@ export type MarketMakerInstructionInput =
    | { kind: 'closeEvent'; auth: Address; eventId: EventId; mmProgram: Address }
    | { kind: 'closeMarket'; auth: Address; marketId: MarketId; mmProgram: Address }
    | { kind: 'getQuote'; quote: MmGetQuote; mmProgram: Address; user: Address }
+   | { kind: 'getQuoteParlay'; quote: MmGetQuoteParlay; mmProgram: Address; user: Address }
+   | {
+        kind: 'fillParlayQuote';
+        params: Omit<FillParlayQuoteIxData, 'instructionDiscriminator'>;
+        mmProgram: Address;
+        user: Address;
+        liabilityAta: Address;
+     }
    | { kind: 'forceClosePda'; auth: Address; pda: Address; mmProgram: Address };
 
 export type MarketMakerInstructionKind = MarketMakerInstructionInput['kind'];
@@ -301,6 +416,10 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
          return getCloseMarketIx(input.auth, input.mmProgram, input.marketId);
       case 'getQuote':
          return getMmGetQuoteIx(input.quote, input.mmProgram, input.user);
+      case 'getQuoteParlay':
+         return getMmGetQuoteParlayIx(input.quote, input.mmProgram, input.user);
+      case 'fillParlayQuote':
+         return getMmFillParlayQuoteIx(input.params, input.mmProgram, input.user, input.liabilityAta);
       case 'forceClosePda':
          return getForceClosePdaIx(input.auth, input.mmProgram, input.pda);
       default: {

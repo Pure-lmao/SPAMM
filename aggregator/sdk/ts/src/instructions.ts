@@ -10,7 +10,7 @@ import {
    SPL_TOKEN_PROGRAM_ID,
    SYSTEM_PROGRAM_ID,
 } from './constants.js';
-import { encodeAggregatorInstructionData, encodeGetQuoteIxData } from './codex.js';
+import { encodeAggregatorInstructionData, encodeGetQuoteIxData, encodeGetQuoteParlayIxData } from './codex.js';
 import {
    getAta,
    getBetPda,
@@ -20,15 +20,28 @@ import {
    getMmEncumbrancePda,
    getMmListPda,
    getMmMarketDataPda,
+   getMmParlayQuoteBufferPda,
    getMmQuoteBufferPda,
    getNettingPda,
+   getParlayBetPda,
 } from './helpers.js';
-import type { BetAccountData, BetFiller, EventId, FillBetIxData, MarketId } from './types.js';
+import type {
+   BetAccountData,
+   BetFiller,
+   EventId,
+   FillBetIxData,
+   FillParlayIxData,
+   MarketId,
+   ParlayBetAccountData,
+   ParlayLegWire,
+} from './types.js';
 import {
    validateBetSide,
    validateChangeConfigStatus,
    validateEventId,
    validateFillBetIxData,
+   validateFillParlayIxData,
+   validateGetQuoteParlayIxData,
    validateGradeBetResults,
    validateMarketId,
    validatePositiveU64,
@@ -43,18 +56,22 @@ export const INIT_PROGRAM_IX_DISCRIMINATOR = 0;
 export const CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR = 1;
 export const REGISTER_MM_IX_DISCRIMINATOR = 2;
 export const FILL_BET_IX_DISCRIMINATOR = 3;
-export const GRADE_BETS_IX_DISCRIMINATOR = 4;
-export const SETTLE_BET_IX_DISCRIMINATOR = 5;
-export const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 6;
-export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 7;
-export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 8;
-export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 9;
-export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 10;
+export const FILL_PARLAY_IX_DISCRIMINATOR = 4;
+export const GRADE_BETS_IX_DISCRIMINATOR = 5;
+export const SETTLE_BET_IX_DISCRIMINATOR = 6;
+export const SETTLE_PARLAY_IX_DISCRIMINATOR = 7;
+export const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 50;
+export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 51;
+export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 52;
+export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 53;
+export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 100;
 export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
 export const MM_GET_QUOTE_IX_DISCRIMINATOR = 5;
 export const MM_FILL_QUOTE_IX_DISCRIMINATOR = 6;
+export const MM_GET_QUOTE_PARLAY_IX_DISCRIMINATOR = 7;
+export const MM_FILL_QUOTE_PARLAY_IX_DISCRIMINATOR = 8;
 
 /**
  * Payload for a market-maker **`get_quote`** CPI (not the aggregator router).
@@ -71,6 +88,14 @@ export type MmGetQuote = {
    eventStateHash: Uint8Array;
    eventStateSequence: number;
    marketId: MarketId;
+};
+
+/** Payload for MM **`get_quote_parlay`** (same leg table as `fill_parlay`). */
+export type MmGetQuoteParlay = {
+   amount: bigint;
+   /** Minimum combined scaled odds hint; wire field `odds_scaled` on `GetQuoteParlayIxData`. */
+   minOddsScaled: bigint;
+   legs: readonly ParlayLegWire[];
 };
 
 const ro = (address: Address) => ({ address, role: AccountRole.READONLY });
@@ -248,6 +273,116 @@ export async function getFillBetIx(
 }
 
 /**
+ * **`fill_parlay`** — CPI MM `get_quote_parlay` / `fill_parlay_quote`, open parlay bet PDA + ATA (no netting; **exactly one** MM).
+ *
+ * **Rust:** `aggregator::instructions::fill_parlay::fill_parlay` (`FILL_PARLAY_IX_DISCRIMINATOR` = 4). Fixed header matches `fill_bet`; bet PDA seeds are **`["parlay", user, bet_id]`** (not `"bet"`). Per MM: program, config, parlay quote buffer, encumbrance, liability ATA, MM token ATA, then `(market_data, event_state)` × `num_legs`.
+ *
+ * @param fill - **TS:** {@link FillParlayIxData}. **Rust:** `FillParlayIxData` after router discriminator.
+ * @param mmProgram - **TS:** `mmProgram`. **Rust:** `6 + 2 * num_legs` accounts for MM.
+ */
+export async function getFillParlayIx(
+   fill: FillParlayIxData,
+   feepayer: Address,
+   user: Address,
+   mmProgram: Address,
+): Promise<Instruction> {
+   validateFillParlayIxData(fill, 'fill');
+   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [betPda] = await getParlayBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const liabilityAta = await getAta(
+      mmEncumbrancePda,
+      MINT_ID,
+      SPL_TOKEN_PROGRAM_ID,
+      SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   );
+   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const accounts = [
+      ws(feepayer),
+      rs(user),
+      rw(userAta),
+      rw(betPda),
+      rw(betAta),
+      ro(configPda),
+      ro(MINT_ID),
+      ro(SPL_TOKEN_PROGRAM_ID),
+      ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+      ro(SYSTEM_PROGRAM_ID),
+      ro(mmProgram),
+      rw(mmConfigPda),
+      rw(mmParlayQuoteBufferPda),
+      rw(mmEncumbrancePda),
+      rw(liabilityAta),
+      rw(mmTokenAta),
+   ];
+
+   for (let legIdx = 0; legIdx < fill.numLegs; legIdx++) {
+      const leg = fill.legs[legIdx]!;
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, leg.marketId);
+      const [eventStatePda] = await getEventStatePda(mmProgram, leg.marketId.eventId);
+      accounts.push(ro(marketDataPda), ro(eventStatePda));
+   }
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts,
+      data: encodeAggregatorInstructionData({
+         kind: 'fillParlay',
+         data: fill,
+      }),
+   };
+}
+
+/**
+ * Build a **market-maker `get_quote_parlay`** instruction (`programAddress` = MM program).
+ *
+ * **Rust:** MM `get_quote_parlay::process` (`GET_QUOTE_PARLAY_IX_DISCRIMINATOR` = 7); accounts: `user`, MM config, parlay quote buffer, then `(market_data, event_state)` × L.
+ */
+export async function getMmGetQuoteParlayIx(
+   quote: MmGetQuoteParlay,
+   mmProgram: Address,
+   user: Address,
+): Promise<Instruction> {
+   const numLegs = quote.legs.length;
+   validateGetQuoteParlayIxData(
+      {
+         amount: quote.amount,
+         oddsScaled: quote.minOddsScaled,
+         numLegs,
+         legs: quote.legs,
+      },
+      'quote',
+   );
+   const ixData = encodeGetQuoteParlayIxData({
+      instructionDiscriminator: MM_GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
+      amount: quote.amount,
+      oddsScaled: quote.minOddsScaled,
+      numLegs,
+      legs: quote.legs,
+   });
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
+   const accounts: { address: Address; role: AccountRole }[] = [
+      ro(user),
+      ro(mmConfigPda),
+      rw(mmParlayQuoteBufferPda),
+   ];
+   for (const leg of quote.legs) {
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, leg.marketId);
+      const [eventStatePda] = await getEventStatePda(mmProgram, leg.marketId.eventId);
+      accounts.push(ro(marketDataPda), ro(eventStatePda));
+   }
+   return {
+      programAddress: mmProgram,
+      accounts,
+      data: ixData,
+   };
+}
+
+/**
  * Build a **market-maker `get_quote`** instruction (invoked **on the MM program**, not the aggregator router).
  * Used to preview a quote off-chain or from a client; aggregator `fill_bet` performs the same CPI internally.
  *
@@ -306,7 +441,7 @@ export async function getMmGetQuoteIx(
 /**
  * **`grade_bets`** — admin sets `BetResult` on many bet PDAs (no token movement).
  *
- * **Rust:** `aggregator::instructions::grade_bets::process` (`GRADE_BETS_IX_DISCRIMINATOR` = 4). Data: one `u8` result per bet account (`data.len() == bet_accounts.len()`).
+ * **Rust:** `aggregator::instructions::grade_bets::process` (`GRADE_BETS_IX_DISCRIMINATOR` = 5). Data: one `u8` result per bet account (`data.len() == bet_accounts.len()`).
  *
  * @param admin - **TS:** `Address` — config admin signer. **Rust:** `admin` (signer).
  * @param betResults - **TS:** `Uint8Array` — one byte per bet, valid graded `BetResult` discriminant. **Rust:** `&[u8]` same length as bet accounts.
@@ -333,7 +468,7 @@ export async function getGradeBetsIx(
 /**
  * **`settle_bet`** — pay winner, release encumbrances to fillers, close bet PDA + bet ATA to feepayer (bet must not be `Pending`).
  *
- * **Rust:** `aggregator::instructions::settle_bet::process` (`SETTLE_BET_IX_DISCRIMINATOR` = 5). Instruction data: none after router discriminator.
+ * **Rust:** `aggregator::instructions::settle_bet::process` (`SETTLE_BET_IX_DISCRIMINATOR` = 6). Instruction data: none after router discriminator.
  *
  * @param bet - **TS:** {@link BetAccountData} — decoded on-chain bet layout (owner, feepayer, fillers, result, etc.). **Rust:** `BetAccountData` read from `bet_account` account.
  * @param signer - **TS:** `Address` — any signer paying/authorizing the settle flow as implemented on-chain. **Rust:** `signer` (signer).
@@ -374,9 +509,56 @@ export async function getSettleBetIx(
 }
 
 /**
+ * **`settle_parlay`** — settle a graded parlay bet; same data shape as `settle_bet` (no payload after router discriminator).
+ *
+ * **Rust:** `aggregator::instructions::settle_parlay::process` (`SETTLE_PARLAY_IX_DISCRIMINATOR` = 7). Instruction data: none after router discriminator.
+ *
+ * @param parlay - **TS:** {@link ParlayBetAccountData}. **Rust:** `ParlayBetAccountData` from parlay bet PDA.
+ * @param signer - **TS:** `Address`. **Rust:** `signer` (signer).
+ * @param betPda - **TS:** parlay bet PDA. **Rust:** `bet_account` (writable).
+ */
+export async function getSettleParlayIx(
+   signer: Address,
+   betPda: Address,
+   parlay: ParlayBetAccountData,
+): Promise<Instruction> {
+   validatePositiveU64(parlay.betId, 'parlay.betId');
+   const user = parlay.owner;
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+
+   const [mmConfigPda] = await getMmConfigPda(parlay.fillerAddress);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(parlay.fillerAddress);
+   const mmLiabilityTokenAccount = await getAta(mmEncumbrancePda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAccount = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const accounts = [
+      rs(signer),
+      rw(betPda),
+      rw(betAta),
+      rw(parlay.feepayer),
+      ro(user),
+      rw(userAta),
+      ro(configPda),
+      ro(MINT_ID),
+      ro(SPL_TOKEN_PROGRAM_ID),
+      ro(parlay.fillerAddress),
+      ro(mmConfigPda),
+      rw(mmEncumbrancePda),
+      rw(mmLiabilityTokenAccount),
+      rw(mmTokenAccount),
+   ];
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts,
+      data: encodeAggregatorInstructionData({ kind: 'settleParlay' }),
+   };
+}
+
+/**
  * **`create_netting_account`** — MM admin creates per-event netting PDA under the aggregator for liability netting.
  *
- * **Rust:** `aggregator::instructions::create_netting_account::process` (`CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 6). Data: `EventId` wire bytes only (after discriminator).
+ * **Rust:** `aggregator::instructions::create_netting_account::process` (`CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 50). Data: `EventId` wire bytes only (after discriminator).
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `EventId` decoded from instruction data.
  * @param mmAdmin - **TS:** `Address` — must match MM config admin. **Rust:** `mm_admin` (writable signer).
@@ -401,7 +583,7 @@ export async function getCreateNettingAccountIx(
 /**
  * **`add_line_to_netting_account`** — MM admin adds `(event_id, period, mkt)` line to an existing netting account.
  *
- * **Rust:** `aggregator::instructions::add_line_to_netting_account::process` (`ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 7). Payload: `EventId` + `period: u8` + `mkt: u32` (`AddLineToLiabilityNettingIxData`).
+ * **Rust:** `aggregator::instructions::add_line_to_netting_account::process` (`ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 51). Payload: `EventId` + `period: u8` + `mkt: u32` (`AddLineToLiabilityNettingIxData`).
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `event_id` in parsed ix data.
  * @param period - **TS:** `number` — `u8` market period. **Rust:** `u8` / `period`.
@@ -435,7 +617,7 @@ export async function getAddLineToNettingAccountIx(
 /**
  * **`remove_line_from_netting_account`** — MM admin removes a netting line keyed by `(event_id, period, mkt)`.
  *
- * **Rust:** `aggregator::instructions::remove_line_from_netting_account::process` (`REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 8). Same payload shape as add-line.
+ * **Rust:** `aggregator::instructions::remove_line_from_netting_account::process` (`REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 52). Same payload shape as add-line.
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `event_id`.
  * @param period - **TS:** `number` — `u8`. **Rust:** `u8`.
@@ -469,7 +651,7 @@ export async function getRemoveLineFromNettingAccountIx(
 /**
  * **`close_netting_account`** — MM admin closes netting PDA for an event and returns rent (requires `EventId` in data).
  *
- * **Rust:** `aggregator::instructions::close_netting_account::process` (`CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 9). Data: `EventId` wire bytes after discriminator.
+ * **Rust:** `aggregator::instructions::close_netting_account::process` (`CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 53). Data: `EventId` wire bytes after discriminator.
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `EventId` from instruction data.
  * @param admin - **TS:** `Address` — MM admin (writable signer). **Rust:** `admin`.
@@ -494,7 +676,7 @@ export async function getCloseNettingAccountIx(
 /**
  * **`withdraw_from_liability_account`** — MM admin pulls free liability vault balance to the MM collateral token account (subject to encumbrance accounting on-chain).
  *
- * **Rust:** `aggregator::instructions::withdraw_from_liability_account::process` (`WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR` = 10). Data: `amount: u64` (LE) after discriminator.
+ * **Rust:** `aggregator::instructions::withdraw_from_liability_account::process` (`WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR` = 100). Data: `amount: u64` (LE) after discriminator.
  *
  * @param amount - **TS:** `bigint` — must fit `u64` and be > 0 where enforced. **Rust:** `u64` read from ix data.
  * @param mmAdmin - **TS:** `Address` — MM admin signer. **Rust:** `mm_admin` (writable signer).
@@ -575,12 +757,20 @@ export type AggregatorInstructionInput =
         mmPrograms: readonly Address[];
      }
    | {
+        kind: 'fillParlay';
+        fill: FillParlayIxData;
+        feepayer: Address;
+        user: Address;
+        mmProgram: Address;
+     }
+   | {
         kind: 'gradeBets';
         betResults: Uint8Array;
         admin: Address;
         betAccounts: readonly Address[];
      }
    | { kind: 'settleBet'; bet: BetAccountData; signer: Address; betPda: Address }
+   | { kind: 'settleParlay'; parlay: ParlayBetAccountData; signer: Address; betPda: Address }
    | { kind: 'createNettingAccount'; eventId: EventId; mmAdmin: Address; mmProgram: Address }
    | {
         kind: 'addLineToNettingAccount';
@@ -600,6 +790,7 @@ export type AggregatorInstructionInput =
      }
    | { kind: 'closeNettingAccount'; eventId: EventId; admin: Address; mmProgram: Address }
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint; mmAdmin: Address; mmProgram: Address }
+   | { kind: 'writeArbitraryData'; admin: Address; account: Address; data: Uint8Array }
    | { kind: 'forceClosePda'; admin: Address; pda: Address };
 
 export type AggregatorInstructionKind = AggregatorInstructionInput['kind'];
@@ -622,10 +813,14 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
          return getRegisterMmIx(input.mmAdmin, input.mmProgram);
       case 'fillBet':
          return getFillBetIx(input.fill, input.feepayer, input.user, input.mmPrograms);
+      case 'fillParlay':
+         return getFillParlayIx(input.fill, input.feepayer, input.user, input.mmProgram);
       case 'gradeBets':
          return getGradeBetsIx(input.admin, input.betResults, input.betAccounts);
       case 'settleBet':
          return getSettleBetIx(input.signer, input.betPda, input.bet);
+      case 'settleParlay':
+         return getSettleParlayIx(input.signer, input.betPda, input.parlay);
       case 'createNettingAccount':
          return getCreateNettingAccountIx(input.eventId, input.mmAdmin, input.mmProgram);
       case 'addLineToNettingAccount':
@@ -648,6 +843,8 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
          return getCloseNettingAccountIx(input.eventId, input.admin, input.mmProgram);
       case 'withdrawFromLiabilityAccount':
          return getWithdrawFromLiabilityAccountIx(input.amount, input.mmAdmin, input.mmProgram);
+      case 'writeArbitraryData':
+         return getWriteArbitraryDataIx(input.admin, input.account, input.data);
       case 'forceClosePda':
          return getForceClosePdaIx(input.admin, input.pda);
       default: {

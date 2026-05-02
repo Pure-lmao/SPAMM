@@ -25,7 +25,7 @@ use crate::mm_helpers::{find_event_state_pda, verify_mm_config_auth};
 
 use crate::state::InitEventIxPayload;
 
-pub const INIT_EVENT_IX_DISCRIMINATOR: u8 = 7;
+pub const INIT_EVENT_IX_DISCRIMINATOR: u8 = 9;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [

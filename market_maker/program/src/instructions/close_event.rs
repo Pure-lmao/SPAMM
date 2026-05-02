@@ -21,7 +21,7 @@ use crate::mm_helpers::{close_pda_return_rent, find_event_state_pda, verify_mm_c
 use crate::state::InitEventIxPayload;
 
 
-pub const CLOSE_EVENT_IX_DISCRIMINATOR: u8 = 9;
+pub const CLOSE_EVENT_IX_DISCRIMINATOR: u8 = 11;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [

@@ -10,8 +10,10 @@ import {
    decodeEventStateData,
    decodeMmEncumbrancePdaData,
    decodeMmListPdaData,
+   decodeMmParlayQuoteBuffer,
    decodeMmQuoteBuffer,
    decodeNettingPdaAccountData,
+   decodeParlayBetAccountDataStrict,
    getMarketIdEncoder,
 } from './codex.js';
 import {
@@ -23,8 +25,10 @@ import {
    getMmConfigPda,
    getMmEncumbrancePda,
    getMmListPda,
+   getMmParlayQuoteBufferPda,
    getMmQuoteBufferPda,
    getNettingPda,
+   getParlayBetPda,
 } from './helpers.js';
 import {
    BET_ACCOUNT_DISCRIMINATOR,
@@ -36,8 +40,10 @@ import {
    type MarketId,
    type MmEncumbrancePdaData,
    type MmListPdaData,
+   type MmParlayQuoteBuffer,
    type MmQuoteBuffer,
    type NettingPdaAccountData,
+   type ParlayBetAccountData,
 } from './types.js';
 
 const addressEncoder = getAddressEncoder();
@@ -308,6 +314,18 @@ export async function getBetData(rpc: Rpc<SolanaRpcApi>, key: GetBetDataKey): Pr
    return decodeBetAccountDataStrict(raw);
 }
 
+/**
+ * Loads one parlay bet PDA by address, or by `(user, betId)` via {@link getParlayBetPda}.
+ */
+export async function getParlayData(rpc: Rpc<SolanaRpcApi>, key: GetBetDataKey): Promise<ParlayBetAccountData> {
+   const address = isBetPdaKey(key) ? (await getParlayBetPda(key.user, key.betId))[0] : key;
+   const raw = await readAccountDataRaw(rpc, address);
+   if (raw === null) {
+      throw new Error(`Parlay account not found: ${String(address)}`);
+   }
+   return decodeParlayBetAccountDataStrict(raw);
+}
+
 export async function getNettingAccountData(
    rpc: Rpc<SolanaRpcApi>,
    mmProgramId: Address,
@@ -353,4 +371,16 @@ export async function getMmQuoteBufferData(rpc: Rpc<SolanaRpcApi>, mmProgramId: 
       throw new Error('MM quote buffer account not found');
    }
    return decodeMmQuoteBuffer(raw);
+}
+
+export async function getMmParlayQuoteBufferData(
+   rpc: Rpc<SolanaRpcApi>,
+   mmProgramId: Address,
+): Promise<MmParlayQuoteBuffer> {
+   const [addr] = await getMmParlayQuoteBufferPda(mmProgramId);
+   const raw = await readAccountDataRaw(rpc, addr);
+   if (raw === null) {
+      throw new Error('MM parlay quote buffer account not found');
+   }
+   return decodeMmParlayQuoteBuffer(raw);
 }

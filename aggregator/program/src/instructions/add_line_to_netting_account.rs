@@ -15,7 +15,7 @@ use crate::{
 /// Data: (event_id: EventId, period: u8, mkt: u32)
 
 
-pub const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 7;
+pub const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 51;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [

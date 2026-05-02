@@ -3,8 +3,10 @@ use pinocchio_log::log;
 
 use crate::instructions::{
    init_program::INIT_PROGRAM_IX_DISCRIMINATOR,
-   fill_quote::FILL_QUOTE_IX_DISCRIMINATOR, 
+   fill_quote::FILL_QUOTE_IX_DISCRIMINATOR,
+   fill_parlay_quote::FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
    get_quote::GET_QUOTE_IX_DISCRIMINATOR,
+   get_quote_parlay::GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
    init_event::INIT_EVENT_IX_DISCRIMINATOR,
    init_market::INIT_MARKET_IX_DISCRIMINATOR,
    close_event::CLOSE_EVENT_IX_DISCRIMINATOR,
@@ -15,12 +17,15 @@ use crate::instructions::{
 mod close_event;
 mod close_market;
 mod fill_quote;
+mod fill_parlay_quote;
 mod get_quote;
+mod get_quote_parlay;
 mod init_event;
 mod init_market;
 mod init_program;
 mod force_close_pda;
 mod update_event_state;
+mod quote_helpers;
 
 #[inline(never)]
 pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {
@@ -28,12 +33,15 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
       // Oracle hot-path discriminator `0` is handled in `lib.rs` (Doppler).
       INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(program_id, accounts, data),
 
-      // Discriminator 2-4 are reserved for whatever SPAMM-specific instructions you want to add.
+      // Discriminators 2-4 are reserved for SPAMM-specific instructions. Aggregator CPI quote
+      // instructions use 5-6 (single leg) and 7-8 (parlay); see `spamm_aggregator::state` ix discs.
 
       // Aggregator CPI (`lib.rs` strips router byte): MUST match `GET_QUOTE_IX_DISCRIMINATOR` /
       // `FILL_QUOTE_IX_DISCRIMINATOR` in `spamm_aggregator`.
       GET_QUOTE_IX_DISCRIMINATOR => get_quote::process(program_id, accounts, data),
       FILL_QUOTE_IX_DISCRIMINATOR => fill_quote::process(program_id, accounts, data),
+      GET_QUOTE_PARLAY_IX_DISCRIMINATOR => get_quote_parlay::process(program_id, accounts, data),
+      FILL_QUOTE_PARLAY_IX_DISCRIMINATOR => fill_parlay_quote::process(program_id, accounts, data),
 
       INIT_EVENT_IX_DISCRIMINATOR => init_event::process(program_id, accounts, data),
       INIT_MARKET_IX_DISCRIMINATOR => init_market::process(program_id, accounts, data),

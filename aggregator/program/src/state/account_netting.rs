@@ -11,7 +11,7 @@ use crate::{
 };
 
 pub const NETTING_PDA_SEED: &[u8] = b"netting";
-pub const NETTING_PDA_DISCRIMINATOR: u8 = 5;
+pub const NETTING_PDA_DISCRIMINATOR: u8 = 6;
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]

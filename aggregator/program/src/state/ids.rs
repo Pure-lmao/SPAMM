@@ -5,6 +5,7 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ZeroPod)]
 #[repr(u8)]
 pub enum Sport {
+   None = 0,
    Soccer = 1,
    AmericanFootball = 2,
    Baseball = 3,
@@ -21,6 +22,7 @@ impl Sport {
    #[inline(always)]
    pub fn try_from_wire_byte(byte: u8) -> Option<Self> {
       match byte {
+         0 => Some(Sport::None),
          1 => Some(Sport::Soccer),
          2 => Some(Sport::AmericanFootball),
          3 => Some(Sport::Baseball),
