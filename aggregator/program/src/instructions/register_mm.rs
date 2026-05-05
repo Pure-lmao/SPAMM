@@ -61,7 +61,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_system_program(&system_program)?;
    verify_token_program(&token_program)?;
    verify_associated_token_program(&associated_token_program)?;
-   verify_system_program(system_program)?;
    verify_mint(&mint)?;
    verify_config_pda(&our_config_pda, false)?;
    verify_mm_list_pda(mm_list_pda)?;
@@ -73,9 +72,9 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let numbet_of_mms = unsafe { read_u16_le_unchecked(mm_list_pda.data_ptr(), MM_LIST_PDA_NUMBER_OF_MMS_OFFSET) } as usize;
+   let number_of_mms = unsafe { read_u16_le_unchecked(mm_list_pda.data_ptr(), MM_LIST_PDA_NUMBER_OF_MMS_OFFSET) } as usize;
    let expected_len = MM_LIST_HEADER_LEN
-      .checked_add(numbet_of_mms.checked_mul(32).ok_or(ProgramError::ArithmeticOverflow)?)
+      .checked_add(number_of_mms.checked_mul(32).ok_or(ProgramError::ArithmeticOverflow)?)
       .ok_or(ProgramError::ArithmeticOverflow)?;
    if unlikely(data_len != expected_len) {
       log!("register_mm: mm_list length does not match number_of_mms");
@@ -98,12 +97,12 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    mm_list_pda.resize(new_len)?;
 
-   let addr_off = MM_LIST_HEADER_LEN + numbet_of_mms * 32;
+   let addr_off = MM_LIST_HEADER_LEN + number_of_mms * 32;
    let mm_addr = mm_program.address().as_ref();
    let ptr = mm_list_pda.data_mut_ptr();
    unsafe {
       write_arbitrary_bytes_unchecked(ptr, addr_off, mm_addr);
-      write_u16_le_unchecked(ptr, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET, (numbet_of_mms + 1) as u16);
+      write_u16_le_unchecked(ptr, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET, (number_of_mms + 1) as u16);
    }
 
    // create the mm encumbrance pda
@@ -118,7 +117,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    );
    if unlikely(!address_eq(mm_encumbrance_pda.address(), &expected_mm_encumbrance_pda)) {
       log!("register_mm: mm liability pda address mismatch");
-      return Err(ProgramError::InvalidAccountOwner);
+      return Err(ProgramError::InvalidSeeds);
    }
 
    let mm_encumbrance_pda_bump_seed = [mm_encumbrance_pda_bump];

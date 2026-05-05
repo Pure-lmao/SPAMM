@@ -43,15 +43,15 @@ use pinocchio::{
 
 use pinocchio_associated_token_account::instructions::Create;
 use pinocchio_log::log;
-use pinocchio_system::instructions::CreateAccount;
+use pinocchio_system::{ID as SYSTEM_ID, instructions::CreateAccount};
 use pinocchio_token::instructions::Transfer;
 use crate::{ID, 
    constants::MAX_NUMBER_OF_MMS, 
-   helpers::{calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
+   helpers::{calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
    instructions::fill_helpers::{parse_quote_return_for_mm, refund_liability_deposit_mismatch},
    parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data}, 
    state::{
-      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::apply_netting, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET}
+      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::{apply_netting, calculate_netting, NettingCalc}, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
    }, writers::write_i64_le_unchecked,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
@@ -101,6 +101,14 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let event_state_hash = parsed_data.event_state_hash;
    let event_state_sequence = parsed_data.event_state_sequence;
 
+   if unlikely(
+      (market_id.is_pregame() && event_state_sequence != 1) || 
+      (!market_id.is_pregame() && event_state_sequence == 1)
+   ) {
+      log!("fill_bet: invalid event state sequence for market.is_pregame");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+
    let bet_id_bytes = bet_id.to_le_bytes();
    let bet_pda_seed = [
       BET_ACCOUNT_SEED, 
@@ -117,6 +125,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    let mut mm_quotes = [const { MaybeUninit::<MMQuote>::uninit() }; MAX_NUMBER_OF_MMS];
    let mut valid_quote_count = 0usize;
+   let mut previous_mms = [&SYSTEM_ID; MAX_NUMBER_OF_MMS];
 
    for i in 0..number_of_mms {
       // 0. program_id (readonly) - verified as executable
@@ -139,6 +148,17 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       let mm_liability_token_account = &mm_accounts[base + 6];
       let mm_token_account = &mm_accounts[base + 7];
       let mm_netting_pda = &mm_accounts[base + 8];
+
+      // Reject duplicate MMs
+      if previous_mms[..i]
+         .iter()
+         .any(|prev| address_eq(mm_program_account.address(), *prev))
+      {
+         log!("fill_bet: duplicate mm program account");
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      previous_mms[i] = mm_program_account.address();
+
 
       let is_valid_mm_config_pda = verify_mm_config_pda(
          mm_config_pda,
@@ -377,21 +397,25 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       };
 
 
-      // apply netting: second return is signed portfolio reserve delta (`new_net - old_net`).
-      let (is_potentially_netted, netting_delta_i64) = if !quote.netting_pda.is_data_empty() {
-         if market_id.is_pregame() {
-            apply_netting(
-               quote.netting_pda, 
-               &market_id, side, 
-               amount_to_fill, 
-               quote.odds_scaled
+      // Stage netting: compute the encumbrance delta and the on-chain mutation **without writing**.
+      // The actual `apply_netting` write is deferred until after the MM `fill_quote` deposit is
+      // confirmed below. This guarantees that a failed / mismatched fill cannot leave the netting
+      // line shifted by a phantom bet (which would let later fills compute an under-collateralised
+      // encumbrance delta against the polluted state).
+      let netting_calc: Option<NettingCalc> =
+         if !quote.netting_pda.is_data_empty() && market_id.is_pregame() {
+            calculate_netting(
+               quote.netting_pda,
+               &market_id,
+               side,
+               amount_to_fill,
+               quote.odds_scaled,
             )
          } else {
-            (false, 0i64)
-         }
-      } else {
-         (false, 0i64)
-      };
+            None
+         };
+      let is_potentially_netted = netting_calc.is_some();
+      let netting_delta_i64: i64 = netting_calc.map(|c| c.delta).unwrap_or(0);
 
       let Ok(gross_margin_u64) = calc_potential_profit(amount_to_fill, quote.odds_scaled) else {
          #[cfg(feature = "log")]
@@ -503,8 +527,29 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             amount_to_send,
             mm_liability_token_account_increase,
          )?;
+
+         continue;
       }
+   
       
+      filled_amount = match filled_amount.checked_add(amount_to_fill) {
+         Some(v) => v,
+         None => continue,
+      };
+
+      let Ok(addl_payout) = calc_potential_payout(amount_to_fill, quote.odds_scaled) else {
+         continue;
+      };
+      
+      filled_payout = match filled_payout.checked_add(addl_payout) {
+         Some(v) => v,
+         None => continue,
+      };
+
+      if let Some(NettingCalc { write: netting_write, .. }) = netting_calc {
+         apply_netting(quote.netting_pda, &netting_write)?;
+      }
+
       unsafe {
          write_i64_le_unchecked(
             mm_encumbrance_pda.data_mut_ptr(),
@@ -512,13 +557,6 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             new_outstanding_liability
          );
       }
-      
-      filled_amount += amount_to_fill;
-
-      let Ok(addl_payout) = calc_potential_profit(amount_to_fill, quote.odds_scaled) else {
-         continue;
-      };
-      filled_payout += addl_payout;
 
       bet_fillers[filler_count].write(BetFiller {
          mm_address: quote.mm_address,

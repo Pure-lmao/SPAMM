@@ -15,7 +15,7 @@ use crate::{
    parsers::get_token_account_balance,
    readers::{read_address_unchecked, read_u8_unchecked},
    state::{
-      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, MM_ACCOUNT_CONFIG_SEED, MM_QUOTE_BUFFER_LEN, MM_PARLAY_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
+      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
          CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_STATUS_OFFSET, MM_ENCUMBRANCE_PDA_BUMP_OFFSET, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED
       }
    },
@@ -365,7 +365,7 @@ pub fn verify_mm_config_pda(mm_config_pda: &AccountView, mm_program_account: &Ac
       return false;
    }
 
-   if unlikely(mm_config_pda.data_len() < MM_MARKET_DATA_PDA_MIN_LEN) {
+   if unlikely(mm_config_pda.data_len() < MM_ACCOUNT_CONFIG_MIN_LEN) {
       return false;
    }
 
@@ -391,6 +391,11 @@ pub fn verify_mm_admin(admin: &AccountView, mm_program_account: &AccountView, co
    if unlikely(!address_eq(config_pda.owner(), &mm_program_account.address())) {
       log!("verify_mm_admin: config pda must be owned by the mm program");
       return Err(ProgramError::InvalidAccountOwner);
+   }
+
+   if unlikely(config_pda.data_len() < MM_ACCOUNT_CONFIG_MIN_LEN) {
+      log!("verify_mm_admin: config pda data length is invalid");
+      return Err(ProgramError::InvalidAccountData);
    }
 
    let stored_bump = unsafe { 
@@ -510,4 +515,13 @@ pub fn calc_potential_profit(amount: u64, odds_scaled: u32) -> Result<u64, Progr
    .try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
 
    Ok(profit)
+}
+
+pub fn calc_potential_payout(amount: u64, odds_scaled: u32) -> Result<u64, ProgramError> {
+   let payout = (odds_scaled as u128)
+   .checked_mul(amount as u128).ok_or_else(|| ProgramError::ArithmeticOverflow)?
+   .checked_div(ODDS_SCALE).ok_or_else(|| ProgramError::ArithmeticOverflow)?
+   .try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
+
+   Ok(payout)
 }

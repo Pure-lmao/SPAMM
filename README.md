@@ -81,7 +81,7 @@ This data is later used by your **`fill_quote`** function to validate the quote 
 The user is passed as a courtesy to allow you to potentially offer better odds to some users. Your Config PDA data beyond the header can be used for storing any global data you want (user profiles, global risk limits, etc). Your Market Data PDA data beyond the header can be used for storing any market-specific data you want (odds, liquidity, etc).
 
 ## Fill_Quote function
-The **`fill_quote`** function is called by the **aggregator** to fill the bet after receiving the quotes, **filtering valid quotes**, and sorting them **best to worst odds**.
+The **`fill_quote`** function is called by the **aggregator** to fill the bet after receiving the quotes, **filtering valid quotes**, and sorting them **best to worst odds**. The function should verify that the caller is a CPI via the aggregator and that all accounts are as expected.
 
 The function **MUST** take the following accounts:
 
@@ -164,7 +164,7 @@ struct MMParlayQuoteBuffer {
 If `max_amount` or `odds_scaled` in return data are **0**, the aggregator will not use that MM’s parlay quote for the fill.
 
 ## Fill_Parlay_Quote function
-The `fill_parlay_quote` function is called by the aggregator after a valid `get_quote_parlay` response, to move collateral from the MM token account to the aggregator’s MM liability ATA for the parlay stake. Parlay fills cannot be netted in any way.
+The `fill_parlay_quote` function is called by the aggregator after a valid `get_quote_parlay` response, to move collateral from the MM token account to the aggregator’s MM liability ATA for the parlay stake. Parlay fills cannot be netted in any way. The function should verify that the caller is a CPI via the aggregator and that all accounts are as expected.
 
 The function **MUST** take these accounts:
 
@@ -189,7 +189,7 @@ struct FillParlayQuoteIxData {
 }
 ```
 
-The MM should decode the parlay quote buffer, verify it matches the instruction (user, odds, amounts), transfer **`amount_to_send`** to the liability account, then set **`is_used`** on the parlay buffer to **1** so the quote **cannot be replayed** without a fresh **`get_quote_parlay`**. The amount to send may be less than the calulated user profit (or 0) if you have free collateral in the MM liability account.
+The MM should decode the parlay quote buffer, verify it matches the instruction (user, odds, amounts), transfer **`amount_to_send`** to the liability account, then **MUST** set **`is_used`** on the parlay buffer to **1** so the quote **cannot be replayed** without a fresh **`get_quote_parlay`**. The amount to send may be less than the calulated user profit (or 0) if you have free collateral in the MM liability account.
 
 ## Config PDA
 The **config PDA** is a PDA owned by the mm program. It **MUST** be of the seeds **`["config"]`**.
@@ -574,7 +574,7 @@ struct FillParlayIxData {
    bet_id: u64,
    amount: u64,
    min_odds_scaled: u32,
-   num_legs: u8,         // L, must be 2..=8
+   num_legs: u8,         // L, must be 2..=5
    legs: [ParlayLegWire; MAX_PARLAY_LEGS], // fixed table; legs[0..L) used — see `ParlayLegWire` under Get_Quote_Parlay
 }
 ```

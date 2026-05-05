@@ -39,13 +39,11 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
    ID,
-   constants::{MAX_PARLAY_LEGS, MAX_PARLAY_QUOTE_CPI_ACCOUNTS, ODDS_SCALE},
+   constants::{MAX_PARLAY_LEGS, MAX_PARLAY_QUOTE_CPI_ACCOUNTS},
    helpers::{
-      calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state,
-      verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_parlay_quote_buffer,
-      verify_signer, verify_system_program, verify_token_account, verify_token_program,
+      calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_parlay_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program
    },
-   instructions::fill_helpers::{parse_quote_return_for_mm, refund_liability_deposit_mismatch},
+   instructions::fill_helpers::parse_quote_return_for_mm,
    parsers::{ParsedFillParlay, get_encumbrance, get_token_account_balance, parse_fill_parlay_data},
    state::{
       FILL_QUOTE_PARLAY_IX_DISCRIMINATOR, FillParlayQuoteIxData, GET_QUOTE_PARLAY_IX_DISCRIMINATOR, GetQuoteParlayIxData, PARLAY_BET_ACCOUNT_DISCRIMINATOR, PARLAY_BET_ACCOUNT_LEN, PARLAY_BET_ACCOUNT_SEED, ParlayBetAccountData, ParlayLegTable, ParlayLegWire, account_bet::BetResult, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
@@ -108,7 +106,7 @@ fn cpi_get_quote_parlay(
    mm_liability_token_account: &AccountView,
    mm_token_account: &AccountView,
    leg_accounts: &mut [AccountView],
-) -> Result<(u64, u32, Address, u8), ProgramError> {
+) -> Result<(u64, u32, Address), ProgramError> {
    if !verify_mm_config_pda(mm_config_pda, mm_program_account) {
       #[cfg(feature = "log")]
       log!("fill_parlay: invalid mm config pda");
@@ -127,7 +125,7 @@ fn cpi_get_quote_parlay(
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   let Some(encumbrance_pda_bump) = verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account) else {
+   let Some(_encumbrance_pda_bump) = verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account) else {
       #[cfg(feature = "log")]
       log!("fill_parlay: invalid encumbrance pda");
       return Err(ProgramError::InvalidInstructionData);
@@ -234,7 +232,7 @@ fn cpi_get_quote_parlay(
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   Ok((max_amount, odds_scaled, *mm_program_account.address(), encumbrance_pda_bump))
+   Ok((max_amount, odds_scaled, *mm_program_account.address()))
 }
 
 /// CPI `fill_parlay_quote`, refund check, encumbrance write. Fill ix buffer + metas live only in this frame.
@@ -244,7 +242,6 @@ fn cpi_fill_parlay_quote_apply(
    amount: u64,
    odds_scaled: u32,
    mm_address: Address,
-   encumbrance_pda_bump: u8,
    user: &AccountView,
    mint: &AccountView,
    token_program: &AccountView,
@@ -347,15 +344,8 @@ fn cpi_fill_parlay_quote_apply(
    };
 
    if unlikely(mm_liability_token_account_increase != amount_to_send) {
-      refund_liability_deposit_mismatch(
-         mm_encumbrance_pda,
-         encumbrance_pda_bump,
-         mm_address,
-         mm_liability_token_account,
-         mm_token_account,
-         amount_to_send,
-         mm_liability_token_account_increase,
-      )?;
+      log!("fill_parlay: refund liability deposit mismatch");
+      return Err(ProgramError::InvalidInstructionData);
    }
 
    unsafe {
@@ -366,10 +356,7 @@ fn cpi_fill_parlay_quote_apply(
       );
    }
 
-   let filled_payout = (amount_to_fill as u128)
-      .checked_mul(odds_scaled as u128).ok_or(ProgramError::InvalidInstructionData)?
-      .checked_div(ODDS_SCALE).ok_or(ProgramError::InvalidInstructionData)?
-      .try_into().map_err(|_| ProgramError::InvalidInstructionData)?;
+   let filled_payout = calc_potential_payout(amount_to_fill, odds_scaled)?;
 
    Ok((amount_to_fill, filled_payout))
 }
@@ -512,7 +499,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    let bet_id_bytes = bet_id.to_le_bytes();
 
-   let (max_amount, odds_scaled, mm_address, encumbrance_pda_bump) = cpi_get_quote_parlay(
+   let (max_amount, odds_scaled, mm_address) = cpi_get_quote_parlay(
       num_legs,
       amount,
       min_odds_scaled,
@@ -534,7 +521,6 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       amount,
       odds_scaled,
       mm_address,
-      encumbrance_pda_bump,
       user,
       mint,
       token_program,

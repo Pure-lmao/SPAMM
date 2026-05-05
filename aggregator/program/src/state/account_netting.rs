@@ -5,9 +5,9 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
    helpers::calc_potential_profit,
-   readers::{self, read_i64_pair_unchecked, read_u8_unchecked, read_u32_le_unchecked},
+   readers::{self, read_i64_le_unchecked, read_i64_pair_unchecked, read_u8_unchecked, read_u32_le_unchecked},
    state::{EventId, MarketId, Sport},
-   writers::{self, write_i64_le_unchecked, write_i64_pair_unchecked, write_netting_line_unchecked, write_u8_unchecked},
+   writers::{write_i64_le_unchecked, write_i64_pair_unchecked, write_netting_line_unchecked, write_u8_unchecked},
 };
 
 pub const NETTING_PDA_SEED: &[u8] = b"netting";
@@ -228,14 +228,41 @@ pub fn remove_netting_line(data: &mut [u8], period: u8, mkt: u32) -> Result<(), 
    Ok(())
 }
 
+#[derive(Clone, Copy)]
+pub enum NettingWrite {
+   /// Header path (Soccer 1X2 `mkt == 1` or non-Soccer ML `mkt == 0`). Three `i64`s overwrite
+   /// `home / draw / away` at [`NETTING_FT_OFFSET`].
+   Header { ft: [i64; 3] },
+   /// Existing `(period, mkt)` line at `line_idx`: overwrite the outcome pair only.
+   ExistingLine { line_idx: usize, side0: i64, side1: i64 },
+   /// New `(period, mkt)` line: insert a blank line at `insertion_idx` (which shifts later lines
+   /// and bumps `number_of_lines`), then write the outcome pair on the freshly inserted line.
+   NewLine {
+      insertion_idx: usize,
+      period: u8,
+      mkt: u32,
+      side0: i64,
+      side1: i64,
+   },
+}
+
+/// Result of [`calculate_netting`]: the encumbrance delta the caller should apply, plus the
+/// staged on-chain mutation to commit later via [`apply_netting`].
+#[derive(Clone, Copy)]
+pub struct NettingCalc {
+   pub delta: i64,
+   pub write: NettingWrite,
+}
+
+
 #[inline(always)]
-pub fn apply_netting(
+pub fn calculate_netting(
    netting_pda: &AccountView,
    market_id: &MarketId,
    side: u8,
    amount_filled: u64,
    odds_scaled: u32,
-) -> (bool, i64) {
+) -> Option<NettingCalc> {
    let m_id = *market_id;
    let sport = m_id.event_id.sport;
    let period = m_id.period;
@@ -249,59 +276,39 @@ pub fn apply_netting(
       mkt == 0 || in_100_to_300 || in_1000_to_2000
    };
    if unlikely(!is_valid_netting_mkt) {
-      return (false, 0i64);
+      return None;
    }
 
    let data = unsafe {
-      core::slice::from_raw_parts_mut(
-         netting_pda.data_ptr() as *mut u8,
-         netting_pda.data_len(),
-      )
+      core::slice::from_raw_parts(netting_pda.data_ptr(), netting_pda.data_len())
    };
    if data.len() < NETTING_HEADER_LEN || data[NETTING_DISC_OFFSET] != NETTING_PDA_DISCRIMINATOR {
-      return (false, 0i64);
+      return None;
    }
 
-   let profit_on_win_u64 = calc_potential_profit(amount_filled, odds_scaled);
-   let profit_on_win: i64 = if let Ok(value) = profit_on_win_u64 { 
-      value.try_into().ok().unwrap_or(0)
-   } else { return (false, 0i64) };
-   
-   let amount_filled_i64 = match i64::try_from(amount_filled) {
-      Ok(value) => value,
-      Err(_) => return (false, 0i64),
-   };
+   let profit_on_win_u64 = calc_potential_profit(amount_filled, odds_scaled).ok()?;
+   let profit_on_win: i64 = profit_on_win_u64.try_into().ok()?;
+   let amount_filled_i64: i64 = amount_filled.try_into().ok()?;
 
    if sport == Sport::Soccer && mkt == 1 {
       let outcome_index = side as usize;
       let mut ft = [0i64; 3];
-      for (i, value) in ft.iter_mut().enumerate() {
-         let start = NETTING_FT_OFFSET + (i * 8);
-         *value = unsafe { readers::read_i64_le_unchecked(data.as_ptr(), start) };
+      for (i, slot) in ft.iter_mut().enumerate() {
+         let off = NETTING_FT_OFFSET + (i * 8);
+         *slot = unsafe { read_i64_le_unchecked(data.as_ptr(), off) };
       }
 
       let old_net = max3(ft[0], ft[1], ft[2]);
-      for (i, value) in ft.iter_mut().enumerate() {
-         if i == outcome_index {
-            *value = match value.checked_add(profit_on_win) {
-               Some(v) => v,
-               None => return (false, 0i64),
-            };
+      for (i, slot) in ft.iter_mut().enumerate() {
+         *slot = if i == outcome_index {
+            slot.checked_add(profit_on_win)?
          } else {
-            *value = match value.checked_sub(amount_filled_i64) {
-               Some(v) => v,
-               None => return (false, 0i64),
-            };
-         }
+            slot.checked_sub(amount_filled_i64)?
+         };
       }
       let new_net = max3(ft[0], ft[1], ft[2]);
-
-      for (i, value) in ft.iter().enumerate() {
-         let start = NETTING_FT_OFFSET + (i * 8);
-         unsafe { writers::write_i64_le_unchecked(data.as_mut_ptr(), start, *value) };
-      }
-
-      return (true, signed_reserve_delta(old_net, new_net));
+      let delta = new_net.checked_sub(old_net)?;
+      return Some(NettingCalc { delta, write: NettingWrite::Header { ft } });
    }
 
    if sport != Sport::Soccer && mkt == 0 {
@@ -309,103 +316,137 @@ pub fn apply_netting(
       let opposing_index = if side == 0 { 2usize } else { 0usize };
 
       let mut ft = [0i64; 3];
-      for (i, value) in ft.iter_mut().enumerate() {
-         let start = NETTING_FT_OFFSET + (i * 8);
-         *value = unsafe { readers::read_i64_le_unchecked(data.as_ptr(), start) };
+      for (i, slot) in ft.iter_mut().enumerate() {
+         let off = NETTING_FT_OFFSET + (i * 8);
+         *slot = unsafe { readers::read_i64_le_unchecked(data.as_ptr(), off) };
       }
 
       let old_net = max3(ft[0], ft[1], ft[2]);
-      ft[selected_index] = match ft[selected_index].checked_add(profit_on_win) {
-         Some(v) => v,
-         None => return (false, 0i64),
-      };
-      ft[opposing_index] = match ft[opposing_index].checked_sub(amount_filled_i64) {
-         Some(v) => v,
-         None => return (false, 0i64),
-      };
+      ft[selected_index] = ft[selected_index].checked_add(profit_on_win)?;
+      ft[opposing_index] = ft[opposing_index].checked_sub(amount_filled_i64)?;
       let new_net = max3(ft[0], ft[1], ft[2]);
-
-      for (i, value) in ft.iter().enumerate() {
-         let start = NETTING_FT_OFFSET + (i * 8);
-         unsafe { write_i64_le_unchecked(data.as_mut_ptr(), start, *value) };
-      }
-
-      return (true, signed_reserve_delta(old_net, new_net));
+      let delta = new_net.checked_sub(old_net)?;
+      return Some(NettingCalc { delta, write: NettingWrite::Header { ft } });
    }
 
    let number_of_lines =
       unsafe { read_u8_unchecked(data.as_ptr(), NETTING_NUMBER_OF_LINES_OFFSET) } as usize;
-
-   match ensure_netting_lines_view(data, number_of_lines) {
-      Ok(()) => {}
-      Err(_) => return (false, 0i64),
-   }
+   ensure_netting_lines_view(data, number_of_lines).ok()?;
    let lines_start = NETTING_HEADER_LEN;
 
-   let line_idx = match find_netting_line_or_insertion(
-      data, lines_start, number_of_lines, period, mkt,
-   ) {
-      Ok(idx) => idx,
+   match find_netting_line_or_insertion(data, lines_start, number_of_lines, period, mkt) {
+      Ok(line_idx) => {
+         let line_offset = lines_start + (line_idx * NETTING_LINE_LEN);
+         let side0_offset = line_offset + offset_of!(NettingLineZc, outcome_0);
+         let (mut side0, mut side1) =
+            unsafe { read_i64_pair_unchecked(data.as_ptr(), side0_offset) };
+
+         let old_net = max2(side0, side1);
+         if side == 0 {
+            side0 = side0.checked_add(profit_on_win)?;
+            side1 = side1.checked_sub(amount_filled_i64)?;
+         } else {
+            side1 = side1.checked_add(profit_on_win)?;
+            side0 = side0.checked_sub(amount_filled_i64)?;
+         }
+         let new_net = max2(side0, side1);
+         let delta = new_net.checked_sub(old_net)?;
+         Some(NettingCalc {
+            delta,
+            write: NettingWrite::ExistingLine { line_idx, side0, side1 },
+         })
+      }
       Err(insertion_idx) => {
          if unlikely(!MarketId::allow_add_netting_line(sport, period, mkt)) {
-            return (false, 0i64);
+            return None;
          }
-         match insert_blank_netting_line_at(
-            data,
-            lines_start,
-            number_of_lines,
-            period,
-            mkt,
-            insertion_idx,
-         ) {
-            Ok(()) => insertion_idx,
-            Err(_) => return (false, 0i64),
+         // Capacity check up-front so `apply_netting` cannot fail when handed this descriptor.
+         if unlikely(number_of_lines >= NETTING_DEFAULT_LINE_CAPACITY) {
+            return None;
          }
+         // A fresh line starts at `(0, 0)`, so `old_net == 0`.
+         let (mut side0, mut side1) = (0i64, 0i64);
+         if side == 0 {
+            side0 = side0.checked_add(profit_on_win)?;
+            side1 = side1.checked_sub(amount_filled_i64)?;
+         } else {
+            side1 = side1.checked_add(profit_on_win)?;
+            side0 = side0.checked_sub(amount_filled_i64)?;
+         }
+         let new_net = max2(side0, side1);
+         let delta = new_net.checked_sub(0i64)?;
+         Some(NettingCalc {
+            delta,
+            write: NettingWrite::NewLine {
+               insertion_idx,
+               period,
+               mkt,
+               side0,
+               side1,
+            },
+         })
       }
-   };
-
-   let line_offset = lines_start + (line_idx * NETTING_LINE_LEN);
-   let side0_offset = line_offset + offset_of!(NettingLineZc, outcome_0);
-
-   let (mut side0, mut side1) = unsafe { read_i64_pair_unchecked(data.as_ptr(), side0_offset) };
-
-   let old_net = max2(side0, side1);
-   if side == 0 {
-      side0 = match side0.checked_add(profit_on_win) {
-         Some(v) => v,
-         None => return (false, 0i64),
-      };
-      side1 = match side1.checked_sub(amount_filled_i64) {
-         Some(v) => v,
-         None => return (false, 0i64),
-      };
-   } else {
-      side1 = match side1.checked_add(profit_on_win) {
-         Some(v) => v,
-         None => return (false, 0i64),
-      };
-      side0 = match side0.checked_sub(amount_filled_i64) {
-         Some(v) => v,
-         None => return (false, 0i64),
-      };
    }
-   let new_net = max2(side0, side1);
-
-   unsafe {
-      write_i64_pair_unchecked(data.as_mut_ptr(), side0_offset, (side0, side1));
-   }
-
-   (true, signed_reserve_delta(old_net, new_net))
 }
 
-/// Signed change in portfolio worst-case reserve (`new_net - old_net`). Positive means more
-/// encumbrance / MM margin required; negative means netting released reserve.
+/// Commit a previously calculated [`NettingWrite`] to `netting_pda`.
 #[inline(always)]
-fn signed_reserve_delta(old_net: i64, new_net: i64) -> i64 {
-   match new_net.checked_sub(old_net) {
-      Some(d) => d,
-      None => 0i64,
+pub fn apply_netting(
+   netting_pda: &AccountView,
+   write: &NettingWrite,
+) -> Result<(), ProgramError> {
+   // SAFETY: the netting PDA was loaded writable by the runtime and aliasing is enforced by the
+   // caller (a single fill processes a netting account at most once between calculate/apply).
+   let data = unsafe {
+      core::slice::from_raw_parts_mut(
+         netting_pda.data_ptr() as *mut u8,
+         netting_pda.data_len(),
+      )
+   };
+   if unlikely(
+      data.len() < NETTING_HEADER_LEN
+         || data[NETTING_DISC_OFFSET] != NETTING_PDA_DISCRIMINATOR,
+   ) {
+      return Err(ProgramError::InvalidAccountData);
    }
+
+   match *write {
+      NettingWrite::Header { ft } => {
+         for (i, value) in ft.iter().enumerate() {
+            let off = NETTING_FT_OFFSET + (i * 8);
+            unsafe { write_i64_le_unchecked(data.as_mut_ptr(), off, *value) };
+         }
+      }
+      NettingWrite::ExistingLine { line_idx, side0, side1 } => {
+         let number_of_lines =
+            unsafe { read_u8_unchecked(data.as_ptr(), NETTING_NUMBER_OF_LINES_OFFSET) } as usize;
+         ensure_netting_lines_view(data, number_of_lines)?;
+         if unlikely(line_idx >= number_of_lines) {
+            return Err(ProgramError::InvalidAccountData);
+         }
+         let lines_start = NETTING_HEADER_LEN;
+         let line_offset = lines_start + (line_idx * NETTING_LINE_LEN);
+         let side0_offset = line_offset + offset_of!(NettingLineZc, outcome_0);
+         unsafe {
+            write_i64_pair_unchecked(data.as_mut_ptr(), side0_offset, (side0, side1));
+         }
+      }
+      NettingWrite::NewLine { insertion_idx, period, mkt, side0, side1 } => {
+         let number_of_lines =
+            unsafe { read_u8_unchecked(data.as_ptr(), NETTING_NUMBER_OF_LINES_OFFSET) } as usize;
+         let lines_start = NETTING_HEADER_LEN;
+         insert_blank_netting_line_at(
+            data, lines_start, number_of_lines, period, mkt, insertion_idx,
+         )?;
+         let line_offset = lines_start + (insertion_idx * NETTING_LINE_LEN);
+         let side0_offset = line_offset + offset_of!(NettingLineZc, outcome_0);
+         unsafe {
+            write_i64_pair_unchecked(data.as_mut_ptr(), side0_offset, (side0, side1));
+         }
+      }
+   }
+
+   Ok(())
 }
 
 

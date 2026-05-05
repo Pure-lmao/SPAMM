@@ -133,7 +133,7 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
       amount_to_user_from_bet_ata, // bet ata -> user
       amount_to_user_from_filler_liability_token_account, //user profit
       amount_to_filler_from_bet_ata, // bet ata -> mm token (non-netted stake / mm take)
-      amouunt_to_filler_token_account_from_liability_token_account, // mm liability token account -> mm token account
+      amount_to_filler_token_account_from_liability_token_account, // mm liability token account -> mm token account
    ): (u64, u64, u64, u64) = match bet_result {
       BetResult::Won => {
          (stake, potential_profit, 0, 0)
@@ -193,12 +193,12 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
       ).invoke_signed(bet_account_signer)?;
    }
 
-   if amouunt_to_filler_token_account_from_liability_token_account > 0 {
+   if amount_to_filler_token_account_from_liability_token_account > 0 {
       Transfer::new(
          mm_liability_token_account,
          mm_token_account,
          mm_encumbrance_pda,
-         amouunt_to_filler_token_account_from_liability_token_account,
+         amount_to_filler_token_account_from_liability_token_account,
       ).invoke_signed(&encumbrance_pda_signer)?;
    }
 
