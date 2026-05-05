@@ -380,6 +380,8 @@ By offering **liability netting** on most markets, the aggregator massively impr
 
 Settling bets could be the responsibility of the SPAMM if netting was not involved, but I believe it is a major improvement to have. As it is, the aggregator already holds a lot of responsibility so settling bets fairly is a natural extension. The alternative is no netting, SPAMMs hold the bet accounts, and users specify which SPAMMs are allowed to fill the bet based on the user trust of the SPAMM (similar to users opting out of Singbet filling orders on Mollybet since they are known to cancel bets for no reason). Forcing the user to profile every SPAMM is not a good user experience and would hinder new SPAMMs joining the network.
 
+Parlays allow combining up to 5 legs. It is on the SPAMM to check they arent linked or price them correctly if they are (SGPs). There are only 5 legs per bet and no execution-time routing because of the tx size limit and I can't be bothered dealing with Account Lookup Tables at this time.
+
 ## User bet flow
 The **user bet flow** is as follows (single-leg **`fill_bet`**; parlay **`fill_parlay`** is the same pattern with multi-leg quotes and **no netting**):
 1. The user (or UI) uses the aggregator API to find an event and market.
@@ -851,3 +853,6 @@ The **aggregator API** is responsible for providing **event and market ids** and
 Since the aggregator **checks quotes at execution-time** and only selects the **best valid quotes**, **spoofing** quote responses to the client at the tx-building stage is **pointless**.
 
 Everyone must trust that the **aggregator program** will **not** be upgraded to a **malicious version** that will steal the funds in **pending bets** and the **liability token accounts**.
+
+### Token
+There is no token. I'm only saying this because I have had people made a token claiming to be a previous project and hopefully this stops it happening here. 
