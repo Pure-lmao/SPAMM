@@ -37,6 +37,8 @@ At maturity, SPAMMs, and the aggregation thereof, will offer very competitive od
 
 SPAMM operators make money by taking +EV positions across many markets like traditional bookmakers. This can either be via trying to balance their book on each market and earning the spread between each side or between the bets offered and positions hedged elsewhere; or by having an internal pricing model and skewing their book to the side they believe is value.
 
+As more stablecoins move onchain, people are going to want to use them to do things. If onchain-native solutions don't exist for sports betting, those stablecoins will just end up deposited to offchain casinos and be removed from the ecosystem.
+
 # The aggregator
 
 The design for the SPAMM aggregator allows for position netting on major markets (FT, ML, total, spread) prematch which reduces the total collateral a SPAMM needs to hold if they can successfully quote opposing outcomes on a market. This gives a major advantage to the SPAMM operator, compared to just facing users natively. Of course the advantage for the user is that they get the best odds **at execution time** as the best pre-execution offers are all loaded on the transaction and checked again during placement.
