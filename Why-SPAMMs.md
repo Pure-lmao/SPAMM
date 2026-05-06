@@ -1,6 +1,6 @@
 *TL;DR — SPAMMs are programmatic, on-chain market makers for sports betting, modelled on the prop AMMs that already out-quote Binance for SOL/USDC. An aggregator routes user bets to the best of multiple competing SPAMMs at execution time, with liability netting and live-event state-tracking baked in.*
 
-Sports Programmatic Automated Market Makers (SPAMMs) are a proposed system for pricing and fulfilling sports bets. They are based on "proprietary automated market makers” (prop AMMs) that were developed on Solana. SPAMMs allow operators to focus on fewer moving parts than quoting on an orderbook, and more on optimising the pricing algorithm. If you are familiar with AMMs and prop AMMs, you can skip the next section
+Sports Programmatic Automated Market Makers (SPAMMs) are a proposed system for pricing and fulfilling sports and esports bets. They are based on "proprietary automated market makers” (prop AMMs) that were developed on Solana. SPAMMs allow operators to focus on fewer moving parts than quoting on an orderbook, and more on optimising the pricing algorithm. If you are familiar with AMMs and prop AMMs, you can skip the next section
 
 # Background
 
@@ -25,7 +25,7 @@ There are multiple prop AMMs running at any time, each aggregated by trade route
 
 # Why SPAMMs?
 
-SPAMMs aim to bring the benefits for traders of prop AMMs to sports betting. Multiple SPAMMs would compete for the bettor flow: trying to offer the best odds possible, without catching -EV flow. SPAMMs can ingest custom offchain data (such as bookie prices or an operator’s model’s prices), and can perform complex quoting functions such as factoring in the time since last price update, number of bets taken since last update, the liability on each side of the market, the profile of the bettor, the prestige of the event, and anything else you can think of.
+SPAMMs aim to bring the benefits for traders of prop AMMs to sports and esports betting. Multiple SPAMMs would compete for the bettor flow: trying to offer the best odds possible, without catching -EV flow. SPAMMs can ingest custom offchain data (such as bookie prices or an operator’s model’s prices), and can perform complex quoting functions such as factoring in the time since last price update, number of bets taken since last update, the liability on each side of the market, the profile of the bettor, the prestige of the event, and anything else you can think of.
 
 SPAMMs replace the constant updating of orderbook offers, monitoring fills and cancels, and managing liability, with the development (and continuous improvement) of a quoting algorithm, and updating market oracle data. 
 
