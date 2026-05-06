@@ -155,12 +155,12 @@ pub fn oracle_body_two_outcome(odds_a: u32, odds_b: u32) -> [u8; 8] {
    b
 }
 
-/// Three-outcome (soccer 1X2) body: 12 bytes.
-pub fn oracle_body_three_outcome(a: u32, b: u32, c: u32) -> [u8; 12] {
+/// Three-outcome body: `u32` scaled odds in wire order **home, away, draw** (LE).
+pub fn oracle_body_three_outcome(home: u32, away: u32, draw: u32) -> [u8; 12] {
    let mut out = [0u8; 12];
-   out[0..4].copy_from_slice(&a.to_le_bytes());
-   out[4..8].copy_from_slice(&b.to_le_bytes());
-   out[8..12].copy_from_slice(&c.to_le_bytes());
+   out[0..4].copy_from_slice(&home.to_le_bytes());
+   out[4..8].copy_from_slice(&away.to_le_bytes());
+   out[8..12].copy_from_slice(&draw.to_le_bytes());
    out
 }
 

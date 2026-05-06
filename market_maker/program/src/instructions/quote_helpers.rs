@@ -4,7 +4,8 @@ use pinocchio::{ProgramResult, error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
 use spamm_aggregator::state::{MarketId, ParlayLegTable, Sport};
 
-/// Soccer Full-Time (`mkt` 1) and Double Chance (`mkt` 5): three `u32` odds in the market-data body; `side` picks the word.
+/// Soccer Full-Time (`mkt` 1) and Double Chance (`mkt` 5): three `u32` LE odds in the body in order
+/// **home, away, draw**; wire `side` is `0` / `1` / `2` for the same three outcomes.
 #[inline(always)]
 pub fn soccer_mkt_is_three_outcome_1x2_or_double_chance(m: &MarketId) -> bool {
    m.event_id.sport == Sport::Soccer && matches!(m.mkt, 1 | 5)

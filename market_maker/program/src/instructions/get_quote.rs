@@ -13,7 +13,7 @@
 //! - `amount` (u64 LE)
 //! - `odds_scaled` (u32 LE) — min odds hint from caller
 //! - `market_id` (**26** bytes): nested `event_id` (`u64` LE `event_id`, `u32` LE `league`, `u8` `sport`) then `u64` LE `player`, `u32` LE `mkt`, `u8` `period`
-//! - `side` (u8): `0` or `1` on two-outcome markets; `0`, `1`, or `2` on soccer `mkt` 1 or 5 (three-way)
+//! - `side` (u8): two-outcome — `0` home, `1` away; soccer `mkt` 1 or 5 — `0` home, `1` away, `2` draw
 //! - `event_state_hash` (`[u8; 32]`)
 //! - `event_state_sequence` (u16 LE), must be `> 0`
 //!

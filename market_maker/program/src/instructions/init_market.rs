@@ -1,7 +1,8 @@
 //! Create the MM market-data PDA for one market: `["market_data", market_id_wire]` with `MarketId` wire bytes (`to_zc`).
 //!
 //! On-chain account layout: **`[u8 disc][u8 bump][u8; 2 pad][u32 sequence LE][oracle_body]`** —
-//! `get_quote` reads odds from `oracle_body` at offset **8** (2 or 3 × `u32` LE, see `get_quote`).
+//! `get_quote` reads odds from `oracle_body` at offset **8** (3 × `u32` LE
+//! for soccer `mkt` 1 or 5 in order **home, away, draw**).
 //!
 //! Accounts **(4)**
 //! 0. `feepayer` (signer) — must match `admin` for `config_pda`

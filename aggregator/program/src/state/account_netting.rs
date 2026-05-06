@@ -20,8 +20,8 @@ pub struct NettingPdaDataHeader {
    pub bump: u8,
    pub event_id: EventId,
    pub home: i64,
-   pub draw: i64,
    pub away: i64,
+   pub draw: i64,
    pub number_of_lines: u8,
 }
 
@@ -231,7 +231,7 @@ pub fn remove_netting_line(data: &mut [u8], period: u8, mkt: u32) -> Result<(), 
 #[derive(Clone, Copy)]
 pub enum NettingWrite {
    /// Header path (Soccer 1X2 `mkt == 1` or non-Soccer ML `mkt == 0`). Three `i64`s overwrite
-   /// `home / draw / away` at [`NETTING_FT_OFFSET`].
+   /// `home / away / draw` at [`NETTING_FT_OFFSET`] (wire `side` `0` / `1` / `2` matches index).
    Header { ft: [i64; 3] },
    /// Existing `(period, mkt)` line at `line_idx`: overwrite the outcome pair only.
    ExistingLine { line_idx: usize, side0: i64, side1: i64 },
@@ -312,8 +312,8 @@ pub fn calculate_netting(
    }
 
    if sport != Sport::Soccer && mkt == 0 {
-      let selected_index = if side == 0 { 0usize } else { 2usize };
-      let opposing_index = if side == 0 { 2usize } else { 0usize };
+      let selected_index = side as usize;
+      let opposing_index = 1usize - selected_index;
 
       let mut ft = [0i64; 3];
       for (i, slot) in ft.iter_mut().enumerate() {

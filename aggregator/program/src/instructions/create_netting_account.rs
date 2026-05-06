@@ -99,8 +99,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       bump,
       event_id: event_id.to_zc(),
       home: 0i64.into(),
-      draw: 0i64.into(),
       away: 0i64.into(),
+      draw: 0i64.into(),
       number_of_lines: 0,
    };
    {

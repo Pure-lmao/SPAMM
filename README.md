@@ -374,6 +374,7 @@ The first byte of instruction data routes the MM program (oracle hot-path **0** 
 The aggregator is responsible for filling user bets with offers from the integrated SPAMMs. It is also responsible for grading the bets.
 
 ## Design Decisions
+
 To be honest, I did not want the aggregator to be responsible for **grading** the bets or **holding any funds**, to reflect how propAMMs and their aggregators are designed. However, they are also simpler in that the only info needed for the quote is the two token mints, and once the swap is complete, that is the interaction over with. For betting, linking an **event/market id** for every single SPAMM using their own system would be nearly impossible, never mind trying to do it onchain. Therefore a **unified system of ids** is needed that **all SPAMMs must use**. This already puts the aggregator in a position of **responsibility for the bets**.
 
 By offering **liability netting** on most markets, the aggregator massively improves the **capital efficiency** of each SPAMM and encourages them to try to **balance liabilities** which can increase the quality of the quotes offered. Without netting, each SPAMM would need to have a lot more capital on hand to be able to fill every bet. With the netting, the aggregator **must hold on to some of the funds** in order to distribute them to the winners. This puts **more responsibility on the aggregator**.
@@ -382,7 +383,22 @@ Settling bets could be the responsibility of the SPAMM if netting was not involv
 
 Parlays allow combining up to 5 legs. It is on the SPAMM to check they arent linked or price them correctly if they are (SGPs). There are only 5 legs per bet and no execution-time routing because of the tx size limit and I can't be bothered dealing with Account Lookup Tables at this time.
 
-## User bet flow
+## Trust Assumptions
+
+The **aggregator API** is responsible for providing **event and market ids** and linking them to a **real-world event**. The SPAMMs and users access this API and **trust these will be correct**. The aggregator is also responsible for **grading bets** (currently via an **admin key**). Everyone must trust that **bet grading** will reflect the **true outcome** of the market.
+
+Since the aggregator **checks quotes at execution-time** and only selects the **best valid quotes**, **spoofing** quote responses to the client at the tx-building stage is **pointless**.
+
+Everyone must trust that the **aggregator program** will **not** be upgraded to a **malicious version** that will steal the funds in **pending bets** and the **liability token accounts**.
+
+## Pricing and Game Theory
+
+Every bet is priced using a blind auction. Each SPAMM must offer their best price to win the right to fill the bet during the RPC tx-building stage, and then again during the actual onchain execution stage. A SPAMM could, theoretically, tell the difference between the two calls and lie during the tx-building stage but they would not get filled as other SPAMMs would be offering a better price. This makes the Nash Equilibrium of the SPAMM behaviour reach being honest at all times, and offering the most competitive price possible. 
+
+The addition of `min_odds_scaled` in the instruction data also ensures that all SPAMMs cannot collaborate to show a good price but then offer worse odds during the execution stage other than griefing. However, it just takes one honest SPAMM to act honestly and the bet would be filled.
+
+## User Bet Flow
+
 The **user bet flow** is as follows (single-leg **`fill_bet`**; parlay **`fill_parlay`** is the same pattern with multi-leg quotes and **no netting**):
 1. The user (or UI) uses the aggregator API to find an event and market.
 2. The user (or UI) uses the RPC to call the get_quote function of each SPAMM.
@@ -410,6 +426,7 @@ Spread/total lines in account data are stored in sorted order by `period` ascend
 When a bet is on a market that is **eligible for liability netting**, the profit is paid back to the **mm liability token account** owned by the **aggregator**, not the mm token account owned by the mm program. This is so that offsetting funds are still accessible to the mm program for paying winning bettors. Your **total outstanding liability** is tracked by a PDA and any excess funds can be withdrawn by calling the **`withdraw_from_liability_account`** function.
 
 ## API
+
 The **aggregator API** will be responsible for providing:
 - a map of sports to sport ids
 - a map of leagues to league ids
@@ -422,6 +439,7 @@ The **aggregator API** will be responsible for providing:
 **SPAMMs should NOT** rely on the event state hash and sequence in reflecting reality to the millisecond. If you have access to a **faster data feed**, you should use it to update the event state hash and sequence so your quotes **match reality** as closely as possible. This means your **Market Data PDA** and **Event State PDA** will be **in sync** with each other, and avoids filling bets at **stale odds/event states**.
 
 ## Accounts at a Glance
+
 | Account | Discriminator | Seed | Notes |
 |---------|---------------|------|-------|
 | Bet PDA Accounts | 1 | ["bet", user_address, bet_id] | created in fill_bet |
@@ -433,7 +451,8 @@ The **aggregator API** will be responsible for providing:
 | MM Liability Token Account | n/a | n/a | authority is the MM Encumbrance PDA, created in register_mm |
 | MM Netting PDA | 6 | ["netting", mm_program_address, event_id] | created with create_netting_account; see Liability Netting for line layout |
 
-## Aggregator instruction discriminators
+## Aggregator Instructions
+
 The first byte of aggregator instruction `data` selects the handler.
 
 | Discriminator | Instruction |
@@ -453,8 +472,6 @@ The first byte of aggregator instruction `data` selects the handler.
 | 100 | `withdraw_from_liability_account` |
 | 254 | `write_arbitrary_data` |
 | 255 | `force_close_pda` |
-
-## Instructions
 
 ### init_program
 Discriminator: **0**
@@ -846,14 +863,6 @@ Accounts:
 | 2 | pda | writable | Any program-owned PDA to close |
 
 This is called by the aggregator admin to force close a PDA on devnet.
-
-## Trust Assumptions
-
-The **aggregator API** is responsible for providing **event and market ids** and linking them to a **real-world event**. The SPAMMs and users access this API and **trust these will be correct**. The aggregator is also responsible for **grading bets** (currently via an **admin key**). Everyone must trust that **bet grading** will reflect the **true outcome** of the market.
-
-Since the aggregator **checks quotes at execution-time** and only selects the **best valid quotes**, **spoofing** quote responses to the client at the tx-building stage is **pointless**.
-
-Everyone must trust that the **aggregator program** will **not** be upgraded to a **malicious version** that will steal the funds in **pending bets** and the **liability token accounts**.
 
 ## Tests
 

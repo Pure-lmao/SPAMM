@@ -22,11 +22,11 @@ pub fn parse_fill_bet_data(data: &[u8]) -> Result<FillBetIxData, ProgramError> {
    let side = parsed_data.side;
    let mkt = parsed_data.market_id.mkt;
    if unlikely(side > 2) {
-      log!("fill_bet: side must be 0, 1, or 2");
+      log!("fill_bet: side must be 0=home, 1=away, or 2=draw");
       return Err(ProgramError::InvalidInstructionData);
    }
    if unlikely(side == 2 && mkt != 1 && mkt != 5) {
-      log!("fill_bet: side 2 is only valid for mkt 1 or 5");
+      log!("fill_bet: side 2 (draw) is only valid for soccer mkt 1 or 5");
       return Err(ProgramError::InvalidInstructionData);
    }
 
@@ -84,11 +84,11 @@ pub fn parse_fill_parlay_data(data: &[u8]) -> Result<ParsedFillParlay, ProgramEr
       let side = leg.side;
       let mkt = leg.market_id.mkt;
       if unlikely(side > 2) {
-         log!("fill_parlay: side must be 0, 1, or 2");
+         log!("fill_parlay: side must be 0=home, 1=away, or 2=draw");
          return Err(ProgramError::InvalidInstructionData);
       }
       if unlikely(side == 2 && mkt != 1 && mkt != 5) {
-         log!("fill_parlay: side 2 is only valid for mkt 1 or 5");
+         log!("fill_parlay: side 2 (draw) is only valid for soccer mkt 1 or 5");
          return Err(ProgramError::InvalidInstructionData);
       }
       if unlikely(leg.event_state_sequence == 0) {

@@ -28,7 +28,7 @@
 //! Data (after router discriminator in `lib.rs`): `[
 //!   bet_id (u64),
 //!   market_id (MarketId),
-//!   side (u8),
+//!   side (u8): two-outcome — `0` home, `1` away; soccer `mkt` 1 or 5 — `0` home, `1` away, `2` draw,
 //!   amount (u64),
 //!   min_odds_scaled (u32),
 //!   event_state_sequence (u16),

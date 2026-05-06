@@ -320,8 +320,8 @@ export const getNettingPdaHeaderEncoder = (): Encoder<NettingPdaDataHeader> =>
       ['bump', getU8Encoder()],
       ['eventId', getEventIdEncoder()],
       ['home', getI64Encoder()],
-      ['draw', getI64Encoder()],
       ['away', getI64Encoder()],
+      ['draw', getI64Encoder()],
       ['numberOfLines', getU8Encoder()],
    ]);
 
@@ -331,8 +331,8 @@ export const getNettingPdaHeaderDecoder = (): Decoder<NettingPdaDataHeader> =>
       ['bump', getU8Decoder()],
       ['eventId', getEventIdDecoder()],
       ['home', getI64Decoder()],
-      ['draw', getI64Decoder()],
       ['away', getI64Decoder()],
+      ['draw', getI64Decoder()],
       ['numberOfLines', getU8Decoder()],
    ]);
 

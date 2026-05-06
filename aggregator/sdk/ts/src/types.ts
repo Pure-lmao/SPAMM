@@ -135,8 +135,8 @@ export type NettingPdaDataHeader = {
    bump: number;
    eventId: EventId;
    home: bigint;
-   draw: bigint;
    away: bigint;
+   draw: bigint;
    numberOfLines: number;
 };
 

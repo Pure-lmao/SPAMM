@@ -129,7 +129,7 @@ pub fn read_netting_lines_snapshot(env: &Env, netting_pda: &Pubkey) -> (u8, Vec<
    (n, lines)
 }
 
-/// Soccer 1X2 header liabilities (`home` / `draw` / `away`) plus sorted line rows with outcomes.
+/// Soccer 1X2 header liabilities (`home` / `away` / `draw`, wire order) plus sorted line rows with outcomes.
 pub fn read_netting_soccer_header_and_lines(
    env: &Env,
    netting_pda: &Pubkey,
@@ -177,11 +177,11 @@ pub fn assert_netting_pda_initialized(env: &Env, netting_pda: &Pubkey, expected_
    assert_eq!(&acct.data[2..15], wire.as_slice(), "netting event_id");
    assert_eq!(acct.data[NETTING_HEADER_LEN - 1], 0, "number_of_lines");
    let home = i64::from_le_bytes(acct.data[15..23].try_into().unwrap());
-   let draw = i64::from_le_bytes(acct.data[23..31].try_into().unwrap());
-   let away = i64::from_le_bytes(acct.data[31..39].try_into().unwrap());
+   let away = i64::from_le_bytes(acct.data[23..31].try_into().unwrap());
+   let draw = i64::from_le_bytes(acct.data[31..39].try_into().unwrap());
    assert_eq!(home, 0);
-   assert_eq!(draw, 0);
    assert_eq!(away, 0);
+   assert_eq!(draw, 0);
 }
 
 /// Token + encumbrance checks after a single-MM `fill_bet` with full fill from one quote.
