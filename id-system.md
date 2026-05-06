@@ -56,8 +56,8 @@
 
 ## Side (u8 - max 255)
 
-0 - Home
-1 - Away
+0 - Home (Over in totals) 
+1 - Away (Under in totals) 
 2 - Draw (used in 3-way markets)
 
 In Double Chance markets, the side is the team NOT to win (so side 0 means the user is betting away OR draw)
