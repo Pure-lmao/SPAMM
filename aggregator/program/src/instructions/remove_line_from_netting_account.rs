@@ -75,4 +75,21 @@ impl RemoveLineFromLiabilityNettingIxData {
          mkt: zc.mkt.get(),
       })
    }
+
+   /// Serialize for tests / off-chain builders.
+   #[inline(always)]
+   pub fn write_wire(&self, out: &mut [u8]) -> Result<(), ProgramError> {
+      if out.len() != REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN {
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      let zc = RemoveLineFromLiabilityNettingIxDataZc {
+         event_id: self.event_id.to_zc(),
+         period: self.period,
+         mkt: self.mkt.into(),
+      };
+      unsafe {
+         core::ptr::write(out.as_mut_ptr().cast(), zc);
+      }
+      Ok(())
+   }
 }

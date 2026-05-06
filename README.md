@@ -848,11 +848,17 @@ Accounts:
 This is called by the aggregator admin to force close a PDA on devnet.
 
 ## Trust Assumptions
+
 The **aggregator API** is responsible for providing **event and market ids** and linking them to a **real-world event**. The SPAMMs and users access this API and **trust these will be correct**. The aggregator is also responsible for **grading bets** (currently via an **admin key**). Everyone must trust that **bet grading** will reflect the **true outcome** of the market.
 
 Since the aggregator **checks quotes at execution-time** and only selects the **best valid quotes**, **spoofing** quote responses to the client at the tx-building stage is **pointless**.
 
 Everyone must trust that the **aggregator program** will **not** be upgraded to a **malicious version** that will steal the funds in **pending bets** and the **liability token accounts**.
 
+## Tests
+
+There are some Mollusk integration tests that I got AI to write. There should be decent enough coverage (although only the example SPAMM is used so routing etc isn't tested) but I cannot be bothered to actually write them myself because Mollusk is a pain in the arse to write with manually and no one really care right now.
+
 ### Token
-There is no token. I'm only saying this because I have had people made a token claiming to be a previous project and hopefully this stops it happening here. 
+
+There is no token. I'm only saying this because people made a token claiming to be a previous project claiming to be real and hopefully this stops it happening here. 

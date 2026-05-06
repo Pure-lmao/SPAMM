@@ -1,0 +1,183 @@
+//! Append-only CU ledger (`cu_ledger.md`) updated on successful instruction tests.
+//! Output is grouped by instruction (first path segment, or whole name if no `/`).
+//!
+//! Each row is a test that measured a **successful** (`ProgramResult::Ok`) execution. Tests that
+//! expect the program to return an error do not call `record_cu_success` (or it no-ops when not `Ok`).
+
+use std::collections::HashMap;
+use std::fs;
+use std::io::Write;
+use std::path::PathBuf;
+use std::sync::Mutex;
+
+use chrono::Utc;
+
+static LEDGER_MUTEX: Mutex<()> = Mutex::new(());
+
+fn ledger_path() -> PathBuf {
+   PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/spamm_mollusk/cu_ledger.md")
+}
+
+/// Preferred section order (matches aggregator instruction groups).
+const GROUP_ORDER: &[&str] = &[
+   "init_program",
+   "change_config_status",
+   "register_mm",
+   "fill_bet",
+   "fill_parlay",
+   "grade_bets",
+   "settle_bet",
+   "settle_parlay",
+   "create_netting_account",
+   "add_line_to_netting_account",
+   "remove_line_from_netting_account",
+   "close_netting_account",
+   "withdraw_from_liability_account",
+   "write_arbitrary_data",
+   "force_close_pda",
+];
+
+/// `(group_key, row_suffix)` for table display — `suffix` equals `group` when there is no sub-path.
+fn split_group(full: &str) -> (String, String) {
+   if let Some((g, rest)) = full.split_once('/') {
+      (g.to_string(), rest.to_string())
+   } else {
+      (full.to_string(), full.to_string())
+   }
+}
+
+fn group_sort_key(group: &str) -> (usize, String) {
+   let idx = GROUP_ORDER.iter().position(|&g| g == group).unwrap_or(usize::MAX);
+   (idx, group.to_string())
+}
+
+fn format_timestamp_utc() -> String {
+   Utc::now().format("%Y-%m-%d %H:%M:%S UTC").to_string()
+}
+
+/// `this_run`, `last_run`, `min`, `last_updated` (UTC string). `diff` is derived when writing.
+type CuRow = (u64, u64, u64, String);
+
+fn cu_diff(this_run: u64, last_run: u64) -> i128 {
+   this_run as i128 - last_run as i128
+}
+
+/// Data rows: `| test | this run | last run | [diff] | min | last updated |` — `diff` optional (older files).
+fn parse_row(cols: &[&str]) -> Option<CuRow> {
+   if cols.len() < 5 || cols[0] == "test" {
+      return None;
+   }
+   let this_run: u64 = cols[1].parse().ok()?;
+   let last_run: u64 = cols[2].parse().ok()?;
+   if cols.len() >= 6 {
+      let min_v: u64 = cols[4].parse().ok()?;
+      let d = cols[5].to_string();
+      Some((this_run, last_run, min_v, d))
+   } else {
+      let min_v: u64 = cols[3].parse().ok()?;
+      let d = cols[4].to_string();
+      Some((this_run, last_run, min_v, d))
+   }
+}
+
+fn load_rows(path: &PathBuf) -> Vec<(String, CuRow)> {
+   if !path.exists() {
+      return Vec::new();
+   }
+   let text = fs::read_to_string(path).unwrap_or_default();
+   let mut rows = Vec::new();
+   let mut current_group: Option<String> = None;
+
+   for line in text.lines() {
+      if let Some(rest) = line.strip_prefix("## `") {
+         if let Some(g) = rest.strip_suffix('`') {
+            current_group = Some(g.to_string());
+         }
+         continue;
+      }
+      if !line.starts_with('|') || line.contains("---") {
+         continue;
+      }
+      let cols: Vec<&str> = line.split('|').map(str::trim).filter(|s| !s.is_empty()).collect();
+      let Some((this_run, last_run, min_v, d)) = parse_row(&cols) else {
+         continue;
+      };
+      let Some(ref g) = current_group else {
+         continue;
+      };
+      let suffix = cols[0];
+      let full = if suffix == *g {
+         g.clone()
+      } else {
+         format!("{}/{}", g, suffix)
+      };
+      rows.push((full, (this_run, last_run, min_v, d)));
+   }
+   rows
+}
+
+fn merge_row(map: &mut HashMap<String, CuRow>, name: String, cus: u64, ts: &str) {
+   map.entry(name)
+      .and_modify(|(this_run, last_run, min_val, d)| {
+         *last_run = *this_run;
+         *this_run = cus;
+         *min_val = (*min_val).min(cus);
+         *d = ts.to_string();
+      })
+      .or_insert((cus, cus, cus, ts.to_string()));
+}
+
+/// Record one successful run: shifts `this run` → `last run`, updates min, writes grouped sections.
+pub fn record_cu(name: &str, cus: u64) {
+   let _g = LEDGER_MUTEX.lock().expect("ledger lock");
+   let path = ledger_path();
+   let ts = format_timestamp_utc();
+
+   let mut map: HashMap<String, CuRow> = HashMap::new();
+   for (n, row) in load_rows(&path) {
+      map.insert(n, row);
+   }
+   merge_row(&mut map, name.to_string(), cus, &ts);
+
+   let mut by_group: HashMap<String, Vec<(String, CuRow, String)>> = HashMap::new();
+   for (full, row) in map {
+      let (g, suf) = split_group(&full);
+      by_group.entry(g).or_default().push((full, row, suf));
+   }
+
+   for vec in by_group.values_mut() {
+      vec.sort_by(|a, b| a.0.cmp(&b.0));
+   }
+
+   let mut group_keys: Vec<String> = by_group.keys().cloned().collect();
+   group_keys.sort_by_key(|g| group_sort_key(g));
+
+   let mut out = String::new();
+   out.push_str("# SPAMM aggregator — Mollusk CU ledger\n\n");
+   out.push_str(
+      "Regenerated by `cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --test-threads=4` \
+       (from `aggregator/program`).\n\n",
+   );
+
+   for g in group_keys {
+      let Some(rows) = by_group.get(&g) else {
+         continue;
+      };
+      out.push_str(&format!("## `{}`\n\n", g));
+      out.push_str("| test | this run | last run | diff | min | last updated |\n");
+      out.push_str("|------|---------:|---------:|-----:|----:|-------------|\n");
+      for (_full, row, suf) in rows {
+         let (this_run, last_run, min_v, d) = row.clone();
+         let diff = cu_diff(this_run, last_run);
+         out.push_str(&format!(
+            "| {} | {} | {} | {} | {} | {} |\n",
+            suf, this_run, last_run, diff, min_v, d
+         ));
+      }
+      out.push('\n');
+   }
+
+   let mut f = fs::File::create(&path).expect("create cu_ledger.md");
+   f.write_all(out.as_bytes()).expect("write cu_ledger");
+}

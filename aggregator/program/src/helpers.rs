@@ -197,6 +197,20 @@ pub fn verify_netting_pda(netting_pda: &AccountView, mm_program_account: &Accoun
    return true;
 }
 
+/// `fill_bet` netting slot: either the real netting PDA for this MM + event, or the system program
+/// id as a placeholder when no netting account exists yet (same as devnet clients).
+#[inline]
+pub fn verify_netting_pda_or_placeholder(
+   netting_pda: &AccountView,
+   mm_program_account: &AccountView,
+   event_id: &EventId,
+) -> bool {
+   if address_eq(netting_pda.address(), &SYSTEM_ID) {
+      return true;
+   }
+   verify_netting_pda(netting_pda, mm_program_account, event_id)
+}
+
 
 pub fn verify_netting_pda_exists(netting_pda: &AccountView, mm_program_account: &AccountView, event_id: &EventId) -> ProgramResult {
    if unlikely(!address_eq(netting_pda.owner(), &ID)) {

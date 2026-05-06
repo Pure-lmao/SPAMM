@@ -87,6 +87,24 @@ impl FillParlayIxData {
          },
       })
    }
+
+   #[inline(always)]
+   pub fn write_wire(&self, out: &mut [u8]) -> Result<(), ProgramError> {
+      if out.len() != FILL_PARLAY_IX_DATA_LEN {
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      let zc = FillParlayIxDataZc {
+         bet_id: self.bet_id.into(),
+         amount: self.amount.into(),
+         min_odds_scaled: self.min_odds_scaled.into(),
+         num_legs: self.num_legs,
+         legs: self.legs.to_zc(),
+      };
+      unsafe {
+         core::ptr::write(out.as_mut_ptr().cast(), zc);
+      }
+      Ok(())
+   }
 }
 
 /// Quote CPI + return parse. Large `maybe_metas` / `cpi_accounts` / ix buffer live **only** in this frame.

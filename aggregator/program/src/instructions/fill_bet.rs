@@ -23,7 +23,7 @@
 //! 5. `mm_encumbrance_pda` (writable)
 //! 6. `mm_liability_token_account` (writable)
 //! 7. `mm_token_account` (writable)
-//! 8. `mm_netting_pda` (writable);
+//! 8. `mm_netting_pda` (writable) — real netting PDA, or **system program** if no netting account exists;
 //!
 //! Data (after router discriminator in `lib.rs`): `[
 //!   bet_id (u64),
@@ -47,7 +47,7 @@ use pinocchio_system::{ID as SYSTEM_ID, instructions::CreateAccount};
 use pinocchio_token::instructions::Transfer;
 use crate::{ID, 
    constants::MAX_NUMBER_OF_MMS, 
-   helpers::{calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
+   helpers::{calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda_or_placeholder, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
    instructions::fill_helpers::{parse_quote_return_for_mm, refund_liability_deposit_mismatch},
    parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data}, 
    state::{
@@ -239,7 +239,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          continue;
       }
 
-      let is_valid_mm_netting_pda = verify_netting_pda(
+      let is_valid_mm_netting_pda = verify_netting_pda_or_placeholder(
          mm_netting_pda,
          &mm_program_account,
          &market_id.event_id,
@@ -700,6 +700,27 @@ impl FillBetIxData {
          market_id: MarketId::from_zc(&zc.market_id).ok_or(ProgramError::InvalidInstructionData)?,
          event_state_hash: zc.event_state_hash,
       })
+   }
+
+   /// Serialize for tests / off-chain tx builders (mirrors [`GetQuoteIxData::write_wire`]).
+   #[inline(always)]
+   pub fn write_wire(&self, out: &mut [u8]) -> Result<(), ProgramError> {
+      if out.len() != FILL_BET_IX_DATA_LEN {
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      let zc = FillBetIxDataZc {
+         bet_id: self.bet_id.into(),
+         market_id: self.market_id.to_zc(),
+         side: self.side,
+         amount: self.amount.into(),
+         min_odds_scaled: self.min_odds_scaled.into(),
+         event_state_sequence: self.event_state_sequence.into(),
+         event_state_hash: self.event_state_hash,
+      };
+      unsafe {
+         core::ptr::write(out.as_mut_ptr().cast(), zc);
+      }
+      Ok(())
    }
 }
 

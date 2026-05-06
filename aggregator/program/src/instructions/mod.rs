@@ -34,8 +34,14 @@ mod change_config_status;
 mod force_close_pda;
 mod withdraw_from_liability_account;
 mod write_arbitrary_data;
-pub use fill_bet::FillBetIxData;
-pub use fill_parlay::FillParlayIxData;
+pub use add_line_to_netting_account::{
+   AddLineToLiabilityNettingIxData, ADD_LINE_TO_LIABILITY_NETTING_IX_LEN,
+};
+pub use fill_bet::{FillBetIxData, FILL_BET_IX_DATA_LEN};
+pub use fill_parlay::{FillParlayIxData, FILL_PARLAY_IX_DATA_LEN};
+pub use remove_line_from_netting_account::{
+   RemoveLineFromLiabilityNettingIxData, REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN,
+};
 
 #[inline(never)]
 pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {

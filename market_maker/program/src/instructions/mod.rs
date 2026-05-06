@@ -30,7 +30,9 @@ mod quote_helpers;
 #[inline(never)]
 pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {
    match d {
-      // Oracle hot-path discriminator `0` is handled in `lib.rs` (Doppler).
+      // Discriminator `0` (`getUpdateOracleIx` / `encodeMarketMakerInstructionData` `updateOracle`): normal
+      // Solana ix from the MM SDK (`market_maker/client/admin.ts`). Handled in `entrypoint` before this table
+      // (Doppler path); do not add a `0` arm here.
       INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(program_id, accounts, data),
 
       // Discriminators 2-4 are reserved for SPAMM-specific instructions. Aggregator CPI quote

@@ -24,6 +24,10 @@ pinocchio::no_allocator!();
 
 #[no_mangle]
 pub unsafe extern "C" fn entrypoint(input: *mut u8) -> u64 {
+   // Oracle refresh: same `Instruction` the TS SDK builds (`getUpdateOracleIx`, see `market_maker/client/admin.ts`
+   // `updateOracle`): MM program id, accounts `[admin signer, market_data writable]`, data `0u8 || u32 seq LE ||
+   // 3×u32 odds LE` (third odds `0` on two-outcome markets). Handled here via Doppler on the VM input buffer
+   // before `deserialize_and_route`; not routed through `instructions::dispatch`.
    if doppler::read::<u64>(input, 0) == 0x2 {
       doppler::prelude::Admin::check(input);
       doppler::prelude::Oracle::<[u32; 3]>::check_and_update(input);
