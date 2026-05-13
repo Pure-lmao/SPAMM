@@ -1,5 +1,6 @@
 #![no_std]
 
+pub mod alt_ix;
 pub mod constants;
 pub mod instructions;
 pub mod parsers;

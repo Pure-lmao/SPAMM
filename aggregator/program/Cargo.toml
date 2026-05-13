@@ -27,7 +27,7 @@ pinocchio-token-2022 = "0.3.0"
 pinocchio-log = { version = "0.5.1", default-features = false, features = ["macro"] }
 solana-address = { version = "2.4.0", features = ["curve25519"] }
 solana-define-syscall = { version = "5.0", features = ["unstable-static-syscalls"] }
-zeropod = { version = "0.1.0", features = ["solana-address"] }
+zeropod = { version = "0.3.2", features = ["solana-address"] }
 
 
 [lints.rust]

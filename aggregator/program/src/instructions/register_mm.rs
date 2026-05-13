@@ -1,21 +1,29 @@
 use pinocchio::{
-   AccountView, Address, ProgramResult, Resize, cpi::{Seed, Signer}, error::ProgramError, hint::unlikely
+   AccountView, Address, ProgramResult, Resize, address::address_eq, cpi::{Seed, Signer},
+   error::ProgramError, hint::unlikely,
 };
 use pinocchio_associated_token_account::instructions::Create as CreateATA;
 use pinocchio_log::log;
 use pinocchio_system::instructions::{CreateAccount, Transfer};
-use solana_address::address_eq;
 
 use crate::{
-   ID, helpers::{
-      get_rent_local, verify_associated_token_program, verify_config_pda, verify_mint, verify_mm_admin, verify_mm_list_pda, verify_mm_program_executable, verify_signer, verify_system_program, verify_token_program
-   }, readers::read_u16_le_unchecked, 
-   state::{MM_LIST_HEADER_LEN, 
-      other::{MM_ENCUMBRANCE_PDA_DISCRIMINATOR, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET, MmEncumbrancePdaDataZc},
-   }, writers::{write_arbitrary_bytes_unchecked, write_u16_le_unchecked}
+   ID,
+   alt_ix::cpi_extend_lookup_table,
+   constants::CONFIG_PDA_SEED,
+   helpers::{
+      get_rent_local, verify_address_lookup_table_program, verify_associated_token_program, verify_config_pda, verify_lookup_table, verify_mint, verify_mm_admin, verify_mm_list_pda, verify_mm_program_executable, verify_parlay_quote_buffer, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program
+   },
+   readers::{read_u16_le_unchecked},
+   state::{
+      MM_LIST_HEADER_LEN, other::{
+         MM_ENCUMBRANCE_PDA_DISCRIMINATOR, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED,
+         MM_LIST_PDA_NUMBER_OF_MMS_OFFSET, MmEncumbrancePdaDataZc,
+      }
+   },
+   writers::{write_arbitrary_bytes_unchecked, write_u16_le_unchecked},
 };
 
-/// Accounts (11):
+/// Accounts (13):
 /// 0. `mm_admin` (writable signer)
 /// 1. `mm_program` (readonly)
 /// 2. `mm_config_pda` (readonly)
@@ -27,24 +35,33 @@ use crate::{
 /// 8. `token_program` (readonly)
 /// 9. `associated_token_program` (readonly)
 /// 10. `system_program` (readonly)
+/// 11. `lookup_table` (writable) — aggregator ALT from config
+/// 12. `mm_token_account` (readonly) — MM token account (`mm_admin` + `mint`)
+/// 13. `mm_quote_buffer` (readonly) — MM quote buffer PDA
+/// 14. `mm_parlay_quote_buffer` (readonly) — MM parlay quote buffer PDA
 ///
-/// No instruction data after the router discriminator.
+/// Data: recent_slot (u64) — LE - must be a recent slot for the ALT program to use
 
 pub const REGISTER_MM_IX_DISCRIMINATOR: u8 = 2;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
-      mm_admin, //check for signer
-      mm_program, //check for executable
-      mm_config_pda, //checked in auth signer check
-      mm_encumbrance_pda, //check for liability pda
-      mm_liability_token_account, //check for liability token account
-      our_config_pda, //check from const
-      mm_list_pda, //check from const
-      mint, //check from const
-      token_program, //check from const
-      associated_token_program, //check from const
-      system_program, //check from const
+      mm_admin,
+      mm_program,
+      mm_config_pda,
+      mm_encumbrance_pda,
+      mm_liability_token_account,
+      our_config_pda,
+      mm_list_pda,
+      mint,
+      token_program,
+      associated_token_program,
+      system_program,
+      lookup_table,
+      lookup_table_program,
+      mm_token_account,
+      mm_quote_buffer,
+      mm_parlay_quote_buffer,
    ] = accounts else {
       log!("register_mm: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
@@ -64,6 +81,22 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_mint(&mint)?;
    verify_config_pda(&our_config_pda, false)?;
    verify_mm_list_pda(mm_list_pda)?;
+   verify_token_account(true, &mm_token_account, &mm_config_pda, &mint, &token_program)?;
+   verify_address_lookup_table_program(&lookup_table_program)?;
+   verify_lookup_table(lookup_table)?;
+   let quote_buffer_valid = verify_quote_buffer(mm_quote_buffer, &mm_program);
+   if unlikely(!quote_buffer_valid) {
+      log!("register_mm: quote buffer is invalid");
+      return Err(ProgramError::InvalidAccountData);
+   }
+   let parlay_quote_buffer_valid = verify_parlay_quote_buffer(mm_parlay_quote_buffer, &mm_program);
+   if unlikely(!parlay_quote_buffer_valid) {
+      log!("register_mm: parlay quote buffer is invalid");
+      return Err(ProgramError::InvalidAccountData);
+   }
+
+   #[cfg(feature = "log")]
+   log!("register_mm: verification complete");
 
    // register mm in the list
    let data_len = mm_list_pda.data_len();
@@ -112,8 +145,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    }
 
    let (expected_mm_encumbrance_pda, mm_encumbrance_pda_bump) = Address::find_program_address(
-      &[MM_ENCUMBRANCE_PDA_SEED, mm_program.address().as_ref()], 
-      &ID
+      &[MM_ENCUMBRANCE_PDA_SEED, mm_program.address().as_ref()],
+      &ID,
    );
    if unlikely(!address_eq(mm_encumbrance_pda.address(), &expected_mm_encumbrance_pda)) {
       log!("register_mm: mm liability pda address mismatch");
@@ -127,23 +160,24 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       Seed::from(&mm_encumbrance_pda_bump_seed),
    ];
    let mm_encumbrance_pda_signer = Signer::from(&mm_encumbrance_pda_seeds);
-   
-   CreateAccount{
+
+   CreateAccount {
       from: mm_admin,
       to: mm_encumbrance_pda,
       lamports: get_rent_local(MM_ENCUMBRANCE_PDA_LEN as u64),
       space: MM_ENCUMBRANCE_PDA_LEN as u64,
       owner: &ID,
-   }.invoke_signed(&[mm_encumbrance_pda_signer])?;
+   }
+   .invoke_signed(&[mm_encumbrance_pda_signer])?;
 
    unsafe {
-      let ptr = mm_encumbrance_pda.data_mut_ptr();
-      let data = MmEncumbrancePdaDataZc {
+      let p = mm_encumbrance_pda.data_mut_ptr();
+      let enc = MmEncumbrancePdaDataZc {
          discriminator: MM_ENCUMBRANCE_PDA_DISCRIMINATOR.into(),
          bump: mm_encumbrance_pda_bump.into(),
          encumbrance: 0i64.into(),
       };
-      core::ptr::write(ptr.cast::<MmEncumbrancePdaDataZc>(), data);
+      core::ptr::write(p.cast::<MmEncumbrancePdaDataZc>(), enc);
    }
 
    // create the mm liability token account (ata of pda)
@@ -154,8 +188,42 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mint,
       token_program,
       system_program,
-   }.invoke()?;
-   
+   }
+   .invoke()?;
+
+   // add mm accounts to the lookup table
+   let (_, config_bump) = Address::find_program_address(&[CONFIG_PDA_SEED], &ID);
+
+   #[cfg(feature = "log")]
+   log!("register_mm: config bump: {}", config_bump);
+
+   let config_bump_seed = &[config_bump];
+   let config_signer_seeds: [Seed<'_>; 2] = [
+      Seed::from(CONFIG_PDA_SEED),
+      Seed::from(config_bump_seed),
+   ];
+   let config_signer = Signer::from(&config_signer_seeds);
+
+   let extend_addresses: [Address; 7] = [
+      *mm_program.address(),
+      *mm_config_pda.address(),
+      *mm_quote_buffer.address(),
+      *mm_parlay_quote_buffer.address(),
+      *mm_encumbrance_pda.address(),
+      *mm_token_account.address(),
+      *mm_liability_token_account.address(),
+   ];
+   #[cfg(feature = "log")]
+   log!("register_mm: cpi start");
+
+   cpi_extend_lookup_table(
+      lookup_table,
+      our_config_pda,
+      mm_admin,
+      system_program,
+      &extend_addresses,
+      config_signer,
+   )?;
 
    Ok(())
 }

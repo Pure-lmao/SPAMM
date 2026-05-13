@@ -313,7 +313,7 @@ export type FillParlayQuoteIxData = {
 };
 
 export type DecodedAggregatorInstruction =
-   | { kind: 'initProgram' }
+   | { kind: 'initProgram'; recentSlot: bigint }
    | { kind: 'changeConfigStatus'; status: 0 | 1 }
    | { kind: 'registerMm' }
    | { kind: 'fillBet'; data: FillBetIxData }

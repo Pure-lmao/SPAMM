@@ -1,12 +1,17 @@
 import { loadKeypairSignerFromJsonFile } from "utils";
-import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
-import { decodeMmReturnData, getBetData, getBetPda, getEventHash, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, ODDS_SCALE, Sport } from "spamm-aggregator-sdk";
+import { createRpcClients, fetchAddressesByLookupTable, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
+import { decodeMmReturnData, getBetData, getBetPda, getEventHash, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, LOOKUP_TABLE_ID, ODDS_SCALE, Sport } from "spamm-aggregator-sdk";
 import type { Address } from "@solana/kit";
 const clients = createRpcClients();
 
 
 export const USER_SIGNER = await loadKeypairSignerFromJsonFile('./user_keypair.json');
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
+const DumbMarketMaker2 = "DUMBu5faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
+const DumbMarketMaker3 = "DUMBu6faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
+const DumbMarketMaker4 = "DUMBu7faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
+const DumbMarketMaker5 = "DUMBu8faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
+
 const betId = 10n;
 const sport = 1 as Sport;
 const marketId = {
@@ -71,8 +76,12 @@ async function placeBet() {
       USER_SIGNER.address,
       [DumbMarketMaker],
    );
-   const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
-   console.log(txResult);
+
+   // const simResult = await simulateTransaction(clients.rpc, [ix], [USER_SIGNER], false);
+   // console.log(simResult);
+
+   // const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER], addressesByLookupTable);
+   // console.log(txResult);
 }
 // placeBet().catch(console.error);
 
@@ -136,8 +145,12 @@ async function placeParlayBet() {
       USER_SIGNER.address,
       DumbMarketMaker,
    );
-   const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
-   console.log(txResult);
+
+   // const simResult = await simulateTransaction(clients.rpc, [ix], [USER_SIGNER], false);
+   // console.log(simResult);
+
+   // const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
+   // console.log(txResult);
 }
 // placeParlayBet().catch(console.error);
 

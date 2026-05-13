@@ -153,6 +153,16 @@ impl MarketId {
       Self::from_zc(zc)
    }
 
+   #[inline(always)]
+   pub fn as_bytes(self) -> [u8; Self::WIRE_SIZE] {
+      let zc = self.to_zc();
+      let mut out = [0u8; Self::WIRE_SIZE];
+      unsafe {
+         core::ptr::write(out.as_mut_ptr().cast(), zc);
+      }
+      out
+   }
+
    /// Whether `(period, mkt)` may be stored as a netting PDA **line-table** row (spread/total style).
    /// Header fields cover soccer win mkt (1) and DC wont fit (5) and non-soccer ML (`period` 0, `mkt` 0);
    /// those keys must not duplicate. Soccer `mkt` 4 may use the line table. Rejects `mkt > 10_000`

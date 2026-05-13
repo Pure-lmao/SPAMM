@@ -20,6 +20,14 @@ export const SPL_ASSOCIATED_TOKEN_PROGRAM_ID: Address = address(
    'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
 );
 
+export const ADDRESS_LOOKUP_TABLE_PROGRAM_ID: Address = address(
+   'AddressLookupTab1e1111111111111111111111111',
+);
+
+export const LOOKUP_TABLE_ID: Address = address(
+   '7AChvrzBkq9zuSWFE89VT5Q4QGDpPG6sYKJMgLYnMDzS',
+);
+
 /** `constants::ODDS_SCALE` — odds are scaled by this factor (e.g. 15000 = 1.5x). */
 export const ODDS_SCALE = 10000n;
 

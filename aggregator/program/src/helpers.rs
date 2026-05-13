@@ -11,7 +11,7 @@ use zeropod::ZeroPodFixed;
 
 use crate::{
    ID,
-   constants::{CONFIG_PDA, MINT, MM_LIST_PDA, ODDS_SCALE},
+   constants::{ADDRESS_LOOKUP_TABLE_PROGRAM, CONFIG_PDA, LOOKUP_TABLE, MINT, MM_LIST_PDA, ODDS_SCALE},
    parsers::get_token_account_balance,
    readers::{read_address_unchecked, read_u8_unchecked},
    state::{
@@ -321,6 +321,26 @@ pub fn verify_parlay_quote_buffer(
    true
 }
 
+#[inline(always)]
+pub fn verify_lookup_table(lookup_table: &AccountView) -> ProgramResult {
+   if unlikely(!address_eq(lookup_table.address(), &LOOKUP_TABLE)) {
+      log!("verify_lookup_table: lookup table must be as defined in the program");
+      return Err(ProgramError::InvalidSeeds);
+   }
+
+   Ok(())
+}
+
+#[inline(always)]
+pub fn verify_address_lookup_table_program(lookup_table_program: &AccountView) -> ProgramResult {
+   if unlikely(!address_eq(lookup_table_program.address(), &ADDRESS_LOOKUP_TABLE_PROGRAM)) {
+      log!("verify_address_lookup_table_program: lookup table program must be the address lookup table program");
+      return Err(ProgramError::InvalidAccountOwner);
+   }
+   Ok(())
+}
+
+#[inline(always)]
 pub fn verify_event_state(
    event_state_pda: &AccountView,
    mm_program_account: &AccountView,

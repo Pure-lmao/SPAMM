@@ -23,7 +23,7 @@ function formatAddressAsRustNewFromArrayBody(address: Address): string {
 // const pda = await getConfigPda();
 // console.log(pda);
 const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile('admin_keypair.json');
-// console.log(formatAddressAsRustNewFromArrayBody(ADMIN_SIGNER.address));
+// console.log(formatAddressAsRustNewFromArrayBody("7AChvrzBkq9zuSWFE89VT5Q4QGDpPG6sYKJMgLYnMDzS" as Address));
 
 const pkString = '';
 /** Base58-encoded 32-byte seed or 64-byte secret key (wallet export format). */

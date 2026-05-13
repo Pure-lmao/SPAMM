@@ -20,7 +20,7 @@ async function registerMM() {
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-// registerMM().catch(console.error);
+registerMM().catch(console.error);
 
 // getMmEncumbranceData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 // getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
@@ -141,7 +141,7 @@ async function updateOracle() {
    console.log(txResult);
 }
 // updateOracle().catch(console.error);
-getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId).then(console.log).catch(console.error);
+// getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId).then(console.log).catch(console.error);
 
 const returnDataDecoder = getMmReturnDataDecoder();
 async function getQuote() {

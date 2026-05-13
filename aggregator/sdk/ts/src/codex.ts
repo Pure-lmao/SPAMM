@@ -819,8 +819,13 @@ function concatDiscriminator(disc: number, payload: ReadonlyUint8Array | Uint8Ar
 
 export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction): Uint8Array {
    switch (ix.kind) {
-      case 'initProgram':
-         return new Uint8Array([INIT_PROGRAM_IX_DISCRIMINATOR]);
+      case 'initProgram': {
+         const payload = getU64Encoder().encode(ix.recentSlot);
+         if (payload.length !== 8) {
+            throw new RangeError('initProgram: recentSlot encoding must be 8 bytes');
+         }
+         return concatDiscriminator(INIT_PROGRAM_IX_DISCRIMINATOR, payload);
+      }
       case 'changeConfigStatus': {
          if (ix.status !== 0 && ix.status !== 1) {
             throw new RangeError('changeConfigStatus.status must be 0 or 1');
@@ -906,10 +911,10 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
    const restBytes = new Uint8Array(rest);
    switch (disc) {
       case INIT_PROGRAM_IX_DISCRIMINATOR:
-         if (rest.length !== 0) {
-            throw new RangeError('initProgram: expected no payload');
+         if (rest.length !== 8) {
+            throw new RangeError('initProgram: expected 8-byte recentSlot (u64 le)');
          }
-         return { kind: 'initProgram' };
+         return { kind: 'initProgram', recentSlot: getU64Decoder().decode(restBytes) };
       case CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR:
          if (rest.length !== 1) {
             throw new RangeError('changeConfigStatus: expected 1 byte');

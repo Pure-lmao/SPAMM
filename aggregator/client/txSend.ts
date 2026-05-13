@@ -2,16 +2,18 @@
  * Shared helpers: load keypair JSON, devnet RPC + WS, v0 tx build/sign, send + confirm.
  */
 
+import { fetchAddressLookupTable } from '@solana-program/address-lookup-table';
 import {
    pipe,
    type Instruction,
+   type Address,
+   type AddressesByLookupTableAddress,
    addSignersToTransactionMessage,
    appendTransactionMessageInstructions,
-   createKeyPairSignerFromBytes,
+   compressTransactionMessageUsingAddressLookupTables,
    createSolanaRpc,
    createSolanaRpcSubscriptions,
    createTransactionMessage,
-   devnet,
    getSignatureFromTransaction,
    sendAndConfirmTransactionFactory,
    setTransactionMessageFeePayerSigner,
@@ -27,8 +29,11 @@ import {
    type Rpc,
    type SolanaRpcApi,
    getBase64EncodedWireTransaction,
-   type Base64EncodedDataResponse
+   getTransactionSize,
+   type Base64EncodedDataResponse,
 } from '@solana/kit';
+import { LOOKUP_TABLE_ID } from 'spamm-aggregator-sdk';
+
 
 /** HTTP RPC URL (env `SOLANA_RPC_URL` or devnet default). */
 export function resolveHttpRpcUrl(override?: string): string {
@@ -62,15 +67,26 @@ export function createRpcClients(options?: Readonly<{ httpUrl?: string; wsUrl?: 
       httpUrl,
       wsUrl,
    };
-}     
+}
 
-
+/** Load on-chain ALT account data for `compressTransactionMessageUsingAddressLookupTables`. */
+export async function fetchAddressesByLookupTable(
+   rpc: RpcClients['rpc'],
+   lookupTableAddress: Address,
+): Promise<AddressesByLookupTableAddress> {
+   const {
+      data: { addresses },
+   } = await fetchAddressLookupTable(rpc, lookupTableAddress);
+   return { [lookupTableAddress]: addresses } as AddressesByLookupTableAddress;
+}
 
 export type BuildSignV0Params = Readonly<{
    feePayer: KeyPairSigner;
    instructions: readonly Instruction[];
    /** Every signer required by the instructions (typically includes `feePayer`). */
    signers: readonly TransactionSigner[];
+   /** When `true`, compress against on-chain {@link LOOKUP_TABLE_ID} (fetched via RPC). */
+   useALT?: boolean;
 }>;
 
 /** Fetch blockhash, assemble v0 message, attach signers, sign. */
@@ -80,12 +96,20 @@ export async function buildSignV0Transaction(
 ): Promise<ReturnType<typeof signTransactionMessageWithSigners>> {
    const { value: latestBlockhash } = await rpc.getLatestBlockhash({ commitment: 'confirmed' }).send();
 
-   const txMessage = pipe(
+   let txMessage = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayerSigner(params.feePayer, m),
       (m) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m),
       (m) => appendTransactionMessageInstructions([...params.instructions], m),
    );
+
+   if (params.useALT === true) {
+      const addressesByLookupTable = await fetchAddressesByLookupTable(rpc, LOOKUP_TABLE_ID);
+      txMessage = compressTransactionMessageUsingAddressLookupTables(
+         txMessage,
+         addressesByLookupTable,
+      );
+   }
 
    const txMessageWithSigners = addSignersToTransactionMessage([...params.signers], txMessage);
    const signedTransaction = await signTransactionMessageWithSigners(txMessageWithSigners);
@@ -126,12 +150,14 @@ export function signatureBase58(signedTransaction: Awaited<ReturnType<typeof bui
 export async function sendAndConfirmInstructions(
    instructions: readonly Instruction[],
    signers: readonly KeyPairSigner[],
+   useALT: boolean = false,
 ): Promise<Signature> {
    const clients = createRpcClients();
-      const signedTransaction = await buildSignV0Transaction(clients.rpc, {
+   const signedTransaction = await buildSignV0Transaction(clients.rpc, {
       feePayer: signers[0]!,
       instructions,
       signers,
+      useALT,
    });
    return sendAndConfirmSignedTransaction(clients, signedTransaction);
 }
@@ -140,14 +166,19 @@ export async function simulateTransaction(
    rpc: RpcClients['rpc'],
    instructions: readonly Instruction[],
    signers: readonly KeyPairSigner[],
+   useALT: boolean = false,
 ): Promise<Base64EncodedDataResponse | undefined> {
    const transaction = await buildSignV0Transaction(rpc, {
       feePayer: signers[0]!,
       instructions,
       signers,
+      useALT,
    });
-   const encodedTransaction = getBase64EncodedWireTransaction(transaction)
-   const simulation = await rpc.simulateTransaction(encodedTransaction, {encoding: 'base64', sigVerify: false}).send();
-   console.log(simulation.value);
+   const wireBytes = getTransactionSize(transaction);
+   console.log(`wire transaction size: ${wireBytes} bytes (useALT=${useALT})`);
+   const encodedTransaction = getBase64EncodedWireTransaction(transaction);
+   const simulation = await rpc
+      .simulateTransaction(encodedTransaction, { encoding: 'base64', sigVerify: false })
+      .send();
    return simulation.value.returnData?.data;
 }

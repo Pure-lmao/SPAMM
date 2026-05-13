@@ -1,6 +1,6 @@
-import { getBetPda, getChangeConfigStatusIx, getEventHash, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getParlayBetPda, getWriteArbitraryDataIx } from "spamm-aggregator-sdk";
+import { getBetPda, getChangeConfigStatusIx, getConfigPda, getEventHash, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getMmListPda, getParlayBetPda, getRecentSlot, getWriteArbitraryDataIx } from "spamm-aggregator-sdk";
 import { loadKeypairSignerFromJsonFile } from "utils";
-import { sendAndConfirmInstructions } from "./txSend.ts"
+import { createRpcClients, sendAndConfirmInstructions } from "./txSend.ts"
 import type { Address } from "@solana/kit";
 import { USER_SIGNER } from "user.ts";
 
@@ -8,7 +8,10 @@ import { USER_SIGNER } from "user.ts";
 const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile('./admin_keypair.json');
 
 async function initProgram() {
-   const ix = await getInitProgramIx(ADMIN_SIGNER.address);
+   const clients = createRpcClients();
+   const currentSlot = await getRecentSlot(clients.rpc);
+   const recentSlot = currentSlot - 5n;
+   const ix = await getInitProgramIx(ADMIN_SIGNER.address, recentSlot);
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
@@ -26,10 +29,10 @@ async function gradeBets(bets: Address[], results: Uint8Array) {
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-gradeBets([
-   (await getParlayBetPda(USER_SIGNER.address, 10n))[0],
-   (await getParlayBetPda(USER_SIGNER.address, 11n))[0],
-], new Uint8Array([1, 2])).catch(console.error);
+// gradeBets([
+//    (await getParlayBetPda(USER_SIGNER.address, 10n))[0],
+//    (await getParlayBetPda(USER_SIGNER.address, 11n))[0],
+// ], new Uint8Array([1, 2])).catch(console.error);
 
 
 async function forceClosePda(pda: Address) {
@@ -37,8 +40,8 @@ async function forceClosePda(pda: Address) {
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-// const [parlayPda] = await getParlayBetPda(USER_SIGNER.address, 2n);
-// forceClosePda(parlayPda).catch(console.error);
+const [pda] = await getConfigPda();
+// forceClosePda(pda).catch(console.error);
 
 async function writeArbitraryData(
    account: Address,

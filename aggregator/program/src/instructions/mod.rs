@@ -47,7 +47,7 @@ pub use remove_line_from_netting_account::{
 pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {
    match d {
       //set up
-      INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(accounts),
+      INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(accounts, data),
       CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR => change_config_status::process(accounts, data),
       REGISTER_MM_IX_DISCRIMINATOR => register_mm::process(accounts, data),
 

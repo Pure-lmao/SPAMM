@@ -478,7 +478,14 @@ The first byte of aggregator instruction `data` selects the handler.
 ### init_program
 Discriminator: **0**
 
-Data: `None`
+Data:
+
+```rust
+struct InitProgramIxData {
+   discriminator: u8, // 0
+   recent_slot: u64, // LE — ALT PDA derivation + create CPI; slot must appear in `SlotHashes` when the transaction executes
+}
+```
 
 Accounts:
 
@@ -488,8 +495,10 @@ Accounts:
 | 1 | config pda | writable | Must be uninitialized. |
 | 2 | mm list pda | writable | Must be uninitialized. |
 | 3 | system program | readonly | Must be the system program |
+| 4 | lookup table | writable | Must be uninitialized. Seeds: `[config_pda, recent_slot]` under the Address Lookup Table program |
+| 5 | address lookup table program | readonly | Must be the Address Lookup Table program |
 
-This is called by the aggregator admin to initialize the program and set up program-owned accounts.
+This is called by the aggregator admin to initialize the program and set up program-owned accounts. It creates an address lookup table authorized by the config PDA, seeds it with core addresses (config PDA, mint, token programs, system program, rent, clock), and stores the ALT pubkey on the config account.
 
 ### change_config_status
 Discriminator: **1**
@@ -526,14 +535,19 @@ Accounts:
 | 2 | mm config pda | readonly | Must be uninitialized |
 | 3 | mm encumbrance pda | writable | Must be uninitialized |
 | 4 | mm liability token account | writable | Must be uninitialized; authority is the MM Encumbrance PDA |
-| 5 | aggregator config pda | readonly | Must be uninitialized |
+| 5 | aggregator config pda | readonly | Must be the Aggregator Config PDA |
 | 6 | mm list pda | writable | |
-| 7 | token program | readonly | Must be the token program |
-| 8 | mint | readonly | Must be the mint |
+| 7 | mint | readonly | Must be the mint |
+| 8 | token program | readonly | Must be the token program |
 | 9 | associated token program | readonly | Must be the associated token program |
 | 10 | system program | readonly | Must be the system program |
+| 11 | lookup table | writable | Aggregator ALT referenced by the aggregator config PDA |
+| 12 | address lookup table program | readonly | Must be the Address Lookup Table program |
+| 13 | mm token account | readonly | |
+| 14 | mm quote buffer | readonly | |
+| 15 | mm parlay quote buffer | readonly | |
 
-This is called by a SPAMM admin to register the SPAMM with the aggregator.
+This is called by a SPAMM admin to register the SPAMM with the aggregator. The MM program id, MM config PDA, quote buffers, encumbrance PDA, collateral ATA, and liability ATA are appended to that address lookup table so transactions can reference them via the ALT.
 
 ### fill_bet
 Discriminator: **3**

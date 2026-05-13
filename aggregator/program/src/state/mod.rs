@@ -41,7 +41,7 @@ pub use mm_get_quote::{GetQuoteIxData, GetQuoteIxDataZc, GET_QUOTE_IX_DISCRIMINA
 pub use mm_fill_quote::{FillQuoteIxData, FillQuoteIxDataZc, FILL_QUOTE_IX_DISCRIMINATOR};
 pub use ids::{EventId, MarketId, Sport};
 pub use other::{
-   CONFIG_PDA_DISCRIMINATOR, CONFIG_PDA_LEN,
+   CONFIG_PDA_DISCRIMINATOR, CONFIG_PDA_LEN, CONFIG_PDA_LOOKUP_TABLE_OFFSET,
    EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED,
    ConfigPdaData, ConfigPdaDataZc, EventStateData, EventStateDataZc, MM_LIST_HEADER_LEN, MM_LIST_PDA_DISCRIMINATOR,
 };

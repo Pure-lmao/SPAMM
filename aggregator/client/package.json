@@ -9,6 +9,7 @@
     "typescript": "^5"
   },
   "dependencies": {
+    "@solana-program/address-lookup-table": "^0.11.0",
     "@solana/kit": "^6.8.0",
     "spamm-aggregator-sdk": "file:../sdk/ts"
   }

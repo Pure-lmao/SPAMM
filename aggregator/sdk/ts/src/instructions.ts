@@ -1,8 +1,18 @@
 import { AccountRole, type Instruction } from '@solana/instructions';
-import { type Address } from '@solana/kit';
-
 import {
+   getProgramDerivedAddress,
+   getAddressEncoder,
+   getU64Encoder,
+   type Address,
+   type Rpc,
+   type SolanaRpcApi,
+} from '@solana/kit';
+const u64Encoder = getU64Encoder();
+const addressEncoder = getAddressEncoder();
+import {
+   ADDRESS_LOOKUP_TABLE_PROGRAM_ID,
    AGGREGATOR_PROGRAM_ID,
+   LOOKUP_TABLE_ID,
    MAX_NUMBER_OF_MMS,
    MINT_ID,
    ODDS_SCALE,
@@ -123,20 +133,26 @@ async function settleFillerAccountRow(
 }
 
 /**
- * **`init_program`** — one-time setup of aggregator config PDA and MM list PDA (rent paid by admin).
+ * **`init_program`** — one-time setup of aggregator config PDA, MM list PDA, and address lookup table (rent paid by admin).
  *
- * **Rust:** `aggregator::instructions::init_program::process` (`INIT_PROGRAM_IX_DISCRIMINATOR` = 0). Router data: empty after discriminator.
+ * **Rust:** `aggregator::instructions::init_program::process` (`INIT_PROGRAM_IX_DISCRIMINATOR` = 0). Router data after discriminator: **`recent_slot: u64`** (little-endian), used for ALT PDA derivation and create CPI (must appear in `SlotHashes` when the tx runs).
  *
- * @param admin - **TS:** `Address` — writable signer, becomes config admin. **Rust:** `admin` (`AccountView`, writable signer).
- * @returns **`Promise<Instruction>`** — `programAddress` = {@link AGGREGATOR_PROGRAM_ID}; `data` = single-byte discriminator only. Accounts: admin, config PDA, MM list PDA, system program (derived PDAs use seeds from helpers / on-chain constants).
+ * @param admin - **TS:** `Address` — writable signer, becomes config admin. **Rust:** `authority` (`AccountView`, writable signer).
+ * @param recentSlot - **TS:** `bigint` — slot encoded as LE `u64` in instruction data and in ALT PDA seeds with config PDA. Use a recent slot from RPC (e.g. {@link getRecentSlot}).
+ * @returns **`Promise<Instruction>`** — `programAddress` = {@link AGGREGATOR_PROGRAM_ID}; `data` = `[discriminator, ...u64(recentSlot)]`. Accounts: admin, config PDA, MM list PDA, system program, lookup table PDA.
  */
-export async function getInitProgramIx(admin: Address): Promise<Instruction> {
+export async function getInitProgramIx(admin: Address, recentSlot: bigint): Promise<Instruction> {
    const [configPda] = await getConfigPda();
    const [mmListPda] = await getMmListPda();
+   const [lookupTablePda] = await getProgramDerivedAddress({
+      programAddress: ADDRESS_LOOKUP_TABLE_PROGRAM_ID,
+      seeds: [addressEncoder.encode(configPda), u64Encoder.encode(recentSlot)],
+   });
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [ws(admin), rw(configPda), rw(mmListPda), ro(SYSTEM_PROGRAM_ID)],
-      data: encodeAggregatorInstructionData({ kind: 'initProgram' }),
+      accounts: [ws(admin), rw(configPda), rw(mmListPda), 
+         ro(SYSTEM_PROGRAM_ID), rw(lookupTablePda), ro(ADDRESS_LOOKUP_TABLE_PROGRAM_ID)],
+      data: encodeAggregatorInstructionData({ kind: 'initProgram', recentSlot }),
    };
 }
 
@@ -179,6 +195,9 @@ export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Pro
    );
    const [configPda] = await getConfigPda();
    const [mmListPda] = await getMmListPda();
+   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [mmQuoteBuffer] = await getMmQuoteBufferPda(mmProgram);
+   const [mmParlayQuoteBuffer] = await getMmParlayQuoteBufferPda(mmProgram);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
@@ -193,6 +212,11 @@ export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Pro
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSTEM_PROGRAM_ID),
+         rw(LOOKUP_TABLE_ID),
+         ro(ADDRESS_LOOKUP_TABLE_PROGRAM_ID),
+         ro(mmTokenAta),
+         ro(mmQuoteBuffer),
+         ro(mmParlayQuoteBuffer),
       ],
       data: encodeAggregatorInstructionData({ kind: 'registerMm' }),
    };
@@ -746,7 +770,7 @@ export async function getWriteArbitraryDataIx(admin: Address, account: Address, 
 
 /** Tagged router input: wire-ish fields and addresses in one object per `kind`. */
 export type AggregatorInstructionInput =
-   | { kind: 'initProgram'; admin: Address }
+   | { kind: 'initProgram'; admin: Address; recentSlot: bigint }
    | { kind: 'changeConfigStatus'; status: 0 | 1; admin: Address }
    | { kind: 'registerMm'; mmAdmin: Address; mmProgram: Address }
    | {
@@ -803,10 +827,10 @@ export type AggregatorInstructionKind = AggregatorInstructionInput['kind'];
  * @param input - **TS:** {@link AggregatorInstructionInput} — discriminated union: `kind` plus the same fields as the matching `get*Ix` function. **Rust:** N/A (client-only helper).
  * @returns **`Promise<Instruction>`** — always `programAddress` = {@link AGGREGATOR_PROGRAM_ID} for router variants. **Note:** does **not** handle {@link getMmGetQuoteIx} (MM program, not router).
  */
-export async function getInstructionIx(input: AggregatorInstructionInput): Promise<Instruction> {
+export async function getInstructionIx(input: AggregatorInstructionInput, _rpc: Rpc<SolanaRpcApi>): Promise<Instruction> {
    switch (input.kind) {
       case 'initProgram':
-         return getInitProgramIx(input.admin);
+         return getInitProgramIx(input.admin, input.recentSlot);
       case 'changeConfigStatus':
          return getChangeConfigStatusIx(input.admin, input.status);
       case 'registerMm':

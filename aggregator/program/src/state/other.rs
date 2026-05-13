@@ -10,12 +10,15 @@ pub struct ConfigPdaData {
    pub discriminator: u8,
    pub status: u8,
    pub authority: Address,
+   /// Address lookup table owned by `ADDRESS_LOOKUP_TABLE_PROGRAM`; authority = config PDA.
+   pub lookup_table: Address,
 }
 
 pub const CONFIG_PDA_DISCRIMINATOR: u8 = 2;
 pub const CONFIG_PDA_LEN: usize = <ConfigPdaData as ZeroPodFixed>::SIZE;
 pub const CONFIG_PDA_STATUS_OFFSET: usize = 1;
 pub const CONFIG_PDA_AUTHORITY_OFFSET: usize = 2;
+pub const CONFIG_PDA_LOOKUP_TABLE_OFFSET: usize = 34;
 
 const _: () = assert!(core::mem::size_of::<ConfigPdaData>() == CONFIG_PDA_LEN);
 

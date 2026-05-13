@@ -1,4 +1,4 @@
-import { getAddressEncoder, getProgramDerivedAddress, ProgramDerivedAddressBump, type Address } from '@solana/kit';
+import { getAddressEncoder, getProgramDerivedAddress, ProgramDerivedAddressBump, Rpc, SolanaRpcApi, type Address } from '@solana/kit';
 
 import {
    AGGREGATOR_PROGRAM_ID,
@@ -37,6 +37,11 @@ export function encodeEventIdWire(eventId: EventId): Uint8Array {
    return new Uint8Array(eventIdEncoder.encode(eventId));
 }
 
+
+export async function getRecentSlot(rpc: Rpc<SolanaRpcApi>): Promise<bigint> {
+   const slot = await rpc.getSlot().send();
+   return slot;
+}
 
 /**
  * **`u64` bet id** as **8 little-endian bytes** for bet PDA seeds (`["bet", user, bet_id]`).
