@@ -14,10 +14,9 @@ use pinocchio::{
 use pinocchio_log::log;
 use pinocchio_token::{instructions::Transfer,};
 
-use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, QUOTE_BUFFER_PDA};
+use crate::{constants::{MM_CONFIG_PDA, QUOTE_BUFFER_PDA}, mm_helpers::check_quote_matches};
 use crate::state::FillQuoteIxPayload;
-use spamm_aggregator::readers::read_u8_unchecked;
-use spamm_aggregator::writers::write_u8_unchecked;
+use spamm_aggregator::{readers::read_u8_unchecked, writers::write_u8_unchecked};
 use spamm_aggregator::state::mm_account_config::MM_CONFIG_PDA_BUMP_OFFSET;
 use spamm_aggregator::state::mm_quote::MM_QUOTE_BUFFER_DISCRIMINATOR;
 use spamm_aggregator::state::{MM_ACCOUNT_CONFIG_SEED, MMQuoteBuffer, MM_QUOTE_BUFFER_LEN};
@@ -58,33 +57,33 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let parsed = FillQuoteIxPayload::decode(data)?;
+   let ix_data = FillQuoteIxPayload::decode(data)?;
+
+   if unlikely(ix_data.amount_to_fill == 0) {
+      unsafe { 
+         write_u8_unchecked(mm_quote_buffer.data_mut_ptr(), IS_USED_OFFSET, 1);
+      }
+      return Ok(());
+   }
 
    let expected = MMQuoteBuffer {
       discriminator: MM_QUOTE_BUFFER_DISCRIMINATOR,
       is_used: 0,
       user_address: *user.address(),
-      market_id: parsed.market_id,
-      side: parsed.side,
-      max_amount: MAX_QUOTE_STAKE_UNITS,
-      odds_scaled: parsed.odds_scaled,
-      event_state_hash: parsed.event_state_hash,
-      event_state_sequence: parsed.event_state_sequence,
+      market_id: ix_data.market_id,
+      side: ix_data.side,
+      max_amount: ix_data.amount_to_fill,
+      odds_scaled: ix_data.odds_scaled,
+      event_state_hash: ix_data.event_state_hash,
+      event_state_sequence: ix_data.event_state_sequence,
    };
-   let mut expected_wire = [0u8; MM_QUOTE_BUFFER_LEN];
-   expected.write_wire(&mut expected_wire)?;
-   let actual = unsafe { core::slice::from_raw_parts(mm_quote_buffer.data_ptr(), MM_QUOTE_BUFFER_LEN) };
-   if unlikely(actual != expected_wire.as_slice()) {
-      log!("fill_quote: instruction snapshot must match quote buffer");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-
-   if unlikely(parsed.amount_to_fill > MAX_QUOTE_STAKE_UNITS) {
-      log!("fill_quote: amount_to_fill exceeds quote max");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-
-   if likely(parsed.amount_to_send > 0) {
+   let quote = {
+      let quote_buf = mm_quote_buffer.try_borrow()?;
+      MMQuoteBuffer::from_bytes(quote_buf.as_ref())?
+   };
+   check_quote_matches(&expected, &quote)?;
+   
+   if likely(ix_data.amount_to_send > 0) {
       let config_bump = unsafe { read_u8_unchecked(mm_config_pda.data_ptr(), MM_CONFIG_PDA_BUMP_OFFSET) };
       let bump_ref = [config_bump];
       let signer_seeds = [
@@ -92,15 +91,17 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
          Seed::from(&bump_ref as &[u8]),
       ];
       let signers = [Signer::from(&signer_seeds)];
+
       Transfer::new(
          mm_token_account,
          liability_account,
          mm_config_pda,
-         parsed.amount_to_send,
+         ix_data.amount_to_send,
       )
       .invoke_signed(&signers)?;
    }
 
+   // set quote is_used to 1
    unsafe {
       write_u8_unchecked(mm_quote_buffer.data_mut_ptr(), IS_USED_OFFSET, 1);
    }
@@ -112,7 +113,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
    //       mm_config_pda.data_ptr(), GLOBAL_EXPOSURE_OFFSET);
    //    write_u64_le_unchecked(
    //       mm_config_pda.data_mut_ptr(), GLOBAL_EXPOSURE_OFFSET, 
-   //       prev_global_exposure + parsed.amount_to_send
+   //       prev_global_exposure + ix_data.amount_to_send
    //    );
    // }
 

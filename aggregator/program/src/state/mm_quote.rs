@@ -67,6 +67,21 @@ impl MMQuoteBuffer {
    }
 
    #[inline(always)]
+   pub fn from_zc(zc: &MMQuoteBufferZc) -> Self {
+      Self {
+         discriminator: zc.discriminator,
+         is_used: zc.is_used,
+         user_address: zc.user_address,
+         market_id: MarketId::from_zc(&zc.market_id).unwrap(),
+         side: zc.side,
+         max_amount: zc.max_amount.into(),
+         odds_scaled: zc.odds_scaled.into(),
+         event_state_hash: zc.event_state_hash,
+         event_state_sequence: zc.event_state_sequence.into(),
+      }
+   }
+
+   #[inline(always)]
    pub fn write_wire(&self, out: &mut [u8]) -> Result<(), ProgramError> {
       if out.len() != MM_QUOTE_BUFFER_LEN {
          return Err(ProgramError::InvalidInstructionData);
@@ -76,6 +91,12 @@ impl MMQuoteBuffer {
          core::ptr::write(out.as_mut_ptr().cast(), zc);
       }
       Ok(())
+   }
+
+   #[inline(always)]
+   pub fn from_bytes(bytes: &[u8]) -> Result<Self, ProgramError> {
+      let zc = <Self as ZeroPodFixed>::from_bytes(bytes).map_err(|_| ProgramError::InvalidInstructionData)?;
+      Ok(Self::from_zc(zc))
    }
 }
 

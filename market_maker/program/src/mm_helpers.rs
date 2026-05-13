@@ -9,8 +9,7 @@ use spamm_aggregator::state::mm_account_config::{
    MM_CONFIG_PDA_ADMIN_OFFSET,
 };
 use spamm_aggregator::state::{
-   EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData,
-   EventStateDataZc, MarketId,
+   EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId
 };
 use zeropod::ZeroPodFixed;
 
@@ -187,4 +186,33 @@ pub fn close_pda_return_rent(
    pda.set_lamports(0);
    recipient.set_lamports(dest_lamports + pda_lamports);
    pda.close()
+}
+
+#[inline(always)]
+pub fn check_quote_matches(expected: &MMQuoteBuffer, account: &MMQuoteBuffer) -> ProgramResult {
+   if unlikely(account.is_used != 0) {
+      return Err(ProgramError::InvalidAccountData);
+   }
+   if unlikely(!address_eq(&expected.user_address, &account.user_address)) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(!expected.market_id.eq(&account.market_id)) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(expected.side != account.side) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(expected.max_amount > account.max_amount) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(expected.odds_scaled != account.odds_scaled) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(expected.event_state_hash != account.event_state_hash) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if unlikely(expected.event_state_sequence != account.event_state_sequence) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   Ok(())
 }

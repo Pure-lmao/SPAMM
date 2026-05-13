@@ -57,7 +57,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let parsed = FillParlayQuoteIxPayload::decode(data)?;
+   let ix_data = FillParlayQuoteIxPayload::decode(data)?;
 
    let quote = {
       let quote_buf = mm_parlay_quote_buffer.try_borrow()?;
@@ -76,11 +76,11 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       log!("fill_parlay_quote: user mismatch");
       return Err(ProgramError::InvalidAccountData);
    }
-   if unlikely(quote.odds_scaled != parsed.odds_scaled) {
+   if unlikely(quote.odds_scaled != ix_data.odds_scaled) {
       log!("fill_parlay_quote: odds_scaled mismatch vs buffer");
       return Err(ProgramError::InvalidInstructionData);
    }
-   if unlikely(parsed.amount_to_fill > quote.max_amount) {
+   if unlikely(ix_data.amount_to_fill > quote.max_amount) {
       log!("fill_parlay_quote: amount_to_fill exceeds quoted max");
       return Err(ProgramError::InvalidInstructionData);
    }
@@ -89,12 +89,12 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   if unlikely(parsed.amount_to_fill > MAX_QUOTE_STAKE_UNITS) {
+   if unlikely(ix_data.amount_to_fill > MAX_QUOTE_STAKE_UNITS) {
       log!("fill_parlay_quote: amount_to_fill exceeds quote max");
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   if likely(parsed.amount_to_send > 0) {
+   if likely(ix_data.amount_to_send > 0) {
       let config_bump = unsafe { read_u8_unchecked(mm_config_pda.data_ptr(), MM_CONFIG_PDA_BUMP_OFFSET) };
       let bump_ref = [config_bump];
       let signer_seeds = [
@@ -106,7 +106,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
          mm_token_account,
          liability_account,
          mm_config_pda,
-         parsed.amount_to_send,
+         ix_data.amount_to_send,
       )
       .invoke_signed(&signers)?;
    }
