@@ -1,4 +1,4 @@
-use pinocchio::Address;
+use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::state::EventId;
@@ -52,6 +52,15 @@ pub struct EventGameState {
 }
 pub const EVENT_GAME_STATE_LEN: usize = <EventGameState as ZeroPodFixed>::SIZE;
 
+impl PartialEq for EventGameState {
+   #[inline(always)]
+   fn eq(&self, other: &Self) -> bool {
+      self.as_u64() == other.as_u64()
+   }
+}
+
+impl Eq for EventGameState {}
+
 impl EventGameState {
    #[inline(always)]
    pub const fn zeroed() -> Self {
@@ -74,18 +83,7 @@ impl EventGameState {
       b[7] = self.away_secondary;
       u64::from_le_bytes(b)
    }
-}
 
-impl PartialEq for EventGameState {
-   #[inline(always)]
-   fn eq(&self, other: &Self) -> bool {
-      self.as_u64() == other.as_u64()
-   }
-}
-
-impl Eq for EventGameState {}
-
-impl EventGameState {
    #[inline(always)]
    pub fn to_zc(self) -> EventGameStateZc {
       EventGameStateZc {
@@ -106,6 +104,12 @@ impl EventGameState {
          home_secondary: z.home_secondary,
          away_secondary: z.away_secondary,
       }
+   }
+
+   #[inline(always)]
+   pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
+      let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+      Ok(Self::from_zc(&z))
    }
 }
 

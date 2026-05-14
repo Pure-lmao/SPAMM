@@ -213,6 +213,17 @@ impl GetQuoteParlayIxData {
    }
 
    #[inline(always)]
+   pub fn from_zc(z: &GetQuoteParlayIxDataZc) -> Self {
+      Self {
+         instruction_discriminator: z.instruction_discriminator,
+         amount: z.amount.into(),
+         odds_scaled: z.odds_scaled.into(),
+         num_legs: z.num_legs,
+         legs: ParlayLegTable::from_zc(&z.legs).unwrap(),
+      }
+   }
+
+   #[inline(always)]
    pub fn write_wire(&self, out: &mut [u8]) -> Result<(), ProgramError> {
       if out.len() != Self::WIRE_LEN {
          return Err(ProgramError::InvalidInstructionData);
@@ -222,6 +233,12 @@ impl GetQuoteParlayIxData {
          core::ptr::write(out.as_mut_ptr().cast(), zc);
       }
       Ok(())
+   }
+
+   #[inline(always)]
+   pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
+      let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+      Ok(Self::from_zc(&z))
    }
 }
 
@@ -250,6 +267,16 @@ impl FillParlayQuoteIxData {
    }
 
    #[inline(always)]
+   pub fn from_zc(z: &FillParlayQuoteIxDataZc) -> Self {
+      Self {
+         instruction_discriminator: z.instruction_discriminator,
+         amount_to_fill: z.amount_to_fill.into(),
+         odds_scaled: z.odds_scaled.into(),
+         amount_to_send: z.amount_to_send.into(),
+      }
+   }
+
+   #[inline(always)]
    pub fn write_wire(&self, out: &mut [u8]) -> Result<(), ProgramError> {
       if out.len() != Self::WIRE_LEN {
          return Err(ProgramError::InvalidInstructionData);
@@ -259,5 +286,11 @@ impl FillParlayQuoteIxData {
          core::ptr::write(out.as_mut_ptr().cast(), zc);
       }
       Ok(())
+   }
+
+   #[inline(always)]
+   pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
+      let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+      Ok(Self::from_zc(&z))
    }
 }

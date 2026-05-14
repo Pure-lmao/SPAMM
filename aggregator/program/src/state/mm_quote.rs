@@ -81,6 +81,12 @@ impl MMQuoteBuffer {
    }
 
    #[inline(always)]
+   pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
+      let zc = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+      Ok(Self::from_zc(zc))
+   }
+
+   #[inline(always)]
    pub fn write_wire(&self, out: &mut [u8]) -> Result<(), ProgramError> {
       if out.len() != MM_QUOTE_BUFFER_LEN {
          return Err(ProgramError::InvalidInstructionData);

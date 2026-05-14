@@ -36,6 +36,20 @@ impl FillQuoteIxData {
    }
 
    #[inline(always)]
+   pub fn from_zc(z: &FillQuoteIxDataZc) -> Self {
+      Self {
+         instruction_discriminator: z.instruction_discriminator,
+         amount_to_fill: z.amount_to_fill.into(),
+         odds_scaled: z.odds_scaled.into(),
+         market_id: MarketId::from_zc(&z.market_id).unwrap(),
+         side: z.side,
+         event_game_state: EventGameState::from_zc(&z.event_game_state),
+         event_state_sequence: z.event_state_sequence.into(),
+         amount_to_send: z.amount_to_send.into(),
+      }
+   }
+
+   #[inline(always)]
    pub fn write_wire(&self, out: &mut [u8]) -> Result<(), ProgramError> {
       if out.len() != Self::WIRE_LEN {
          return Err(ProgramError::InvalidInstructionData);
@@ -45,5 +59,11 @@ impl FillQuoteIxData {
          core::ptr::write(out.as_mut_ptr().cast(), zc);
       }
       Ok(())
+   }
+
+   #[inline(always)]
+   pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
+      let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+      Ok(Self::from_zc(&z))
    }
 }
