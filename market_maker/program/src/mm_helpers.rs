@@ -5,11 +5,12 @@ use pinocchio::address::{Address, address_eq};
 use pinocchio::error::ProgramError;
 use pinocchio::hint::unlikely;
 use pinocchio::ProgramResult;
+use pinocchio_log::log;
 use spamm_aggregator::state::mm_account_config::{
    MM_CONFIG_PDA_ADMIN_OFFSET,
 };
 use spamm_aggregator::state::{
-   EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId
+   EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventId, EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId
 };
 use zeropod::ZeroPodFixed;
 
@@ -115,33 +116,46 @@ pub fn mm_market_data_pda_ok(market_data: &AccountView, program_id: &Address, ma
    address_eq(market_data.address(), &expected)
 }
 
-/// Event state PDA `["event_state", event_id]`, plus sequence and hash.
+/// Event state PDA `["event_state", event_id]`, plus sequence and game state.
 #[inline(always)]
 pub fn verify_event_state(
    event_state_pda: &AccountView,
    program_id: &Address,
    event_id: &EventId,
-   event_state_hash: &[u8; 32],
+   event_game_state: &EventGameState,
    event_state_sequence: u16,
 ) -> bool {
    if unlikely(!address_eq(event_state_pda.owner(), program_id)) {
+      log!("verify_event_state: wrong owner");
       return false;
    }
 
    let event_state_data = match event_state_pda.try_borrow() {
       Ok(data) => data,
-      Err(_) => return false,
+      Err(_) => {
+         log!("verify_event_state: borrow failed");
+         return false;
+      }
    };
 
    if unlikely(event_state_data.len() != EVENT_STATE_LEN) {
+      log!(
+         "verify_event_state: len got {} want {}",
+         event_state_data.len(),
+         EVENT_STATE_LEN
+      );
       return false;
    }
 
    let state = match EventStateData::from_bytes(&event_state_data) {
       Ok(s) => s,
-      Err(_) => return false,
+      Err(_) => {
+         log!("verify_event_state: from_bytes failed");
+         return false;
+      }
    };
    if unlikely(state.discriminator != EVENT_STATE_DISCRIMINATOR) {
+      log!("verify_event_state: bad disc got {}", state.discriminator);
       return false;
    }
 
@@ -153,14 +167,26 @@ pub fn verify_event_state(
       program_id
    );
    if unlikely(!address_eq(event_state_pda.address(), &expected_pda)) {
+      log!("verify_event_state: pda mismatch");
       return false;
    }
 
    if unlikely(state.sequence.get() != event_state_sequence) {
+      log!(
+         "verify_event_state: seq on_chain {} want {}",
+         state.sequence.get(),
+         event_state_sequence
+      );
       return false;
    }
 
-   if unlikely(&state.state_hash != event_state_hash) {
+   if unlikely(EventGameState::from_zc(&state.game_state) != *event_game_state) {
+      let on_chain = EventGameState::from_zc(&state.game_state);
+      log!(
+         "verify_event_state: game_state mismatch on_chain_u64 {} want_u64 {}",
+         on_chain.as_u64(),
+         event_game_state.as_u64()
+      );
       return false;
    }
 
@@ -168,6 +194,7 @@ pub fn verify_event_state(
       || state.event_id.league != event_id.league
       || state.event_id.sport != event_id.sport)
    {
+      log!("verify_event_state: event_id mismatch");
       return false;
    }
 
@@ -208,7 +235,7 @@ pub fn check_quote_matches(expected: &MMQuoteBuffer, account: &MMQuoteBuffer) ->
    if unlikely(expected.odds_scaled != account.odds_scaled) {
       return Err(ProgramError::InvalidInstructionData);
    }
-   if unlikely(expected.event_state_hash != account.event_state_hash) {
+   if unlikely(expected.event_game_state != account.event_game_state) {
       return Err(ProgramError::InvalidInstructionData);
    }
    if unlikely(expected.event_state_sequence != account.event_state_sequence) {

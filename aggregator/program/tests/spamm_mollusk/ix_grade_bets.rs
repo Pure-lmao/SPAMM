@@ -4,7 +4,7 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_program_error::ProgramError;
 
 use spamm_aggregator::instructions::FillBetIxData;
-
+use spamm_aggregator::state::EventGameState;
 use spamm_aggregator::state::account_bet::BetResult;
 
 use crate::common::{
@@ -39,7 +39,7 @@ fn place_simple_bet(env: &mut Env, bet_id: u64) {
       amount: 4_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let ix = fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder());
    assert_ix_ok(&env.run_ix(ix), "place_simple_bet");

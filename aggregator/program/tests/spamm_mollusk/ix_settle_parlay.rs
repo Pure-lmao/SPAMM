@@ -6,6 +6,7 @@ use solana_program_error::ProgramError;
 use spamm_aggregator::instructions::FillBetIxData;
 use spamm_aggregator::instructions::FillParlayIxData;
 
+use spamm_aggregator::state::EventGameState;
 use spamm_aggregator::state::account_bet::BetResult;
 
 use crate::common::{
@@ -39,8 +40,8 @@ fn fill_parlay_and_grade(env: &mut Env, bet_id: u64, grade_result: u8) {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id,
       amount: 4_000_000,
@@ -212,8 +213,8 @@ fn settle_parlay_pending_fails() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 501,
       amount: 4_000_000,
@@ -282,7 +283,7 @@ fn settle_parlay_regular_bet_account_rejected() {
       amount: 3_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    assert!(env
       .run_ix(fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder()))

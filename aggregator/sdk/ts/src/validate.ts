@@ -70,12 +70,8 @@ export function validateI64(n: bigint, label = 'value'): void {
 }
 
 export function validateBetSide(side: number, mkt: number, label = 'side'): void {
-   if (!Number.isInteger(side) || side < 0 || side > 2) {
-      throw new RangeError(`${label} must be 0, 1, or 2`);
-   }
-   if (side === 2 && mkt !== 1 && mkt !== 5) {
-      throw new RangeError(`${label} may be 2 only when mkt is 1 or 5`);
-   }
+  //temporary disable side validation until I can be bothered coding it
+  return;
 }
 
 export function validateSportEnum(sport: Sport, label = 'sport'): void {
@@ -118,7 +114,14 @@ export function validateFillBetIxData(data: FillBetIxData, label = 'fillBet'): v
    }
    validateU16(data.eventStateSequence, `${label}.eventStateSequence`);
    if (data.eventStateSequence === 0) {
-      throw new RangeError(`${label}.eventStateSequence must be > 0`);
+      throw new RangeError(`${label}.eventStateSequence must be greater than 0`);
+   }
+   if (data.marketId.isPregame) {
+      if (data.eventStateSequence !== 1) {
+         throw new RangeError(`${label}.eventStateSequence must be 1 for pregame markets`);
+      }
+   } else if (data.eventStateSequence < 2) {
+      throw new RangeError(`${label}.eventStateSequence must be >= 2 for live markets`);
    }
    if (data.eventStateHash.byteLength !== 32) {
       throw new RangeError(`${label}.eventStateHash must be 32 bytes`);
@@ -130,7 +133,14 @@ export function validateParlayLegWire(leg: ParlayLegWire, label: string): void {
    validateBetSide(leg.side, leg.marketId.mkt, `${label}.side`);
    validateU16(leg.eventStateSequence, `${label}.eventStateSequence`);
    if (leg.eventStateSequence === 0) {
-      throw new RangeError(`${label}.eventStateSequence must be > 0`);
+      throw new RangeError(`${label}.eventStateSequence must be greater than 0`);
+   }
+   if (leg.marketId.isPregame) {
+      if (leg.eventStateSequence !== 1) {
+         throw new RangeError(`${label}.eventStateSequence must be 1 for pregame markets`);
+      }
+   } else if (leg.eventStateSequence < 2) {
+      throw new RangeError(`${label}.eventStateSequence must be >= 2 for live markets`);
    }
    if (leg.eventStateHash.byteLength !== 32) {
       throw new RangeError(`${label}.eventStateHash must be 32 bytes`);

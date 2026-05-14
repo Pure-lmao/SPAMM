@@ -201,7 +201,7 @@ fn cpi_get_quote_parlay(
          event_state_pda,
          mm_program_account,
          &market_id.event_id,
-         &leg.event_state_hash,
+         &leg.event_game_state,
          &leg.event_state_sequence,
       ) {
          #[cfg(feature = "log")]

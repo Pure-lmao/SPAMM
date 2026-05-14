@@ -16,11 +16,28 @@ use crate::{
 /// Parse CPI return data from a prior MM `get_quote` / `get_quote_parlay` when the return program id matches.
 #[inline(always)]
 pub fn parse_quote_return_for_mm(mm_program_account: &AccountView) -> Option<(u64, u32)> {
-   let return_data = get_return_data()?;
+   let return_data = match get_return_data() {
+      Some(rd) => rd,
+      None => {
+         #[cfg(feature = "log")]
+         log!("fill_helpers: parse_quote_return_for_mm: get_return_data empty after CPI");
+         return None;
+      }
+   };
    if unlikely(!address_eq(return_data.program_id(), mm_program_account.address())) {
+      #[cfg(feature = "log")]
+      log!("fill_helpers: parse_quote_return_for_mm: return data owner != expected MM program id");
       return None;
    }
-   parse_quote_data(return_data.as_slice()).ok()
+   let slice = return_data.as_slice();
+   match parse_quote_data(slice) {
+      Ok(parsed) => Some(parsed),
+      Err(_) => {
+         #[cfg(feature = "log")]
+         log!("fill_helpers: parse_quote_return_for_mm: parse_quote_data failed len {}", slice.len());
+         None
+      }
+   }
 }
 
 /// If the MM liability ATA increased by something other than `amount_to_send`, sweep that deposit back

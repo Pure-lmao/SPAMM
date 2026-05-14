@@ -32,7 +32,7 @@
 //!   amount (u64),
 //!   min_odds_scaled (u32),
 //!   event_state_sequence (u16),
-//!   event_state_hash ([u8; 32]),
+//!   event_game_state (EventGameState: game_phase [u8;4], home_primary, away_primary, home_secondary, away_secondary),
 //! ]`
 
 use core::mem::MaybeUninit;
@@ -51,7 +51,7 @@ use crate::{ID,
    instructions::fill_helpers::{parse_quote_return_for_mm, refund_liability_deposit_mismatch},
    parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data}, 
    state::{
-      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::{apply_netting, calculate_netting, NettingCalc}, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
+      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, EventGameState, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::{apply_netting, calculate_netting, NettingCalc}, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
    }, writers::write_i64_le_unchecked,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
@@ -91,23 +91,15 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_token_account(true, user_ata, user, mint, token_program)?;
    verify_config_pda(&config_pda, true)?;
 
-   // Values are validated by the parser.
+   // Amount, odds, side, sport, and event_state_sequence vs is_pregame are validated in `parse_fill_bet_data`.
    let parsed_data = parse_fill_bet_data(data)?;
    let bet_id = parsed_data.bet_id;
    let amount = parsed_data.amount;
    let min_odds_scaled = parsed_data.min_odds_scaled;
    let market_id = parsed_data.market_id;
    let side = parsed_data.side;
-   let event_state_hash = parsed_data.event_state_hash;
+   let event_game_state = parsed_data.event_game_state;
    let event_state_sequence = parsed_data.event_state_sequence;
-
-   if unlikely(
-      (market_id.is_pregame() && event_state_sequence != 1) || 
-      (!market_id.is_pregame() && event_state_sequence == 1)
-   ) {
-      log!("fill_bet: invalid event state sequence for market.is_pregame");
-      return Err(ProgramError::InvalidInstructionData);
-   }
 
    let bet_id_bytes = bet_id.to_le_bytes();
    let bet_pda_seed = [
@@ -230,7 +222,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          mm_event_state_pda,
          &mm_program_account,
          &market_id.event_id,
-         &event_state_hash,
+         &event_game_state,
          &event_state_sequence,
       );
       if !is_valid_event_state {
@@ -257,7 +249,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          odds_scaled: min_odds_scaled,
          market_id,
          side,
-         event_state_hash,
+         event_game_state,
          event_state_sequence,
       };
 
@@ -462,7 +454,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          amount_to_fill,
          odds_scaled: quote.odds_scaled,
          market_id,
-         event_state_hash,
+         event_game_state,
          amount_to_send,
       };
       let mut fill_quote_ix_buf = [0u8; FillQuoteIxData::WIRE_LEN];
@@ -615,7 +607,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       amount: filled_amount,
       payout: filled_payout,
       market_id,
-      event_state_hash,
+      event_game_state,
       result: BetResult::Pending,
       filler_0: finalized_bet_fillers[0],
       filler_1: finalized_bet_fillers[1],
@@ -678,7 +670,7 @@ pub struct FillBetIxData {
    pub amount: u64,
    pub min_odds_scaled: u32,
    pub event_state_sequence: u16,
-   pub event_state_hash: [u8; 32],
+   pub event_game_state: EventGameState,
 }
 
 pub const FILL_BET_IX_DATA_LEN: usize = <FillBetIxData as ZeroPodFixed>::SIZE;
@@ -698,7 +690,7 @@ impl FillBetIxData {
          event_state_sequence: zc.event_state_sequence.get(),
          side: zc.side,
          market_id: MarketId::from_zc(&zc.market_id).ok_or(ProgramError::InvalidInstructionData)?,
-         event_state_hash: zc.event_state_hash,
+         event_game_state: EventGameState::from_zc(&zc.event_game_state),
       })
    }
 
@@ -715,7 +707,7 @@ impl FillBetIxData {
          amount: self.amount.into(),
          min_odds_scaled: self.min_odds_scaled.into(),
          event_state_sequence: self.event_state_sequence.into(),
-         event_state_hash: self.event_state_hash,
+         event_game_state: self.event_game_state.to_zc(),
       };
       unsafe {
          core::ptr::write(out.as_mut_ptr().cast(), zc);
@@ -723,5 +715,3 @@ impl FillBetIxData {
       Ok(())
    }
 }
-
-const _: () = assert!(FILL_BET_IX_DATA_LEN == 82);

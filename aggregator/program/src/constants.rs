@@ -2,6 +2,19 @@ use pinocchio::Address;
 
 pub const MAX_NUMBER_OF_MMS: usize = 5;
 
+/// Max SPL token sub-instructions in one `settle_bet` CPI batch (tight bound):
+/// 5 fillers × (1 enc→user + 1 bet→…) + bet→user (stake) + bet→user (dust) + ATA close = 13.
+pub const SETTLE_BET_TOKEN_BATCH_IX_CAP: usize = 13;
+
+/// Flattened CPI account slots for that batch (`Transfer` / `CloseAccount` each use 3 accounts).
+pub const SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS: usize = SETTLE_BET_TOKEN_BATCH_IX_CAP * 3;
+
+/// Max SPL token sub-instructions in `settle_parlay` batch CPI.
+pub const SETTLE_PARLAY_TOKEN_BATCH_IX_CAP: usize = 8;
+
+/// Max `Transfer::DATA_LEN` / `CloseAccount::DATA_LEN` in batch is 9; use 9 for buffer sizing.
+pub const SETTLE_TOKEN_BATCH_MAX_INNER_DATA: usize = 9;
+
 /// Max legs per parlay (quote buffer, fill ix wire, and on-chain parlay bet account).
 pub const MAX_PARLAY_LEGS: usize = 5;
 
@@ -41,6 +54,10 @@ pub const ADDRESS_LOOKUP_TABLE_PROGRAM: Address = Address::new_from_array([
    0x00, 0x02, 0x30, 0x92, 0x66, 0xf6, 0x2e, 0x53, 0xc1, 0x18, 0x24, 0x49, 0x82, 0x00, 0x00, 0x00,
 ]);
 
+/// Recent slot used for the ALT PDA(`CONFIG_PDA`, this slot) == [`LOOKUP_TABLE`].
+pub const INIT_PROGRAM_RECENT_SLOT: u64 = 462_125_461;
+
+// 7AChvrzBkq9zuSWFE89VT5Q4QGDpPG6sYKJMgLYnMDzS.
 pub const LOOKUP_TABLE: Address = Address::new_from_array([
    0x5b, 0x81, 0x95, 0xa0, 0x6a, 0x7c, 0x25, 0x6a, 0xf4, 0x32, 0x73, 0x4f, 0x11, 0x88, 0xb5, 0x87, 
    0x0f, 0xed, 0x41, 0x73, 0xdb, 0xc1, 0xe6, 0x1c, 0x73, 0x1e, 0xe1, 0x89, 0x72, 0x2d, 0xfe, 0x43,

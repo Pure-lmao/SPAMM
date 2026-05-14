@@ -55,7 +55,7 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 pub struct RemoveLineFromLiabilityNettingIxData {
    pub event_id: EventId,
    pub period: u8,
-   pub mkt: u32,
+   pub mkt: u16,
 }
 
 pub const REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN: usize =

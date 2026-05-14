@@ -33,6 +33,12 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::NotEnoughAccountKeys);
    };
    let parsed = GetQuoteParlayIxPayload::decode(data)?;
+   log!(
+      "get_quote_parlay: decoded num_legs {} amount {} min_odds_scaled {}",
+      parsed.num_legs,
+      parsed.amount,
+      parsed.odds_scaled
+   );
    let n = parsed.num_legs as usize;
    if unlikely(n < 2 || n > MAX_PARLAY_LEGS) {
       log!("get_quote_parlay: num_legs must be 2..=MAX_PARLAY_LEGS");
@@ -63,16 +69,27 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       let leg = parsed.legs.get(i).ok_or(ProgramError::InvalidInstructionData)?;
       let side = leg.side;
       let mkt = leg.market_id.mkt;
+      // SIDECHECK
       if unlikely(side > 2) {
          log!("get_quote_parlay: side must be 0, 1, or 2");
          return Err(ProgramError::InvalidInstructionData);
       }
+      // SIDECHECK
       if unlikely(side == 2 && mkt != 1 && mkt != 5) {
          log!("get_quote_parlay: side 2 is only valid for mkt 1 or 5");
          return Err(ProgramError::InvalidInstructionData);
       }
       if unlikely(leg.event_state_sequence == 0) {
-         log!("get_quote_parlay: event_state_sequence must be > 0");
+         log!("get_quote_parlay: leg event_state_sequence must be greater than 0");
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      if leg.market_id.is_pregame() {
+         if unlikely(leg.event_state_sequence != 1) {
+            log!("get_quote_parlay: pregame leg event_state_sequence must be 1");
+            return Err(ProgramError::InvalidInstructionData);
+         }
+      } else if unlikely(leg.event_state_sequence < 2) {
+         log!("get_quote_parlay: live leg event_state_sequence must be >= 2");
          return Err(ProgramError::InvalidInstructionData);
       }
       let sport = leg.market_id.event_id.sport;
@@ -93,7 +110,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
          es,
          program_id,
          &mid.event_id,
-         &leg.event_state_hash,
+         &leg.event_game_state,
          leg.event_state_sequence,
       )) {
          log!("get_quote_parlay: event state invalid");

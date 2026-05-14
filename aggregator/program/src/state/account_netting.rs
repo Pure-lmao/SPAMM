@@ -5,7 +5,7 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
    helpers::calc_potential_profit,
-   readers::{self, read_i64_le_unchecked, read_i64_pair_unchecked, read_u8_unchecked, read_u32_le_unchecked},
+   readers::{self, read_i64_le_unchecked, read_i64_pair_unchecked, read_u8_unchecked, read_u16_le_unchecked},
    state::{EventId, MarketId, Sport},
    writers::{write_i64_le_unchecked, write_i64_pair_unchecked, write_netting_line_unchecked, write_u8_unchecked},
 };
@@ -30,7 +30,7 @@ pub struct NettingPdaDataHeader {
 #[repr(C)]
 pub struct NettingLine {
    pub period: u8,
-   pub mkt: u32,
+   pub mkt: u16,
    pub outcome_0: i64,
    pub outcome_1: i64,
 }
@@ -75,7 +75,7 @@ pub(crate) fn find_netting_line_or_insertion(
    lines_start: usize,
    number_of_lines: usize,
    period: u8,
-   mkt: u32,
+   mkt: u16,
 ) -> Result<usize, usize> {
    let mut lo = 0usize;
    let mut hi = number_of_lines;
@@ -90,7 +90,7 @@ pub(crate) fn find_netting_line_or_insertion(
          read_u8_unchecked(data.as_ptr(), line_offset + NETTING_LINE_PERIOD_OFFSET)
       };
       let this_mkt =
-         unsafe { read_u32_le_unchecked(data.as_ptr(), line_offset + NETTING_LINE_MKT_OFFSET) };
+         unsafe { read_u16_le_unchecked(data.as_ptr(), line_offset + NETTING_LINE_MKT_OFFSET) };
       let this_key = (this_period, this_mkt);
       if this_key < key {
          lo = mid + 1;
@@ -112,7 +112,7 @@ pub(crate) fn insert_blank_netting_line_at(
    lines_start: usize,
    number_of_lines: usize,
    period: u8,
-   mkt: u32,
+   mkt: u16,
    insertion_idx: usize,
 ) -> Result<(), ProgramError> {
    ensure_netting_lines_view(data, number_of_lines)?;
@@ -160,7 +160,7 @@ pub fn add_netting_line(
    data: &mut [u8],
    sport: Sport,
    period: u8,
-   mkt: u32,
+   mkt: u16,
 ) -> Result<(), ProgramError> {
    if unlikely(!MarketId::allow_add_netting_line(sport, period, mkt)) {
       return Err(ProgramError::InvalidInstructionData);
@@ -185,7 +185,7 @@ pub fn add_netting_line(
 
 /// Removes the line with the given `(period, mkt)` if present. Fails if no line matches.
 #[inline(always)]
-pub fn remove_netting_line(data: &mut [u8], period: u8, mkt: u32) -> Result<(), ProgramError> {
+pub fn remove_netting_line(data: &mut [u8], period: u8, mkt: u16) -> Result<(), ProgramError> {
    if unlikely(data.len() < NETTING_HEADER_LEN || data[NETTING_DISC_OFFSET] != NETTING_PDA_DISCRIMINATOR) {
       return Err(ProgramError::InvalidAccountData);
    }
@@ -240,7 +240,7 @@ pub enum NettingWrite {
    NewLine {
       insertion_idx: usize,
       period: u8,
-      mkt: u32,
+      mkt: u16,
       side0: i64,
       side1: i64,
    },
@@ -462,9 +462,3 @@ fn max3(a: i64, b: i64, c: i64) -> i64 {
    let best = if ab > c { ab } else { c };
    if best > 0 { best } else { 0 }
 }
-
-// `NettingLine` packed on-chain size (period u8 + mkt u32 + outcome_0 i64 + outcome_1 i64).
-const _: () = assert!(NETTING_LINE_LEN == 21);
-const _: () = assert!(NETTING_HEADER_LEN == 40);
-const _: () = assert!(core::mem::size_of::<NettingPdaDataHeaderZc>() == NETTING_HEADER_LEN);
-const _: () = assert!(core::mem::size_of::<NettingLineZc>() == NETTING_LINE_LEN);

@@ -1,5 +1,8 @@
-//! Create the event-state PDA: `["event_state", event_id]`. Initial `sequence = 1`, `state_hash = 0`,
-//! matching the SPAMM README (first sporting sequence consumers must observe before quoting live odds).//!
+//! Create the event-state PDA: `["event_state", event_id]`. Initial `sequence = 0` with zeroed `game_state`
+//! means the account exists but no operator game state has been entered yet. The operator uses
+//! `update_event_state` to advance to `sequence = 1` (pregame setup, e.g. PG / 0-0), then to `sequence >= 2`
+//! when the match is underway and live markets have `is_pregame == false`.
+//!
 //! Accounts: **(4)**
 //! 0. `feepayer` (signer) — must match `MmAccountConfig::admin` on `config_pda`
 //! 1. `config_pda` (readonly) — PDA `["config"]` under the MM
@@ -18,7 +21,7 @@ use pinocchio_system::instructions::CreateAccount;
 use spamm_aggregator::helpers::get_rent_local;
 use spamm_aggregator::helpers::{verify_signer, verify_system_program};
 use spamm_aggregator::state::{
-   EventStateDataZc, EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED,
+   EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventStateDataZc,
 };
 
 use crate::mm_helpers::{find_event_state_pda, verify_mm_config_auth};
@@ -89,14 +92,11 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
          discriminator: EVENT_STATE_DISCRIMINATOR,
          bump,
          event_id: event_id.to_zc(),
-         sequence: 1u16.into(),
-         state_hash: [0u8; 32],
+         sequence: 0u16.into(),
+         game_state: EventGameState::zeroed().to_zc(),
       };
       unsafe {
-         core::ptr::write(
-            data.as_mut_ptr().cast::<EventStateDataZc>(),
-            initial,
-         );
+         core::ptr::write(data.as_mut_ptr().cast::<EventStateDataZc>(), initial);
       }
    }
 

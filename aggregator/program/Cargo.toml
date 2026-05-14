@@ -16,7 +16,7 @@ bpf-entrypoint = []
 # Enables `pinocchio_log::log!` call sites gated by `#[cfg(feature = "log")]`.
 log = []
 # Mollusk SBF integration tests (`program/tests/*`). Requires `app_specific_delegated_vaults.so` in `target/deploy/`.
-test-sbf = []
+test-sbf = ["log"]
 
 [dependencies]
 pinocchio = { version = "0.11.1", default-features = false, features = ["cpi", "copy", "account-resize"] }
@@ -41,6 +41,7 @@ required-features = ["test-sbf"]
 
 [dev-dependencies]
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+zeropod = { version = "0.3.2", features = ["solana-address"] }
 mollusk-svm = "0.12.1-agave.4"
 mollusk-svm-programs-token = "0.12.1-agave.4"
 solana-account = "=3.4.0"

@@ -1,7 +1,7 @@
 use pinocchio::error::ProgramError;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use spamm_aggregator::state::{FillQuoteIxData, MarketId};
+use spamm_aggregator::state::{EventGameState, FillQuoteIxData, MarketId};
 
 /// Fill-quote instruction payload (bytes after the router discriminator in `lib.rs`), matching
 /// `FillQuoteIxData` minus `instruction_discriminator`.
@@ -12,7 +12,7 @@ pub struct FillQuoteIxPayload {
    pub odds_scaled: u32,
    pub market_id: MarketId,
    pub side: u8,
-   pub event_state_hash: [u8; 32],
+   pub event_game_state: EventGameState,
    pub event_state_sequence: u16,
    pub amount_to_send: u64,
 }
@@ -33,7 +33,7 @@ impl FillQuoteIxPayload {
          amount_to_fill: zc.amount_to_fill.get(),
          odds_scaled: zc.odds_scaled.get(),
          market_id: MarketId::from_zc(&zc.market_id).ok_or(ProgramError::InvalidInstructionData)?,
-         event_state_hash: zc.event_state_hash,
+         event_game_state: EventGameState::from_zc(&zc.event_game_state),
          amount_to_send: zc.amount_to_send.get(),
       })
    }

@@ -6,14 +6,18 @@ use solana_program_error::ProgramError;
 use solana_pubkey::Pubkey;
 
 use crate::common::{
-   assert_encumbrance_discriminator, assert_program_err, config_pda, encumbrance_pda, event_id_soccer,
-   liability_token_ata, market_spread_pregame, mm_admin, mm_config_pda, mm_list_pda, mm_program_id, mint_pubkey,
-   oracle_body_two_outcome, read_encumbrance, read_mm_list_tail, record_cu_success, user, wrong_signer, Env,
+   address_lookup_table_program_pubkey, assert_encumbrance_discriminator, assert_program_err, config_pda,
+   encumbrance_pda, event_id_soccer, liability_token_ata, lookup_table_pubkey, market_spread_pregame, mm_admin,
+   mm_collateral_ata, mm_config_pda, mm_list_pda, mm_parlay_quote_buffer_pda, mm_program_id, mm_quote_buffer_pda,
+   mint_pubkey, oracle_body_two_outcome, read_encumbrance, read_mm_list_tail, record_cu_success, user, wrong_signer,
+   Env,
 };
 use mollusk_svm_programs_token::{associated_token, token};
 
 fn register_metas(signer: solana_pubkey::Pubkey, mm_prog: solana_pubkey::Pubkey) -> Vec<AccountMeta> {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
+   let lt = lookup_table_pubkey();
+   let alt_prog = address_lookup_table_program_pubkey();
    vec![
       AccountMeta::new(signer, true),
       AccountMeta::new_readonly(mm_prog, false),
@@ -26,6 +30,11 @@ fn register_metas(signer: solana_pubkey::Pubkey, mm_prog: solana_pubkey::Pubkey)
       AccountMeta::new_readonly(token::ID, false),
       AccountMeta::new_readonly(associated_token::ID, false),
       AccountMeta::new_readonly(sys, false),
+      AccountMeta::new(lt, false),
+      AccountMeta::new_readonly(alt_prog, false),
+      AccountMeta::new_readonly(mm_collateral_ata(), false),
+      AccountMeta::new_readonly(mm_quote_buffer_pda(), false),
+      AccountMeta::new_readonly(mm_parlay_quote_buffer_pda(), false),
    ]
 }
 

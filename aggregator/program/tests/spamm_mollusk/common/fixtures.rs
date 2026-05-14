@@ -1,6 +1,9 @@
 //! Deterministic pubkeys / domain values (matches on-chain layouts).
 
+use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
+use solana_sdk_ids::address_lookup_table;
+use spamm_aggregator::constants::INIT_PROGRAM_RECENT_SLOT;
 use spamm_aggregator::state::{EventId, MarketId, Sport};
 
 /// Aggregator program id (`spamm_aggregator::constants::ID`).
@@ -30,6 +33,39 @@ pub fn mint_pubkey() -> Pubkey {
       0xe9, 0x28, 0x39, 0x55, 0x09, 0x65, 0xff, 0xd4, 0xd6, 0x4a, 0xca, 0xaf, 0x46, 0xd4, 0x5d, 0xf7,
       0x31, 0x8e, 0x5b, 0x4f, 0x57, 0xc9, 0x0c, 0x48, 0x7d, 0x60, 0x62, 0x5d, 0x82, 0x9b, 0x83, 0x7b,
    ])
+}
+
+/// SPL Address Lookup Table program (`AddressLookupTab1e1111111111111111111111111`).
+pub fn address_lookup_table_program_pubkey() -> Pubkey {
+   address_lookup_table::id()
+}
+
+/// Aggregator ALT (`spamm_aggregator::constants::LOOKUP_TABLE`): PDA(config, [`INIT_PROGRAM_RECENT_SLOT`]).
+pub fn lookup_table_pubkey() -> Pubkey {
+   Pubkey::find_program_address(
+      &[
+         config_pda().as_ref(),
+         INIT_PROGRAM_RECENT_SLOT.to_le_bytes().as_slice(),
+      ],
+      &address_lookup_table_program_pubkey(),
+   )
+   .0
+}
+
+pub fn init_program_ix_data() -> Vec<u8> {
+   INIT_PROGRAM_RECENT_SLOT.to_le_bytes().to_vec()
+}
+
+/// Metas for aggregator `init_program` (router disc `0`); pair with [`init_program_ix_data`].
+pub fn init_program_account_metas(admin: Pubkey, admin_signer: bool, system_program: Pubkey) -> Vec<AccountMeta> {
+   vec![
+      AccountMeta::new(admin, admin_signer),
+      AccountMeta::new(config_pda(), false),
+      AccountMeta::new(mm_list_pda(), false),
+      AccountMeta::new_readonly(system_program, false),
+      AccountMeta::new(lookup_table_pubkey(), false),
+      AccountMeta::new_readonly(address_lookup_table_program_pubkey(), false),
+   ]
 }
 
 // --- Example MM (pinned addresses from `market_maker/program/src/constants.rs`) ---

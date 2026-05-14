@@ -4,6 +4,7 @@ use solana_instruction::AccountMeta;
 
 use spamm_aggregator::helpers::calc_potential_profit;
 use spamm_aggregator::instructions::{FillBetIxData, FillParlayIxData};
+use spamm_aggregator::state::EventGameState;
 use spamm_aggregator::state::account_bet::BetResult;
 
 use crate::common::{
@@ -45,7 +46,7 @@ fn scenario_single_leg_fill_grade_settle_won() {
       amount: 6_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let fill = env.run_ix(fill_bet_instruction(
       &data,
@@ -123,7 +124,7 @@ fn scenario_netting_create_add_fill_m4() {
       amount: 2_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let r = env.run_ix(fill_bet_instruction(
       &data,
@@ -138,7 +139,7 @@ fn scenario_netting_create_add_fill_m4() {
    let (_, lines) = read_netting_soccer_header_and_lines(&env, &np);
    assert_eq!(lines.len(), 1);
    assert_eq!(lines[0].0, 1u8);
-   assert_eq!(lines[0].1, 4u32);
+   assert_eq!(lines[0].1, 4u16);
    let b = decode_bet(&env, &bet);
    assert!(b.filler_0.is_potentially_netted);
    assert_eq!(read_encumbrance(&env, &encumbrance_pda()), enc_pre + b.filler_0.encumbrance_delta);
@@ -158,8 +159,8 @@ fn scenario_parlay_fill_grade_settle_won() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id,
       amount: 4_000_000,

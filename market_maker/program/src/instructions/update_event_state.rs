@@ -1,11 +1,11 @@
-//! Update `event_state` PDA: set `sequence` and `state_hash` (admin-only).
+//! Update `event_state` PDA: set `sequence` and `game_state` (admin-only).
 //!
 //! Accounts: **(3)**
 //! 0. `feepayer` (signer) — must match `MmAccountConfig::admin` on `config_pda`
 //! 1. `config_pda` (readonly) — PDA `["config"]` under the MM
 //! 2. `event_state_pda` (writable) — [`EVENT_STATE_LEN`] bytes
 //!
-//! Instruction `data`: [`UpdateEventStateIxPayload`] (`event_id`, `sequence` LE, `state_hash`).
+//! Instruction `data`: [`UpdateEventStateIxPayload`] (`event_id`, `sequence` LE, `game_state`).
 
 use core::ptr::write;
 
@@ -34,7 +34,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    let mut zc = verify_event_state_pda(event_state_pda, program_id, &event_id)?;
    zc.sequence = parsed.sequence.into();
-   zc.state_hash = parsed.state_hash;
+   zc.game_state = parsed.game_state.to_zc();
 
    {
       let mut es = event_state_pda.try_borrow_mut()?;

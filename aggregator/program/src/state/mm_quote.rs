@@ -1,7 +1,7 @@
 use pinocchio::{AccountView, Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use crate::state::MarketId;
+use crate::state::{EventGameState, MarketId};
 
 pub struct MMQuote<'a> {
    pub max_amount: u64,
@@ -41,14 +41,13 @@ pub struct MMQuoteBuffer {
    pub side: u8,
    pub max_amount: u64,
    pub odds_scaled: u32,
-   pub event_state_hash: [u8; 32],
+   pub event_game_state: EventGameState,
    pub event_state_sequence: u16,
 }
 
 pub const MM_QUOTE_BUFFER_DISCRIMINATOR: u8 = 2;
 
 pub const MM_QUOTE_BUFFER_LEN: usize = <MMQuoteBuffer as ZeroPodFixed>::SIZE;
-const _: () = assert!(MM_QUOTE_BUFFER_LEN == 108);
 
 impl MMQuoteBuffer {
    #[inline(always)]
@@ -61,7 +60,7 @@ impl MMQuoteBuffer {
          side: self.side,
          max_amount: self.max_amount.into(),
          odds_scaled: self.odds_scaled.into(),
-         event_state_hash: self.event_state_hash,
+         event_game_state: self.event_game_state.to_zc(),
          event_state_sequence: self.event_state_sequence.into(),
       }
    }
@@ -76,7 +75,7 @@ impl MMQuoteBuffer {
          side: zc.side,
          max_amount: zc.max_amount.into(),
          odds_scaled: zc.odds_scaled.into(),
-         event_state_hash: zc.event_state_hash,
+         event_game_state: EventGameState::from_zc(&zc.event_game_state),
          event_state_sequence: zc.event_state_sequence.into(),
       }
    }

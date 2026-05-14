@@ -23,7 +23,7 @@ use crate::{
    writers::{write_arbitrary_bytes_unchecked, write_u16_le_unchecked},
 };
 
-/// Accounts (13):
+/// Accounts (16):
 /// 0. `mm_admin` (writable signer)
 /// 1. `mm_program` (readonly)
 /// 2. `mm_config_pda` (readonly)
@@ -35,12 +35,13 @@ use crate::{
 /// 8. `token_program` (readonly)
 /// 9. `associated_token_program` (readonly)
 /// 10. `system_program` (readonly)
-/// 11. `lookup_table` (writable) — aggregator ALT from config
-/// 12. `mm_token_account` (readonly) — MM token account (`mm_admin` + `mint`)
-/// 13. `mm_quote_buffer` (readonly) — MM quote buffer PDA
-/// 14. `mm_parlay_quote_buffer` (readonly) — MM parlay quote buffer PDA
+/// 11. `lookup_table` (writable) — aggregator ALT (`constants::LOOKUP_TABLE`)
+/// 12. `lookup_table_program` (readonly)
+/// 13. `mm_token_account` (readonly) — MM token account (`mm_admin` + `mint`)
+/// 14. `mm_quote_buffer` (readonly)
+/// 15. `mm_parlay_quote_buffer` (readonly)
 ///
-/// Data: recent_slot (u64) — LE - must be a recent slot for the ALT program to use
+/// Instruction data: empty.
 
 pub const REGISTER_MM_IX_DISCRIMINATOR: u8 = 2;
 

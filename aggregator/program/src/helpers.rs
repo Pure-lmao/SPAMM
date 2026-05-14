@@ -15,7 +15,7 @@ use crate::{
    parsers::get_token_account_balance,
    readers::{read_address_unchecked, read_u8_unchecked},
    state::{
-      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventId, EventStateData, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
+      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventId, EventStateData, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
          CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_STATUS_OFFSET, MM_ENCUMBRANCE_PDA_BUMP_OFFSET, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED
       }
    },
@@ -345,27 +345,49 @@ pub fn verify_event_state(
    event_state_pda: &AccountView,
    mm_program_account: &AccountView,
    event_id: &EventId,
-   event_state_hash: &[u8; 32],
+   event_game_state: &EventGameState,
    event_state_sequence: &u16,
 ) -> bool {
    if unlikely(!address_eq(event_state_pda.owner(), mm_program_account.address())) {
+      #[cfg(feature = "log")]
+      log!("verify_event_state: fail owner (event_state owner != mm program id)");
       return false;
    }
 
    let event_state_data = match event_state_pda.try_borrow() {
       Ok(data) => data,
-      Err(_) => return false,
+      Err(_) => {
+         #[cfg(feature = "log")]
+         log!("verify_event_state: fail borrow (account data borrow)");
+         return false;
+      }
    };
 
    if unlikely(event_state_data.len() != EVENT_STATE_LEN) {
+      #[cfg(feature = "log")]
+      log!(
+         "verify_event_state: fail data_len got={} want={}",
+         event_state_data.len() as u64,
+         EVENT_STATE_LEN as u64
+      );
       return false;
    }
 
    let state = match EventStateData::from_bytes(&event_state_data) {
       Ok(s) => s,
-      Err(_) => return false,
+      Err(_) => {
+         #[cfg(feature = "log")]
+         log!("verify_event_state: fail from_bytes (wire invalid for EventStateData)");
+         return false;
+      }
    };
    if unlikely(state.discriminator != EVENT_STATE_DISCRIMINATOR) {
+      #[cfg(feature = "log")]
+      log!(
+         "verify_event_state: fail discriminator got={} want={}",
+         state.discriminator as u64,
+         EVENT_STATE_DISCRIMINATOR as u64
+      );
       return false;
    }
 
@@ -380,14 +402,31 @@ pub fn verify_event_state(
       &mm_program_account.address()
    );
    if unlikely(!address_eq(event_state_pda.address(), &expected_pda)) {
+      #[cfg(feature = "log")]
+      log!(
+         "verify_event_state: fail pda bump={} (derive_address != account key)",
+         state.bump as u64
+      );
       return false;
    }
 
    if unlikely(state.sequence.get() != *event_state_sequence) {
+      #[cfg(feature = "log")]
+      log!(
+         "verify_event_state: fail sequence acct={} ix={}",
+         state.sequence.get() as u64,
+         *event_state_sequence as u64
+      );
       return false;
    }
 
-   if unlikely(&state.state_hash != event_state_hash) {
+   if unlikely(EventGameState::from_zc(&state.game_state) != *event_game_state) {
+      #[cfg(feature = "log")]
+      log!(
+         "verify_event_state: fail game_state acct_u64={} ix_u64={}",
+         EventGameState::from_zc(&state.game_state).as_u64(),
+         event_game_state.as_u64()
+      );
       return false;
    }
 

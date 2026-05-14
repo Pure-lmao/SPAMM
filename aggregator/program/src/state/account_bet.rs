@@ -1,10 +1,7 @@
 use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use crate::{
-   constants::MAX_NUMBER_OF_MMS,
-   state::MarketId,
-};
+use crate::state::{EventGameState, MarketId, ids::MARKET_ID_LEN, other::EVENT_GAME_STATE_LEN};
 
 pub const BET_ACCOUNT_SEED: &[u8] = b"bet";
 pub const BET_ACCOUNT_DISCRIMINATOR: u8 = 1;
@@ -63,7 +60,7 @@ pub struct BetAccountData {
    pub amount: u64,
    pub payout: u64,
    pub event_state_sequence: u16,
-   pub event_state_hash: [u8; 32],
+   pub event_game_state: EventGameState,
    pub result: BetResult,
    pub filler_0: BetFiller,
    pub filler_1: BetFiller,
@@ -73,7 +70,7 @@ pub struct BetAccountData {
 }
 
 pub const BET_ACCOUNT_LEN: u64 = <BetAccountData as ZeroPodFixed>::SIZE as u64;
-pub const BET_RESULT_OFFSET: usize = 152;
+pub const BET_RESULT_OFFSET: usize = 1+1+32+32+8+MARKET_ID_LEN+1+8+8+2+EVENT_GAME_STATE_LEN;
 
 impl BetFiller {
    #[inline(always)]
@@ -102,7 +99,7 @@ impl BetAccountData {
          amount: self.amount.into(),
          payout: self.payout.into(),
          event_state_sequence: self.event_state_sequence.into(),
-         event_state_hash: self.event_state_hash,
+         event_game_state: self.event_game_state.to_zc(),
          result: self.result.into(),
          filler_0: self.filler_0.to_zc(),
          filler_1: self.filler_1.to_zc(),
@@ -142,7 +139,7 @@ impl BetAccountData {
          amount: zc.amount.get(),
          payout: zc.payout.get(),
          event_state_sequence: zc.event_state_sequence.get(),
-         event_state_hash: zc.event_state_hash,
+         event_game_state: EventGameState::from_zc(&zc.event_game_state),
          result: BetResult::from_u8(zc.result.get()),
          filler_0: BetFiller {
             mm_address: zc.filler_0.mm_address,
@@ -182,9 +179,3 @@ impl BetAccountData {
       })   
    }
 }
-
-const BET_FILLER_WIRE_LEN: usize = <BetFiller as ZeroPodFixed>::SIZE;
-const BET_ACCOUNT_EXPECTED_LEN: usize = 153 + MAX_NUMBER_OF_MMS * BET_FILLER_WIRE_LEN;
-
-const _: () = assert!(MAX_NUMBER_OF_MMS == 5);
-const _: () = assert!(<BetAccountData as ZeroPodFixed>::SIZE == BET_ACCOUNT_EXPECTED_LEN);

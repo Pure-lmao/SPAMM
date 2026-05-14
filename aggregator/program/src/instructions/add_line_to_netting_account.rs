@@ -56,7 +56,7 @@ use crate::state::EventId;
 pub struct AddLineToLiabilityNettingIxData {
    pub event_id: EventId,
    pub period: u8,
-   pub mkt: u32,
+   pub mkt: u16,
 }
 
 pub const ADD_LINE_TO_LIABILITY_NETTING_IX_LEN: usize =

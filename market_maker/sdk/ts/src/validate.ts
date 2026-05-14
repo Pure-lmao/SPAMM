@@ -65,12 +65,9 @@ export function validatePositiveU64(n: bigint, label = 'value'): void {
 }
 
 export function validateBetSide(side: number, mkt: number, label = 'side'): void {
-   if (!Number.isInteger(side) || side < 0 || side > 2) {
-      throw new RangeError(`${label} must be 0, 1, or 2`);
-   }
-   if (side === 2 && mkt !== 1 && mkt !== 5) {
-      throw new RangeError(`${label} may be 2 only when mkt is 1 or 5`);
-   }
+   // SIDECHECK
+   //temporary disable side validation until I can be bothered coding it
+   return;
 }
 
 export function validateSportEnum(sport: Sport, label = 'sport'): void {

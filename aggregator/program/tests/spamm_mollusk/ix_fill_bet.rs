@@ -11,6 +11,7 @@ use spl_token_interface::state::{Account as SplTokenAccount, AccountState, Mint}
 use spamm_aggregator::constants::{MAX_NUMBER_OF_MMS, ODDS_SCALE};
 use spamm_aggregator::helpers::calc_potential_profit;
 use spamm_aggregator::instructions::FillBetIxData;
+use spamm_aggregator::state::EventGameState;
 use crate::common::{
    admin, assert_bet_after_fill, assert_fill_bet_single_mm_economics, assert_ok_record_cu, assert_program_err,
    bet_pda_for, bet_token_ata, config_pda, decode_bet, encumbrance_pda, event_id_soccer, fill_bet_instruction,
@@ -39,7 +40,7 @@ fn run_fill_bet(
       amount,
       min_odds_scaled: min_odds,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let ix = fill_bet_instruction(&data, bet, bat, &market, mm_netting);
    env.run_ix(ix)
@@ -121,7 +122,7 @@ fn fill_bet_wrong_user_signer() {
       amount: 10_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
    metas[1] = AccountMeta::new_readonly(crate::common::wrong_signer(), true);
@@ -150,12 +151,12 @@ fn fill_bet_invalid_sport_wire_byte_rejected() {
       amount: 1_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut pay = [0u8; spamm_aggregator::instructions::FILL_BET_IX_DATA_LEN];
    data.write_wire(&mut pay).unwrap();
    // `EventId.sport` wire byte inside `MarketId` (after `bet_id` + `event` + `league`).
-   pay[20] = 99;
+   pay[18] = 99;
    let mut buf = vec![3u8];
    buf.extend_from_slice(&pay);
    let ix = solana_instruction::Instruction::new_with_bytes(
@@ -189,7 +190,7 @@ fn fill_bet_live_market_sequence_two_success() {
       amount: 3_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 2,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let ix = fill_bet_instruction(&data, bet, bat, &mid_live, fill_bet_netting_placeholder());
    let r = env.run_ix(ix);
@@ -222,7 +223,7 @@ fn fill_bet_mm_accounts_not_multiple_of_nine() {
       amount: 10_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
    metas.pop();
@@ -251,7 +252,7 @@ fn fill_bet_duplicate_mm_program_in_tail() {
       amount: 10_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
    let tail = metas[10..].to_vec();
@@ -281,7 +282,7 @@ fn fill_bet_pregame_sequence_mismatch() {
       amount: 10_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 2,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let ix = fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder());
    let r = env.run_ix(ix);
@@ -304,7 +305,7 @@ fn fill_bet_wrong_user_collateral_owner() {
       amount: 10_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
    let bad_ata = crate::common::mm_collateral_ata();
@@ -356,7 +357,7 @@ fn fill_bet_wrong_user_collateral_mint() {
       amount: 10_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
    metas[2] = AccountMeta::new(wrong_ata, false);
@@ -433,7 +434,7 @@ fn fill_bet_with_netting_line_m4() {
    let (_, lines1) = read_netting_soccer_header_and_lines(&env, &np);
    assert_eq!(lines1.len(), 1);
    assert_eq!(lines1[0].0, 1u8);
-   assert_eq!(lines1[0].1, 4u32);
+   assert_eq!(lines1[0].1, 4u16);
    assert_eq!(lines1[0].2, p8);
    assert_eq!(lines1[0].3, -8_000_000i64);
    let net1 = max2_onchain(lines1[0].2, lines1[0].3);
@@ -592,7 +593,7 @@ fn fill_bet_event_state_sequence_zero_rejected() {
       amount: 1_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 0,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let r = env.run_ix(fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder()));
    assert_program_err(&r, ProgramError::InvalidInstructionData);
@@ -616,7 +617,7 @@ fn fill_bet_live_market_sequence_one_rejected() {
       amount: 1_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let r = env.run_ix(fill_bet_instruction(&data, bet, bat, &mid_live, fill_bet_netting_placeholder()));
    assert_program_err(&r, ProgramError::InvalidInstructionData);
@@ -638,7 +639,7 @@ fn fill_bet_no_mm_accounts_rejected() {
       amount: 1_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut buf = vec![3u8];
    let mut pay = [0u8; spamm_aggregator::instructions::FILL_BET_IX_DATA_LEN];
@@ -680,7 +681,7 @@ fn fill_bet_too_many_mm_groups_rejected() {
       amount: 1_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
    let group = metas[9..18].to_vec();
@@ -731,7 +732,7 @@ fn fill_bet_feepayer_not_signer_rejected() {
       amount: 1_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
    metas[0] = AccountMeta::new(crate::common::bet_feepayer(), false);

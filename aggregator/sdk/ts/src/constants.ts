@@ -24,6 +24,7 @@ export const ADDRESS_LOOKUP_TABLE_PROGRAM_ID: Address = address(
    'AddressLookupTab1e1111111111111111111111111',
 );
 
+// slot: 462125461
 export const LOOKUP_TABLE_ID: Address = address(
    '7AChvrzBkq9zuSWFE89VT5Q4QGDpPG6sYKJMgLYnMDzS',
 );

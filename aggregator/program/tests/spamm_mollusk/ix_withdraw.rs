@@ -3,14 +3,14 @@
 use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
 
-use spamm_aggregator::instructions::FillBetIxData;
-
 use crate::common::{
    assert_program_err, bet_pda_for, bet_token_ata, encumbrance_pda, event_id_soccer, fill_bet_instruction,
    fill_bet_netting_placeholder, liability_token_ata, market_spread_pregame, mm_admin, mm_collateral_ata,
    mm_config_pda, mm_program_id, mint_pubkey, read_encumbrance, read_token_balance, record_cu_success,
    system_owned_empty, user, user_collateral_ata, wrong_signer, Env,
 };
+use spamm_aggregator::instructions::FillBetIxData;
+use spamm_aggregator::state::EventGameState;
 use mollusk_svm_programs_token::token;
 use solana_program_pack::Pack;
 use spl_token_interface::state::Account as TokenState;
@@ -35,7 +35,7 @@ fn withdraw_free_after_fill() {
       amount: 5_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    assert!(env
       .run_ix(fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder()))
@@ -100,7 +100,7 @@ fn withdraw_works_while_agg_paused() {
       amount: 2_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    assert!(env
       .run_ix(fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder()))
@@ -167,7 +167,7 @@ fn filled_env_with_extra_liab() -> (Env, u64) {
       amount: 5_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    assert!(env
       .run_ix(fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder()))

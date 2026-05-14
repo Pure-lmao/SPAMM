@@ -87,7 +87,7 @@ fn add_line_success_sorted() {
    let np = netting_pda_for_event(&event_id_soccer());
    let (n, lines) = read_netting_lines_snapshot(&env, &np);
    assert_eq!(n, 1);
-   assert_eq!(lines, vec![(1u8, 200u32)]);
+   assert_eq!(lines, vec![(1u8, 200u16)]);
    record_cu_success("add_line_to_netting_account", &r);
 }
 
@@ -243,7 +243,7 @@ fn add_line_second_line_records_cu() {
    assert!(r2.program_result.is_ok(), "{:?}", r2);
    let (n, lines) = read_netting_lines_snapshot(&env, &np);
    assert_eq!(n, 2);
-   assert_eq!(lines, vec![(1u8, 200u32), (1u8, 201u32)]);
+   assert_eq!(lines, vec![(1u8, 200u16), (1u8, 201u16)]);
    record_cu_success("add_line_to_netting_account/second_line", &r2);
 }
 
@@ -253,7 +253,7 @@ fn remove_line_second_line_records_cu() {
    env.bootstrap_default_mm_spread();
    env.create_netting_for_soccer_event();
    let np = netting_pda_for_event(&event_id_soccer());
-   for mkt in [200u32, 201u32] {
+   for mkt in [200u16, 201u16] {
       let add = AddLineToLiabilityNettingIxData {
          event_id: event_id_soccer(),
          period: 1,
@@ -295,7 +295,7 @@ fn remove_line_second_line_records_cu() {
    assert!(r.program_result.is_ok(), "{:?}", r);
    let (n, lines) = read_netting_lines_snapshot(&env, &np);
    assert_eq!(n, 1);
-   assert_eq!(lines, vec![(1u8, 200u32)]);
+   assert_eq!(lines, vec![(1u8, 200u16)]);
    record_cu_success("remove_line_from_netting_account/second_line", &r);
 }
 

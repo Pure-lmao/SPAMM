@@ -17,6 +17,9 @@ use spamm_aggregator::state::other::{
 };
 use spamm_aggregator::state::{EventId, MarketId, NETTING_HEADER_LEN, NETTING_LINE_LEN, NETTING_PDA_DISCRIMINATOR};
 
+/// First `i64` header liability (`home`) after `discriminator` + `bump` + wire `EventId`.
+const NETTING_HEADER_HOME_OFFSET: usize = 2 + EventId::WIRE_SIZE;
+
 use super::env::Env;
 use super::fixtures::{
    agg_program_id, encumbrance_pda, mm_program_id, user_collateral_ata,
@@ -111,7 +114,7 @@ pub fn assert_encumbrance_discriminator(env: &Env, enc: &Pubkey) {
 }
 
 /// Header + line count from netting PDA (must be initialised).
-pub fn read_netting_lines_snapshot(env: &Env, netting_pda: &Pubkey) -> (u8, Vec<(u8, u32)>) {
+pub fn read_netting_lines_snapshot(env: &Env, netting_pda: &Pubkey) -> (u8, Vec<(u8, u16)>) {
    let acct = env
       .get_account(netting_pda)
       .unwrap_or_else(|| panic!("missing netting {netting_pda}"));
@@ -123,7 +126,7 @@ pub fn read_netting_lines_snapshot(env: &Env, netting_pda: &Pubkey) -> (u8, Vec<
    for i in 0..(n as usize) {
       let off = lines_start + i * NETTING_LINE_LEN;
       let period = acct.data[off];
-      let mkt = u32::from_le_bytes(acct.data[off + 1..off + 5].try_into().unwrap());
+      let mkt = u16::from_le_bytes(acct.data[off + 1..off + 3].try_into().unwrap());
       lines.push((period, mkt));
    }
    (n, lines)
@@ -133,7 +136,7 @@ pub fn read_netting_lines_snapshot(env: &Env, netting_pda: &Pubkey) -> (u8, Vec<
 pub fn read_netting_soccer_header_and_lines(
    env: &Env,
    netting_pda: &Pubkey,
-) -> ([i64; 3], Vec<(u8, u32, i64, i64)>) {
+) -> ([i64; 3], Vec<(u8, u16, i64, i64)>) {
    let acct = env
       .get_account(netting_pda)
       .unwrap_or_else(|| panic!("missing netting {netting_pda}"));
@@ -145,7 +148,7 @@ pub fn read_netting_soccer_header_and_lines(
    assert_eq!(acct.data[0], NETTING_PDA_DISCRIMINATOR);
    let mut ft = [0i64; 3];
    for (i, slot) in ft.iter_mut().enumerate() {
-      let off = 15 + i * 8;
+      let off = NETTING_HEADER_HOME_OFFSET + i * 8;
       *slot = i64::from_le_bytes(acct.data[off..off + 8].try_into().unwrap());
    }
    let n = acct.data[NETTING_HEADER_LEN - 1];
@@ -154,9 +157,9 @@ pub fn read_netting_soccer_header_and_lines(
    for i in 0..(n as usize) {
       let off = lines_start + i * NETTING_LINE_LEN;
       let period = acct.data[off];
-      let mkt = u32::from_le_bytes(acct.data[off + 1..off + 5].try_into().unwrap());
-      let o0 = i64::from_le_bytes(acct.data[off + 5..off + 13].try_into().unwrap());
-      let o1 = i64::from_le_bytes(acct.data[off + 13..off + 21].try_into().unwrap());
+      let mkt = u16::from_le_bytes(acct.data[off + 1..off + 3].try_into().unwrap());
+      let o0 = i64::from_le_bytes(acct.data[off + 3..off + 11].try_into().unwrap());
+      let o1 = i64::from_le_bytes(acct.data[off + 11..off + 19].try_into().unwrap());
       out.push((period, mkt, o0, o1));
    }
    (ft, out)
@@ -174,11 +177,24 @@ pub fn assert_netting_pda_initialized(env: &Env, netting_pda: &Pubkey, expected_
    );
    assert_eq!(acct.data[0], NETTING_PDA_DISCRIMINATOR);
    let wire = expected_event_id.as_wire_bytes();
-   assert_eq!(&acct.data[2..15], wire.as_slice(), "netting event_id");
+   let ev_end = 2 + EventId::WIRE_SIZE;
+   assert_eq!(&acct.data[2..ev_end], wire.as_slice(), "netting event_id");
    assert_eq!(acct.data[NETTING_HEADER_LEN - 1], 0, "number_of_lines");
-   let home = i64::from_le_bytes(acct.data[15..23].try_into().unwrap());
-   let away = i64::from_le_bytes(acct.data[23..31].try_into().unwrap());
-   let draw = i64::from_le_bytes(acct.data[31..39].try_into().unwrap());
+   let home = i64::from_le_bytes(
+      acct.data[NETTING_HEADER_HOME_OFFSET..NETTING_HEADER_HOME_OFFSET + 8]
+         .try_into()
+         .unwrap(),
+   );
+   let away = i64::from_le_bytes(
+      acct.data[NETTING_HEADER_HOME_OFFSET + 8..NETTING_HEADER_HOME_OFFSET + 16]
+         .try_into()
+         .unwrap(),
+   );
+   let draw = i64::from_le_bytes(
+      acct.data[NETTING_HEADER_HOME_OFFSET + 16..NETTING_HEADER_HOME_OFFSET + 24]
+         .try_into()
+         .unwrap(),
+   );
    assert_eq!(home, 0);
    assert_eq!(away, 0);
    assert_eq!(draw, 0);

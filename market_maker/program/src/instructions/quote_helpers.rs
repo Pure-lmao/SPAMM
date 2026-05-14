@@ -23,13 +23,19 @@ pub fn u32_le_at(slice: &[u8], word_index: usize) -> Option<u32> {
 pub fn odds_from_market_data_body(m: &MarketId, body: &[u8], side: u8) -> Result<u32, ProgramError> {
    if soccer_mkt_is_three_outcome_1x2_or_double_chance(m) {
       if unlikely(body.len() < 12) {
-         log!("quote_helpers: market data body needs 3 outcomes (3 x u32)");
+         log!(
+            "quote_helpers: 3-outcome body too short len {} need 12",
+            body.len()
+         );
          return Err(ProgramError::InvalidAccountData);
       }
       u32_le_at(body, side as usize).ok_or(ProgramError::InvalidAccountData)
    } else {
       if unlikely(body.len() < 8) {
-         log!("quote_helpers: market data body needs 2 outcomes (2 x u32)");
+         log!(
+            "quote_helpers: 2-outcome body too short len {} need 8",
+            body.len()
+         );
          return Err(ProgramError::InvalidAccountData);
       }
       u32_le_at(body, side as usize).ok_or(ProgramError::InvalidAccountData)

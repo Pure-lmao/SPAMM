@@ -6,7 +6,7 @@ use solana_pubkey::Pubkey;
 use mollusk_svm_programs_token::{associated_token, token};
 
 use spamm_aggregator::instructions::{FillBetIxData, FillParlayIxData, FILL_BET_IX_DATA_LEN, FILL_PARLAY_IX_DATA_LEN};
-use spamm_aggregator::state::{MarketId, ParlayLegTable, ParlayLegWire};
+use spamm_aggregator::state::{EventGameState, MarketId, ParlayLegTable, ParlayLegWire};
 
 use super::fixtures::*;
 
@@ -108,12 +108,12 @@ pub fn fill_parlay_instruction(payload: &FillParlayIxData, bet_pda: Pubkey, bet_
    Instruction::new_with_bytes(agg_program_id(), &buf, fill_parlay_metas(bet_pda, bet_ata, markets))
 }
 
-pub fn parlay_leg(market_id: MarketId, side: u8, seq: u16, hash: [u8; 32]) -> ParlayLegWire {
+pub fn parlay_leg(market_id: MarketId, side: u8, seq: u16, game_state: EventGameState) -> ParlayLegWire {
    ParlayLegWire {
       market_id,
       side,
       event_state_sequence: seq,
-      event_state_hash: hash,
+      event_game_state: game_state,
    }
 }
 

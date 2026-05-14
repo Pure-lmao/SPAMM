@@ -3,7 +3,7 @@
 use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use crate::state::MarketId;
+use crate::state::{EventGameState, MarketId};
 
 /// One parlay selection on the wire (matches `fill_parlay` / MM quote buffer leg slots).
 #[derive(Copy, Clone, ZeroPod)]
@@ -12,12 +12,10 @@ pub struct ParlayLegWire {
    pub market_id: MarketId,
    pub side: u8,
    pub event_state_sequence: u16,
-   pub event_state_hash: [u8; 32],
+   pub event_game_state: EventGameState,
 }
 
 pub const PARLAY_LEG_WIRE_LEN: usize = <ParlayLegWire as ZeroPodFixed>::SIZE;
-
-const _: () = assert!(PARLAY_LEG_WIRE_LEN == 62);
 
 impl ParlayLegWire {
    #[inline(always)]
@@ -26,7 +24,7 @@ impl ParlayLegWire {
          market_id: self.market_id.to_zc(),
          side: self.side,
          event_state_sequence: self.event_state_sequence.into(),
-         event_state_hash: self.event_state_hash,
+         event_game_state: self.event_game_state.to_zc(),
       }
    }
 
@@ -36,7 +34,7 @@ impl ParlayLegWire {
          market_id: MarketId::from_zc(&z.market_id)?,
          side: z.side,
          event_state_sequence: z.event_state_sequence.get(),
-         event_state_hash: z.event_state_hash,
+         event_game_state: EventGameState::from_zc(&z.event_game_state),
       })
    }
 }

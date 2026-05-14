@@ -205,14 +205,14 @@ const getBetResultU8Decoder = (): Decoder<BetResult> => transformDecoder(getU8De
 export const getEventIdEncoder = (): Encoder<EventId> =>
    getStructEncoder([
       ['event', getU64Encoder()],
-      ['league', getU32Encoder()],
+      ['league', getU16Encoder()],
       ['sport', getSportU8Encoder()],
    ]);
 
 export const getEventIdDecoder = (): Decoder<EventId> =>
    getStructDecoder([
       ['event', getU64Decoder()],
-      ['league', getU32Decoder()],
+      ['league', getU16Decoder()],
       ['sport', getSportU8Decoder()],
    ]);
 
@@ -220,7 +220,7 @@ export const getMarketIdEncoder = (): Encoder<MarketId> =>
    getStructEncoder([
       ['eventId', getEventIdEncoder()],
       ['player', getU64Encoder()],
-      ['mkt', getU32Encoder()],
+      ['mkt', getU16Encoder()],
       ['period', getU8Encoder()],
       ['isPregame', getBoolU8Encoder()],
    ]);
@@ -229,7 +229,7 @@ export const getMarketIdDecoder = (): Decoder<MarketId> =>
    getStructDecoder([
       ['eventId', getEventIdDecoder()],
       ['player', getU64Decoder()],
-      ['mkt', getU32Decoder()],
+      ['mkt', getU16Decoder()],
       ['period', getU8Decoder()],
       ['isPregame', getBoolU8Decoder()],
    ]);
@@ -301,7 +301,7 @@ export const decodeBetAccountData = (data: ReadonlyUint8Array): BetAccountData =
 export const getNettingLineEncoder = (): Encoder<NettingLine> =>
    getStructEncoder([
       ['period', getU8Encoder()],
-      ['mkt', getU32Encoder()],
+      ['mkt', getU16Encoder()],
       ['outcome0', getI64Encoder()],
       ['outcome1', getI64Encoder()],
    ]);
@@ -309,7 +309,7 @@ export const getNettingLineEncoder = (): Encoder<NettingLine> =>
 export const getNettingLineDecoder = (): Decoder<NettingLine> =>
    getStructDecoder([
       ['period', getU8Decoder()],
-      ['mkt', getU32Decoder()],
+      ['mkt', getU16Decoder()],
       ['outcome0', getI64Decoder()],
       ['outcome1', getI64Decoder()],
    ]);
@@ -747,14 +747,14 @@ const getAddLineToNettingIxPayloadEncoder = (): Encoder<AddLineToNettingIxData> 
    getStructEncoder([
       ['eventId', getEventIdEncoder()],
       ['period', getU8Encoder()],
-      ['mkt', getU32Encoder()],
+      ['mkt', getU16Encoder()],
    ]);
 
 const getAddLineToNettingIxPayloadDecoder = (): Decoder<AddLineToNettingIxData> =>
    getStructDecoder([
       ['eventId', getEventIdDecoder()],
       ['period', getU8Decoder()],
-      ['mkt', getU32Decoder()],
+      ['mkt', getU16Decoder()],
    ]);
 
 const getRemoveLineFromNettingIxPayloadEncoder = (): Encoder<RemoveLineFromNettingIxData> =>

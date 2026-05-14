@@ -1,4 +1,5 @@
 use pinocchio::error::ProgramError;
+use pinocchio_log::log;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use spamm_aggregator::state::{GetQuoteParlayIxData, ParlayLegTable};
@@ -20,9 +21,20 @@ impl GetQuoteParlayIxPayload {
    #[inline(always)]
    pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
       if data.len() != GET_QUOTE_PARLAY_IX_PAYLOAD_LEN {
+         log!(
+            "get_quote_parlay: ix payload len mismatch got {} want {}",
+            data.len(),
+            GET_QUOTE_PARLAY_IX_PAYLOAD_LEN
+         );
          return Err(ProgramError::InvalidInstructionData);
       }
-      let zc = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+      let zc = match <Self as ZeroPodFixed>::from_bytes(data) {
+         Ok(z) => z,
+         Err(_) => {
+            log!("get_quote_parlay: ix payload from_bytes failed");
+            return Err(ProgramError::InvalidInstructionData);
+         }
+      };
       Ok(Self {
          amount: zc.amount.get(),
          odds_scaled: zc.odds_scaled.get(),

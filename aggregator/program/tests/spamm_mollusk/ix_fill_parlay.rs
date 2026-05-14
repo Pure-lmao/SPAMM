@@ -4,7 +4,7 @@ use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
 
 use spamm_aggregator::instructions::FillParlayIxData;
-use spamm_aggregator::state::MarketId;
+use spamm_aggregator::state::{EventGameState, MarketId};
 
 use spamm_aggregator::constants::{MAX_PARLAY_LEGS, ODDS_SCALE};
 
@@ -34,8 +34,8 @@ fn fill_parlay_two_legs_success() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id,
       amount: 5_000_000,
@@ -66,7 +66,7 @@ fn fill_parlay_num_legs_too_low() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 200,
       amount: 5_000_000,
@@ -95,8 +95,8 @@ fn fill_parlay_paused() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 201,
       amount: 5_000_000,
@@ -116,8 +116,8 @@ fn fill_parlay_wrong_mm_program() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 202,
       amount: 5_000_000,
@@ -143,8 +143,8 @@ fn fill_parlay_amount_zero_rejected() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 210,
       amount: 0,
@@ -164,8 +164,8 @@ fn fill_parlay_num_legs_above_max_rejected() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 211,
       amount: 1_000_000,
@@ -185,8 +185,8 @@ fn fill_parlay_leg_accounts_len_mismatch_rejected() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 212,
       amount: 2_000_000,
@@ -211,8 +211,8 @@ fn fill_parlay_side_invalid_rejected() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 3, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 3, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 213,
       amount: 2_000_000,
@@ -232,8 +232,8 @@ fn fill_parlay_min_odds_at_scale_rejected() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 214,
       amount: 2_000_000,
@@ -259,8 +259,8 @@ fn fill_parlay_duplicate_event_id_rejected() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m_spread, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m_ft, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m_spread, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m_ft, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 215,
       amount: 2_000_000,
@@ -304,7 +304,7 @@ fn fill_parlay_three_legs_success() {
    let legs: Vec<_> = markets
       .iter()
       .enumerate()
-      .map(|(i, mid)| parlay_leg(*mid, (i % 2) as u8, 1, [0u8; 32]))
+      .map(|(i, mid)| parlay_leg(*mid, (i % 2) as u8, 1, EventGameState::zeroed()))
       .collect();
    let payload = FillParlayIxData {
       bet_id: 220,
@@ -340,7 +340,7 @@ fn fill_parlay_four_legs_success() {
    let legs: Vec<_> = markets
       .iter()
       .enumerate()
-      .map(|(i, mid)| parlay_leg(*mid, (i % 2) as u8, 1, [0u8; 32]))
+      .map(|(i, mid)| parlay_leg(*mid, (i % 2) as u8, 1, EventGameState::zeroed()))
       .collect();
    let payload = FillParlayIxData {
       bet_id: 222,
@@ -376,7 +376,7 @@ fn fill_parlay_five_legs_success() {
    let legs: Vec<_> = markets
       .iter()
       .enumerate()
-      .map(|(i, mid)| parlay_leg(*mid, (i % 2) as u8, 1, [0u8; 32]))
+      .map(|(i, mid)| parlay_leg(*mid, (i % 2) as u8, 1, EventGameState::zeroed()))
       .collect();
    let payload = FillParlayIxData {
       bet_id: 221,

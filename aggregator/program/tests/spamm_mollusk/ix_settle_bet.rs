@@ -7,7 +7,7 @@ use spamm_aggregator::helpers::calc_potential_profit;
 use spamm_aggregator::instructions::{
    AddLineToLiabilityNettingIxData, FillBetIxData, FillParlayIxData, ADD_LINE_TO_LIABILITY_NETTING_IX_LEN,
 };
-use spamm_aggregator::state::MarketId;
+use spamm_aggregator::state::{EventGameState, MarketId};
 use spamm_aggregator::state::account_bet::BetResult;
 
 use crate::common::{
@@ -46,7 +46,7 @@ fn fill_and_grade(env: &mut Env, bet_id: u64, result: u8) {
       amount: 3_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    assert!(env
       .run_ix(fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder()))
@@ -99,7 +99,7 @@ fn fill_netting_m4_bet_and_grade(env: &mut Env, bet_id: u64, result: u8) {
       amount: 8_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    assert!(env
       .run_ix(fill_bet_instruction(
@@ -345,7 +345,7 @@ fn settle_bet_pending_fails() {
       amount: 3_000_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
-      event_state_hash: [0u8; 32],
+      event_game_state: EventGameState::zeroed(),
    };
    assert!(env
       .run_ix(fill_bet_instruction(&data, bet, bat, &mid, fill_bet_netting_placeholder()))
@@ -406,8 +406,8 @@ fn settle_bet_parlay_account_rejected() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m1, 0, 1, [0u8; 32]);
-   let l1 = parlay_leg(m2, 1, 1, [0u8; 32]);
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2, 1, 1, EventGameState::zeroed());
    let payload = FillParlayIxData {
       bet_id: 432,
       amount: 3_000_000,

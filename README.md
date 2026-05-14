@@ -41,6 +41,7 @@ The function **MUST** take the following accounts:
 | 4 | MM Quote Buffer | readonly |  |
 
 The function **MUST** take the following data:
+
 ```rust
 struct GetQuoteIxData {
    discriminator: u8, // 5
@@ -48,10 +49,11 @@ struct GetQuoteIxData {
    odds_scaled: u32,
    market_id: MarketId,
    side: u8, // two-outcome markets: 0 or 1; soccer mkt 1 or 5: 0, 1, or 2
-   event_state_hash: [u8; 32],
+   event_game_state: EventGameState,
    event_state_sequence: u16,
 }
 ```
+
 The function **MUST** return the following data for a valid quote:
 ```rust
 struct GetQuoteReturnData {
@@ -59,12 +61,14 @@ struct GetQuoteReturnData {
    odds_scaled: u32, // the decimal odds scaled by ODDS_SCALE from the perspective of the taking user
 }
 ```
+
 The function **MUST** return the data using **`sol_set_return_data`**.
 If **any of these values are 0**, then nothing will attempt to be filled.
 
 You can be filled at any amount from max_amount down to 0. You will be filled at odds_scaled.
 
 You **MUST** then populate the **MM Quote Buffer** with the following data:
+
 ```rust
 struct MMQuoteBuffer {
    discriminator: u8 = 2,
@@ -74,10 +78,11 @@ struct MMQuoteBuffer {
    side: u8, // same encoding as GetQuoteIxData.side
    max_amount: u64,
    odds_scaled: u32,
-   event_state_hash: [u8; 32],
+   event_game_state: EventGameState,
    event_state_sequence: u16,
 }
 ```
+
 This data is later used by your **`fill_quote`** function to validate the quote was actually offered by yourself and is **not spoofed**.
 
 The user is passed as a courtesy to allow you to potentially offer better odds to some users. Your Config PDA data beyond the header can be used for storing any global data you want (user profiles, global risk limits, etc). Your Market Data PDA data beyond the header can be used for storing any market-specific data you want (odds, liquidity, etc).
@@ -106,7 +111,7 @@ struct FillQuoteIxData {
    odds_scaled: u32,
    market_id: MarketId,
    side: u8,
-   event_state_hash: [u8; 32],
+   event_game_state: EventGameState,
    event_state_sequence: u16,
    amount_to_send: u64,
 }
@@ -145,11 +150,11 @@ struct ParlayLegWire {
    market_id: MarketId,
    side: u8, // two-outcome: 0 or 1; soccer mkt 1 or 5: 0, 1, or 2
    event_state_sequence: u16,
-   event_state_hash: [u8; 32],
+   event_game_state: EventGameState,
 }
 ```
 
-The MM should validate each leg’s market data / event state PDAs and that per-leg state hash and sequence match the instruction. The MM should be careful when quoting parlays with legs in the same event (Same-Game Parlays - SGPs), but this is not policed at the aggregator level. The example MM simply combines per-leg scaled odds from market data and writes a full snapshot into the **MM Parlay Quote Buffer**:
+The MM should validate each leg’s market data / event state PDAs and that per-leg **`event_game_state`** and **`event_state_sequence`** match the instruction (and the on-chain event-state account). The MM should be careful when quoting parlays with legs in the same event (Same-Game Parlays - SGPs), but this is not policed at the aggregator level. The example MM simply combines per-leg scaled odds from market data and writes a full snapshot into the **MM Parlay Quote Buffer**:
 
 ```rust
 struct MMParlayQuoteBuffer {
@@ -246,23 +251,36 @@ struct MarketData {
    remaining1: // reset on oracle hot path then decrement on fill_quote
 }
 ```
-It **MUST** have the seeds **`["market_data", market_id]`** using the wire **`MarketId`** bytes. The account can contain any data that you want to store for the market. The **aggregator verifies** the Market Data PDA exists with the expected seed. You should perform additional checks as needed such as the **sequence** and **data validation**.
+It **MUST** have the seeds **`["market_data", market_id]`** using the wire **`MarketId`** bytes. The account can contain any data that you want to store for the market. The **aggregator verifies** the Market Data PDA exists with the expected seed. You should perform additional checks as needed (for example that your odds align with the current **`EventGameState`** / **`sequence`** on the event-state account).
 
 It is recommended you use something like Doppler (https://github.com/blueshift-gg/doppler) for 21 CU updates and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_quote function.
 
 ## Event State PDA
-An **Event State PDA** **MUST** have the following structure:
+An **Event State PDA** **MUST** use the on-wire layout **`EventStateData`** (see `spamm_aggregator::state::EventStateData`):
+
 ```rust
-struct EventState {
+struct EventStateData {
    discriminator: u8 = 4,
    bump: u8,
    event_id: EventId,
    sequence: u16,
-   state_hash: [u8; 32],
+   game_state: EventGameState,
 }
 ```
-The sequence is incremented by 1 for each new state. The inital state has a sequence of 1 and the following activities increment the state:
-- Event starts
+
+```rust
+struct EventGameState {
+   game_phase: [u8; 4], // 4 ASCII bytes, 0-padded right
+   home_primary: u8, // main score
+   away_primary: u8, // main score
+   home_secondary: u8, // sport-dependent extras (for example red cards on soccer)
+   away_secondary: u8, // sport-dependent extras (for example red cards on soccer)
+}
+```
+
+The sequence is incremented by 1 for each new state. The initial state has a sequence of 0 and the following activities increment the state:
+- Event quoting starts (sequence 1, game_phase is `"PG"` scores are 0-0, 0-0)
+- Event starts (sequence 2, game_phase is sport initial period scores are 0-0, 0-0)
 - Goal is scored (soccer, ice hockey)
 - Red card (soccer)
 - Goal is cancelled (soccer, ice hockey)
@@ -275,47 +293,57 @@ The sequence is incremented by 1 for each new state. The inital state has a sequ
 
 An activity being cancelled refers to when the data feed updates to show the activity has happened and then reverted, NOT when the activity is pending. This is to allow reverting bets which are placed at odds which should not have existed.
 
-For example, if the state is 1-0 "1H", with sequence of 3 (1 - inital state of pregame, 2 - event started, 3 - first goal scored) and the data feed updates to show a goal is scored, the state should be updated to 1-1 "1H" with sequence of 4. If the data feed then updates to show the goal is cancelled, the state should be updated to 1-0 "1H" with sequence of 5. Any bets with a sequence of 4 are invalid and will be rolled back.
+For example, if the state is 1-0 "1H", with sequence of 3 (1 - initial state of pregame, 2 - event started, 3 - first goal scored) and the data feed updates to show a goal is scored, the state should be updated to 1-1 "1H" with sequence of 4. If the data feed then updates to show the goal is cancelled, the state should be updated to 1-0 "1H" with sequence of 5. Any bets with a sequence of 4 are invalid and will be rolled back.
 
 The event state hash and sequence of a market maker event PDA **must match** the **aggregator API** state hash and sequence which is used to construct the fill tx for the user or the market maker is considered **to not be in sync** and **won't be used to fill bets**.
 
 The state hash is constructed based on data which varies by sport:
 (P prefix meaning "pre-")
 ```rust
-soccer (sport_id = 1): (
-   home_team_score as u8, 
-   away_team_score as u8, 
-   home_team_red_cards as u8, 
-   away_team_red_cards as u8, 
-   "PG"|"1H"|"HT"|"2H"|"PET"|"1ET"|"HTET"|"2ET"|"PPen"|"Pen" as str
-)
+soccer (sport_id = 1): {
+   game_phase: "PG"|"1H"|"HT"|"2H"|"PET"|"1ET"|"HTET"|"2ET"|"PPen"|"Pen" encoded as [u8; 4],
+   home_primary: home team score,
+   away_primary: away team score,
+   home_secondary: home team red cards,
+   away_secondary: away team red cards,
+}
 
-american_football (sport_id = 2): (
-   home_team_score as u8, 
-   away_team_score as u8, 
-   "PG"|"1Q"|"P2Q"|"2Q"|"HT"|"3Q"|"P4Q"|"POT"|"OT" as str
-)
+american_football (sport_id = 2): {
+   game_phase: "PG"|"1Q"|"P2Q"|"2Q"|"HT"|"3Q"|"P4Q"|"POT"|"OT" encoded as [u8; 4],
+   home_primary: home team score,
+   away_primary: away team score,
+   home_secondary: 0,
+   away_secondary: 0,
+}
 
-baseball (sport_id = 3): (
-   home_team_score as u8, 
-   away_team_score as u8, 
-   "PG"|"T1"|"B1"|"P2"|"T2"|"B2"|"P3"... as str
-)
+baseball (sport_id = 3): {
+   game_phase: "PG"|"T1"|"B1"|"P2"|"T2"|"B2"|"P3"... encoded as [u8; 4],
+   home_primary: home team score,
+   away_primary: away team score,
+   home_secondary: 0,
+   away_secondary: 0,
+}
 
-basketball (sport_id = 4): (
-   //score is omitted as constant updates would be excessive
-   "PG"|"1Q"|"P2Q"|"2Q"|"HT"|"3Q"|"P4Q"|"POT"|"OT"|"POTx"|"OTx" as str
-   //where x > 1 of the double/triple overtimes
-)
+basketball (sport_id = 4): {
+   game_phase: "PG"|"1Q"|"P2Q"|"2Q"|"HT"|"3Q"|"P4Q"|"POT"|"OT"|"POTx"|"OTx" encoded as [u8; 4],
+   home_primary: 0, // score is omitted as constant updates would be excessive
+   away_primary: 0,
+   home_secondary: 0,
+   away_secondary: 0,
+}
 
-ice_hockey (sport_id = 5): (
-   home_team_score as u8, 
-   away_team_score as u8, 
-   "PG"|"1P"|"P2P"|"2P"|"P3P"|"P3"|"POT"|"OT"|"PSO"|"SO" as str
-)
+ice_hockey (sport_id = 5): {
+   game_phase: "PG"|"1P"|"P2P"|"2P"|"P3P"|"P3"|"POT"|"OT"|"PSO"|"SO" encoded as [u8; 4],
+   home_primary: home team score,
+   away_primary: away team score,
+   home_secondary: 0,
+   away_secondary: 0,
+}
+
+// when tennis is added, the number of sets won will be primary and set current games will be secondary
+// when esports are added, the number of map wins will be primary and map current score will be secondary if applicable (e.g. CS:GO)
+
 ```
-
-The hash is constructed as **`sha256(sport_id || state_tuple) => [u8; 32]`**.
 
 ## Accounts at a Glance
 | Account | Discriminator | Seed | Notes |
@@ -324,7 +352,7 @@ The hash is constructed as **`sha256(sport_id || state_tuple) => [u8; 32]`**.
 | MM Config PDA | 1 | ["config"] | created in init_program |
 | MM Quote Buffer | 2 | ["mm_quote_buffer"] | created in init_program |
 | MM Parlay Quote Buffer | 3 | ["mm_parlay_quote_buffer"] | created in init_program; used for parlay get/fill |
-| MM Event State | 4 | ["event_state", event_id] | created in init_event |
+| MM Event State | 4 | ["event_state", event_id] | created in `init_event` at **sequence 0**; operator advances **`game_state` / `sequence`** via `update_event_state` |
 | MM Token Account | n/a | n/a | authority is the MM Config PDA, created in init_program |
 
 MM accounts owned by the aggregator:
@@ -344,7 +372,7 @@ The first byte of instruction data routes the MM program (oracle hot-path **0** 
 | 6 | `fill_quote` | Single market; CPI from aggregator `fill_bet` |
 | 7 | `get_quote_parlay` | Multi-leg; CPI from aggregator `fill_parlay` or RPC to build tx |
 | 8 | `fill_parlay_quote` | Multi-leg; CPI from aggregator `fill_parlay` |
-| 9 | `init_event` | Creates event state PDA `["event_state", event_id]` |
+| 9 | `init_event` | Creates event state PDA `["event_state", event_id]` at **sequence 0** (zeroed `game_state`) |
 | 10 | `init_market` | Creates market/oracle body under `["market_data", market_id]` |
 | 11 | `close_event` | |
 | 12 | `close_market` | |
@@ -361,7 +389,7 @@ The first byte of instruction data routes the MM program (oracle hot-path **0** 
 6. Create event state PDAs for events you wish to quote.
 7. Create market data PDAs for markets you wish to quote.
 8. If you want to net liabilities on a market, create a liability netting PDA for the event by calling create_netting_account and add lines to the netting account by calling add_line_to_netting_account (passing `period` and `mkt` for each spread/total line you want reserved). The main win market (FT in soccer, ML in non-soccer) is added by default.
-9. Update the Event State PDA as the event progresses.
+9. Update the Event State PDA (**`game_state`** and **`sequence`**) as the event progresses.
 10. Update the Market Data PDA as the market odds change.
 11. Clients can now call the get_quote function of your SPAMM to get quotes for markets you are quoting. You should verify accounts that are passed and calculate the odds you want to offer based on the Market Data PDA and any data you have stored in your Config PDA.
 12. If your quote is in the top 5, the client will build a tx to attempt to fill the user bet. The aggregator will call the get_quote function again to get the best execution-time offers and then the fill_quote function if you are still offering the best odds. You can update the Config PDA and Market Data PDA here if you wish, for reference in the future.
@@ -436,9 +464,9 @@ The **aggregator API** will be responsible for providing:
 - a defined system of period ids
 - a defined system of market ids
 - a map of players to player ids (deterministic)
-- the event state hash and sequence for each event
+- the **`EventGameState`** snapshot and **`sequence`** for each event
 
-**SPAMMs should NOT** rely on the event state hash and sequence in reflecting reality to the millisecond. If you have access to a **faster data feed**, you should use it to update the event state hash and sequence so your quotes **match reality** as closely as possible. This means your **Market Data PDA** and **Event State PDA** will be **in sync** with each other, and avoids filling bets at **stale odds/event states**.
+**SPAMMs should NOT** rely on the published snapshot in reflecting reality to the millisecond. If you have access to a **faster data feed**, you should use it to advance **`sequence`** and refresh **`game_state`** so your quotes **match reality** as closely as possible. Keep your **Market Data PDA** and **Event State PDA** **in sync** with each other to avoid filling at **stale odds or stale game state**.
 
 ## Accounts at a Glance
 
@@ -563,7 +591,7 @@ struct FillBetIxData {
    amount: u64,
    min_odds_scaled: u32,
    event_state_sequence: u16,
-   event_state_hash: [u8; 32],
+   event_game_state: EventGameState,
 }
 ```
 

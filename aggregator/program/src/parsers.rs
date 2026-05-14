@@ -19,19 +19,17 @@ pub fn parse_fill_bet_data(data: &[u8]) -> Result<FillBetIxData, ProgramError> {
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   let side = parsed_data.side;
-   let mkt = parsed_data.market_id.mkt;
-   if unlikely(side > 2) {
-      log!("fill_bet: side must be 0=home, 1=away, or 2=draw");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   if unlikely(side == 2 && mkt != 1 && mkt != 5) {
-      log!("fill_bet: side 2 (draw) is only valid for soccer mkt 1 or 5");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-
    if unlikely(parsed_data.event_state_sequence == 0) {
       log!("fill_bet: event_state_sequence must be greater than 0");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   if parsed_data.market_id.is_pregame() {
+      if unlikely(parsed_data.event_state_sequence != 1) {
+         log!("fill_bet: pregame event_state_sequence must be 1");
+         return Err(ProgramError::InvalidInstructionData);
+      }
+   } else if unlikely(parsed_data.event_state_sequence < 2) {
+      log!("fill_bet: live event_state_sequence must be >= 2");
       return Err(ProgramError::InvalidInstructionData);
    }
 
@@ -81,18 +79,18 @@ pub fn parse_fill_parlay_data(data: &[u8]) -> Result<ParsedFillParlay, ProgramEr
 
    for i in 0..num {
       let leg = parsed.legs.get(i).ok_or(ProgramError::InvalidInstructionData)?;
-      let side = leg.side;
-      let mkt = leg.market_id.mkt;
-      if unlikely(side > 2) {
-         log!("fill_parlay: side must be 0=home, 1=away, or 2=draw");
-         return Err(ProgramError::InvalidInstructionData);
-      }
-      if unlikely(side == 2 && mkt != 1 && mkt != 5) {
-         log!("fill_parlay: side 2 (draw) is only valid for soccer mkt 1 or 5");
-         return Err(ProgramError::InvalidInstructionData);
-      }
+      
       if unlikely(leg.event_state_sequence == 0) {
          log!("fill_parlay: event_state_sequence must be greater than 0");
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      if leg.market_id.is_pregame() {
+         if unlikely(leg.event_state_sequence != 1) {
+            log!("fill_parlay: pregame leg event_state_sequence must be 1");
+            return Err(ProgramError::InvalidInstructionData);
+         }
+      } else if unlikely(leg.event_state_sequence < 2) {
+         log!("fill_parlay: live leg event_state_sequence must be >= 2");
          return Err(ProgramError::InvalidInstructionData);
       }
       let sport = leg.market_id.event_id.sport;

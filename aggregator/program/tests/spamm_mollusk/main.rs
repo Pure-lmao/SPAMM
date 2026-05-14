@@ -1,8 +1,10 @@
 //! Mollusk SBF integration tests for `spamm_aggregator`.
-//! Build programs first: `cargo build-sbf --manifest-path aggregator/program/Cargo.toml`
-//! and `cargo build-sbf --manifest-path market_maker/program/Cargo.toml`.
+//! Build programs first: `cargo build-sbf --manifest-path aggregator/program/Cargo.toml`,
+//! `cargo build-sbf --manifest-path market_maker/program/Cargo.toml`, and
+//! `cargo build-sbf --manifest-path aggregator/program/tests/spamm_mollusk/alt_stub/Cargo.toml`.
 //!
 //! Run (from `aggregator/program`): `cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --test-threads=1`
+//! (`test-sbf` pulls in `log`; program logs include `fill_helpers::parse_quote_return_for_mm` and MM `get_quote` decode breadcrumbs.)
 
 #![cfg(feature = "test-sbf")]
 

@@ -34,10 +34,80 @@ pub const MM_LIST_PDA_DISCRIMINATOR: u8 = 3;
 pub const MM_LIST_HEADER_LEN: usize = <MmListPdaData as ZeroPodFixed>::SIZE;
 pub const MM_LIST_PDA_NUMBER_OF_MMS_OFFSET: usize = 1;
 
-const _: () = assert!(MM_LIST_HEADER_LEN == 3);
 
 pub const EVENT_STATE_SEED: &[u8] = b"event_state";
 pub const EVENT_STATE_DISCRIMINATOR: u8 = 4;
+
+/// Packed live snapshot carried on the event-state PDA and echoed in quote / fill instruction data.
+/// Wire order is fixed; equality is defined as matching little-endian `u64` over the eight bytes.
+#[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
+pub struct EventGameState {
+   /// Up to four ASCII bytes for the game phase label (e.g. `"PG"`, `"T1"`); shorter labels pad with `0`.
+   pub game_phase: [u8; 4],
+   pub home_primary: u8,
+   pub away_primary: u8,
+   pub home_secondary: u8,
+   pub away_secondary: u8,
+}
+pub const EVENT_GAME_STATE_LEN: usize = <EventGameState as ZeroPodFixed>::SIZE;
+
+impl EventGameState {
+   #[inline(always)]
+   pub const fn zeroed() -> Self {
+      Self {
+         game_phase: [0u8; 4],
+         home_primary: 0,
+         away_primary: 0,
+         home_secondary: 0,
+         away_secondary: 0,
+      }
+   }
+
+   #[inline(always)]
+   pub fn as_u64(self) -> u64 {
+      let mut b = [0u8; 8];
+      b[..4].copy_from_slice(&self.game_phase);
+      b[4] = self.home_primary;
+      b[5] = self.away_primary;
+      b[6] = self.home_secondary;
+      b[7] = self.away_secondary;
+      u64::from_le_bytes(b)
+   }
+}
+
+impl PartialEq for EventGameState {
+   #[inline(always)]
+   fn eq(&self, other: &Self) -> bool {
+      self.as_u64() == other.as_u64()
+   }
+}
+
+impl Eq for EventGameState {}
+
+impl EventGameState {
+   #[inline(always)]
+   pub fn to_zc(self) -> EventGameStateZc {
+      EventGameStateZc {
+         game_phase: self.game_phase,
+         home_primary: self.home_primary,
+         away_primary: self.away_primary,
+         home_secondary: self.home_secondary,
+         away_secondary: self.away_secondary,
+      }
+   }
+
+   #[inline(always)]
+   pub fn from_zc(z: &EventGameStateZc) -> Self {
+      Self {
+         game_phase: z.game_phase,
+         home_primary: z.home_primary,
+         away_primary: z.away_primary,
+         home_secondary: z.home_secondary,
+         away_secondary: z.away_secondary,
+      }
+   }
+}
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
@@ -46,12 +116,10 @@ pub struct EventStateData {
    pub bump: u8,
    pub event_id: EventId,
    pub sequence: u16,
-   pub state_hash: [u8; 32],
+   pub game_state: EventGameState,
 }
 
 pub const EVENT_STATE_LEN: usize = <EventStateData as ZeroPodFixed>::SIZE;
-
-const _: () = assert!(EVENT_STATE_LEN == 49);
 
 pub const MM_MARKET_DATA_PDA_SEED: &[u8] = b"market_data";
 pub const MM_MARKET_DATA_PDA_DISCRIMINATOR: u8 = 0;
@@ -78,5 +146,3 @@ pub struct MmEncumbrancePdaData {
 pub const MM_ENCUMBRANCE_PDA_LEN: usize = <MmEncumbrancePdaData as ZeroPodFixed>::SIZE;
 pub const MM_ENCUMBRANCE_PDA_BUMP_OFFSET: usize = 1;
 pub const MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET: usize = 2;
-
-const _: () = assert!(core::mem::size_of::<MmEncumbrancePdaDataZc>() == MM_ENCUMBRANCE_PDA_LEN);

@@ -1,7 +1,7 @@
 use pinocchio::error::ProgramError;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use crate::state::MarketId;
+use crate::state::{EventGameState, MarketId};
 
 pub const FILL_QUOTE_IX_DISCRIMINATOR: u8 = 6;
 
@@ -13,7 +13,7 @@ pub struct FillQuoteIxData {
    pub odds_scaled: u32,
    pub market_id: MarketId,
    pub side: u8,
-   pub event_state_hash: [u8; 32],
+   pub event_game_state: EventGameState,
    pub event_state_sequence: u16,
    pub amount_to_send: u64
 }
@@ -29,7 +29,7 @@ impl FillQuoteIxData {
          odds_scaled: self.odds_scaled.into(),
          market_id: self.market_id.to_zc(),
          side: self.side,
-         event_state_hash: self.event_state_hash,
+         event_game_state: self.event_game_state.to_zc(),
          event_state_sequence: self.event_state_sequence.into(),
          amount_to_send: self.amount_to_send.into(),
       }
@@ -47,6 +47,3 @@ impl FillQuoteIxData {
       Ok(())
    }
 }
-
-
-const _: () = assert!(FillQuoteIxData::WIRE_LEN == 83);

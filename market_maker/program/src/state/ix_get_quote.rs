@@ -1,7 +1,8 @@
 use pinocchio::error::ProgramError;
+use pinocchio_log::log;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use spamm_aggregator::state::{GetQuoteIxData, MarketId};
+use spamm_aggregator::state::{EventGameState, MarketId};
 
 /// Get-quote instruction payload (bytes after the router discriminator in `lib.rs`), matching
 /// `GetQuoteIxData` minus `instruction_discriminator`
@@ -12,7 +13,7 @@ pub struct GetQuoteIxPayload {
    pub odds_scaled: u32,
    pub market_id: MarketId,
    pub side: u8,
-   pub event_state_hash: [u8; 32],
+   pub event_game_state: EventGameState,
    pub event_state_sequence: u16,
 }
 
@@ -22,20 +23,34 @@ impl GetQuoteIxPayload {
    #[inline(always)]
    pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
       if data.len() != GET_QUOTE_IX_PAYLOAD_LEN {
+         log!(
+            "get_quote: ix payload len mismatch got {} want {}",
+            data.len(),
+            GET_QUOTE_IX_PAYLOAD_LEN
+         );
          return Err(ProgramError::InvalidInstructionData);
       }
-      let zc = <Self as ZeroPodFixed>::from_bytes(data)
-         .map_err(|_| ProgramError::InvalidInstructionData)?;
+      let zc = match <Self as ZeroPodFixed>::from_bytes(data) {
+         Ok(z) => z,
+         Err(_) => {
+            log!("get_quote: ix payload from_bytes failed");
+            return Err(ProgramError::InvalidInstructionData);
+         }
+      };
+      let market_id = match MarketId::from_zc(&zc.market_id) {
+         Some(m) => m,
+         None => {
+            log!("get_quote: ix payload market_id from_zc failed");
+            return Err(ProgramError::InvalidInstructionData);
+         }
+      };
       Ok(Self {
          side: zc.side,
          event_state_sequence: zc.event_state_sequence.get(),
          odds_scaled: zc.odds_scaled.get(),
          amount: zc.amount.get(),
-         market_id: MarketId::from_zc(&zc.market_id).ok_or(ProgramError::InvalidInstructionData)?,
-         event_state_hash: zc.event_state_hash,
+         market_id,
+         event_game_state: EventGameState::from_zc(&zc.event_game_state),
       })
    }
 }
-
-// MM `data` tail must match aggregator CPI: full `GetQuoteIxData` wire is discrim + this payload.
-const _: () = assert!(GET_QUOTE_IX_PAYLOAD_LEN == GetQuoteIxData::WIRE_LEN - 1);

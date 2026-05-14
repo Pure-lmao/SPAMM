@@ -10,9 +10,41 @@
 6 - Ice Hockey
 ... More to be added
 
-## League (u32 - max 4,294,967,295)
+## League (u16 - max 65535)
 
-... To be defined by the source API used
+Digit 1 is the tier of the competition within it's `type` (e.g. Premier League = 1, Championship = 2)
+Digit 2 is the type of competition:
+
+| Digit 2 | Type |
+|---------|------|
+| 1       | Men's league|
+| 2       | Men's cup |
+| 3       | Men's secondary cup (e.g.League Cup) |
+| 4       | Youth league |
+| 5       | Youth cup |
+| 6       | Women's league |
+| 7       | Women's cup |
+
+Digits 3-6 are the country code from ISO 3166-1 numeric with additions for non-ISO countries and non-countries (e.g. UEFA) as follows:
+
+| County/Continent | Custom Code |
+|-------------|---------|
+| England | 827 (UK 826 + 1) |
+| Scotland | 828 (UK 826 + 2) |
+| Wales | 829 (UK 826 + 3) |
+| Northern Ireland | 830 (UK 826 + 4) |
+| Global Organiser (e.g. FIFA) | 900 |
+| European Organiser (e.g. UEFA) | 901 |
+| South American Organiser (e.g. CONMEBOL) | 902 |
+| North American Organiser (e.g. CONCACAF) | 903 |
+| African Organiser (e.g. CAF) | 904 |
+| Asian Organiser (e.g. AFC) | 905 |
+| Oceania Organiser (e.g. OFC) | 906 |
+| Olympic Games | 930 |
+| International Friendly | 950 |
+| Club Friendly | 951 |
+
+
 
 ## Event (u64 - max 18,446,744,073,709,551,615)
 
@@ -38,21 +70,31 @@
 32 - Tennis Games Betting Set 2
 ... More to be added such as corners, cards, etc.
 
-## Market (u32 - max 4,294,967,295)
+## Market (u16 - max 65535)
 
-0 - Moneyline (used in 2-way markets)
-1 - Full Time Result (used in 3-way markets)
-4 - Both Teams To Score
-5 - Double Chance (used in 3-way markets)
-10,000 - Base for total markets, take line and multiply by 100 then add to this base
-20,000 - Base for home team total markets, take line and multiply by 100 then add to this base
-30,000 - Base for away team total markets, take line and multiply by 100 then add to this base
-200,000 - Base for handicap markets, take line from home team perspective and multiply by 100 then add to this base
-... More to be added such as FT+BTTS, HT/FT, CS, Player Props, etc.
+mkt start | mkt end | market | sides count | logic | sides meaning
+|-------|-------|-------|-------|-------|-------|
+|0	|-| ml	| 2	| fixed	| home, away
+|1 |-|1X2	|3	|fixed	|home, away, draw
+|4	|-|btts	|2	|fixed	|yes, no
+|5	|-|dc	|3	|fixed	|not home, not away, not draw
+|6	|-|ft+btts	|6	|fixed	|h-y, a-y, d-y, h-n, a-n, d-n
+|7	|-|ht/ft	|9	|fixed	|h/h, h/a, h/d, a/h, a/a, a/d, d/h, d/a, d/d
+|10	|50	|mo	|2	|fixed	|win, not win
+|51	|99	|ou (x.25)	|2	|50+4*L	|over, under
+|100	|299	|ah (x.5)	|2	|200+2*L	|home, away
+|300	|499	|ah (x.25)	|2	|400+4*L	|home, away
+|1000	|1999	|ou (x.5)	|2	|1000+2*L	|over, under
+|2000	|2999	|hou	|2	|2000+2*L	|over, under
+|3000	|3999	|aou	|2	|3000+2*L	|over, under
+|4000	|4999	|btts+ou	|4	|4000+2*L	|y-o, y-u, n-o, n-u
+|5000	|5999	|ft+ou	|6	|5000+2*L	|h-o, a-o, d-o, h-u, a-u, d-u
+|10000	|100909	|cs	|1	|[10][0, home score][0, away score] - scores max at 9	|
+
 
 ## Player (u64 - max 18,446,744,073,709,551,615)
 
-... To be defined by the source API used or determined by encoding the player name
+... To be defined by the source API used or determined by encoding the player name (TBD)
 
 ## Side (u8 - max 255)
 

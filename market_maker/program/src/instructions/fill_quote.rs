@@ -74,7 +74,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       side: ix_data.side,
       max_amount: ix_data.amount_to_fill,
       odds_scaled: ix_data.odds_scaled,
-      event_state_hash: ix_data.event_state_hash,
+      event_game_state: ix_data.event_game_state,
       event_state_sequence: ix_data.event_state_sequence,
    };
    let quote = {

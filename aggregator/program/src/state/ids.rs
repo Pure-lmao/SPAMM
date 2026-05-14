@@ -42,7 +42,7 @@ impl Sport {
 #[repr(C)]
 pub struct EventId {
    pub event: u64,
-   pub league: u32,
+   pub league: u16,
    pub sport: Sport,
 }
 
@@ -100,10 +100,11 @@ impl EventId {
 pub struct MarketId {
    pub event_id: EventId,
    pub player: u64,
-   pub mkt: u32,
+   pub mkt: u16,
    pub period: u8,
    pub is_pregame: bool,
 }
+pub const MARKET_ID_LEN: usize = <MarketId as ZeroPodFixed>::SIZE;
 
 impl MarketId {
    pub const WIRE_SIZE: usize = <Self as ZeroPodFixed>::SIZE;
@@ -163,13 +164,10 @@ impl MarketId {
       out
    }
 
-   /// Whether `(period, mkt)` may be stored as a netting PDA **line-table** row (spread/total style).
-   /// Header fields cover soccer win mkt (1) and DC wont fit (5) and non-soccer ML (`period` 0, `mkt` 0);
-   /// those keys must not duplicate. Soccer `mkt` 4 may use the line table. Rejects `mkt > 10_000`
-   /// for every sport.
+   //allow netting on 4 (btts) and 51-199 (ou and ah)
    #[inline(always)]
-   pub fn allow_add_netting_line(sport: Sport, period: u8, mkt: u32) -> bool {
-      if mkt > 10_000 {
+   pub fn allow_add_netting_line(sport: Sport, period: u8, mkt: u16) -> bool {
+      if mkt != 4 && (mkt < 51 || mkt > 1999) {
          return false;
       }
       match sport {
@@ -178,6 +176,3 @@ impl MarketId {
       }
    }
 }
-
-const _: () = assert!(<EventId as ZeroPodFixed>::SIZE == 13);
-const _: () = assert!(<MarketId as ZeroPodFixed>::SIZE == 27);

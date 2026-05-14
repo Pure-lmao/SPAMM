@@ -9,8 +9,9 @@ use spl_token_interface::state::Mint;
 use mollusk_svm_programs_token::token;
 
 use crate::common::{
-   admin, assert_program_err, bet_feepayer, config_pda, mm_admin, mint_pubkey, mm_list_pda, read_config_authority_status,
-   record_cu_success, rich_signer_account, system_owned_empty, user, wrong_signer, Env,
+   admin, assert_program_err, bet_feepayer, config_pda, init_program_account_metas, init_program_ix_data, mm_admin,
+   mint_pubkey, mm_list_pda, read_config_authority_status, record_cu_success, rich_signer_account, lookup_table_pubkey,
+   system_owned_empty, user, wrong_signer, Env,
 };
 
 fn seed_funded_actors(env: &mut Env) {
@@ -43,17 +44,9 @@ fn init_program_success_creates_pdas() {
    seed_funded_actors(&mut env);
    env.upsert(config_pda(), system_owned_empty());
    env.upsert(mm_list_pda(), system_owned_empty());
+   env.upsert(lookup_table_pubkey(), system_owned_empty());
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
-   let ix = env.agg_ix(
-      0,
-      vec![],
-      vec![
-         AccountMeta::new(admin(), true),
-         AccountMeta::new(config_pda(), false),
-         AccountMeta::new(mm_list_pda(), false),
-         AccountMeta::new_readonly(sys_pk, false),
-      ],
-   );
+   let ix = env.agg_ix(0, init_program_ix_data(), init_program_account_metas(admin(), true, sys_pk));
    let r = env.run_ix(ix);
    assert!(r.program_result.is_ok(), "{:?}", r);
    let cfg = env.get_account(&config_pda()).expect("config");
@@ -72,16 +65,7 @@ fn init_program_fails_reinit() {
    let mut env = Env::new();
    env.bootstrap_agg_only();
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
-   let ix = env.agg_ix(
-      0,
-      vec![],
-      vec![
-         AccountMeta::new(admin(), true),
-         AccountMeta::new(config_pda(), false),
-         AccountMeta::new(mm_list_pda(), false),
-         AccountMeta::new_readonly(sys_pk, false),
-      ],
-   );
+   let ix = env.agg_ix(0, init_program_ix_data(), init_program_account_metas(admin(), true, sys_pk));
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::InvalidAccountData);
 }
@@ -92,19 +76,13 @@ fn init_program_wrong_config_pda_seeds() {
    seed_funded_actors(&mut env);
    env.upsert(config_pda(), system_owned_empty());
    env.upsert(mm_list_pda(), system_owned_empty());
+   env.upsert(lookup_table_pubkey(), system_owned_empty());
    let bad = Pubkey::new_from_array([0x55; 32]);
    env.upsert(bad, system_owned_empty());
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
-   let ix = env.agg_ix(
-      0,
-      vec![],
-      vec![
-         AccountMeta::new(admin(), true),
-         AccountMeta::new(bad, false),
-         AccountMeta::new(mm_list_pda(), false),
-         AccountMeta::new_readonly(sys_pk, false),
-      ],
-   );
+   let mut metas = init_program_account_metas(admin(), true, sys_pk);
+   metas[1] = AccountMeta::new(bad, false);
+   let ix = env.agg_ix(0, init_program_ix_data(), metas);
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::InvalidSeeds);
 }
@@ -114,19 +92,13 @@ fn init_program_wrong_mm_list_pda() {
    let mut env = Env::new();
    seed_funded_actors(&mut env);
    env.upsert(config_pda(), system_owned_empty());
+   env.upsert(lookup_table_pubkey(), system_owned_empty());
    let bad_list = Pubkey::new_from_array([0x66; 32]);
    env.upsert(bad_list, system_owned_empty());
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
-   let ix = env.agg_ix(
-      0,
-      vec![],
-      vec![
-         AccountMeta::new(admin(), true),
-         AccountMeta::new(config_pda(), false),
-         AccountMeta::new(bad_list, false),
-         AccountMeta::new_readonly(sys_pk, false),
-      ],
-   );
+   let mut metas = init_program_account_metas(admin(), true, sys_pk);
+   metas[2] = AccountMeta::new(bad_list, false);
+   let ix = env.agg_ix(0, init_program_ix_data(), metas);
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::InvalidSeeds);
 }
@@ -137,17 +109,9 @@ fn init_program_missing_admin_signer() {
    seed_funded_actors(&mut env);
    env.upsert(config_pda(), system_owned_empty());
    env.upsert(mm_list_pda(), system_owned_empty());
+   env.upsert(lookup_table_pubkey(), system_owned_empty());
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
-   let ix = env.agg_ix(
-      0,
-      vec![],
-      vec![
-         AccountMeta::new(admin(), false),
-         AccountMeta::new(config_pda(), false),
-         AccountMeta::new(mm_list_pda(), false),
-         AccountMeta::new_readonly(sys_pk, false),
-      ],
-   );
+   let ix = env.agg_ix(0, init_program_ix_data(), init_program_account_metas(admin(), false, sys_pk));
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::MissingRequiredSignature);
 }
