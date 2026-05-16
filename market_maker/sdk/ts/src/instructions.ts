@@ -20,6 +20,7 @@ import {
    getMmQuoteBufferPda,
 } from './helpers.js';
 import type {
+   EventGameState,
    EventId,
    FillParlayQuoteIxData,
    GetQuoteIxData,
@@ -28,7 +29,7 @@ import type {
    ParlayLegWire,
 } from './types.js';
 import {
-   validateBytes32,
+   validateEventGameState,
    validateEventId,
    validateFillParlayQuoteIxData,
    validateGetQuoteIxData,
@@ -60,7 +61,7 @@ export type MmGetQuote = {
    amount: bigint;
    minOddsScaled: bigint;
    side: number;
-   eventStateHash: Uint8Array;
+   eventGameState: EventGameState;
    eventStateSequence: number;
    marketId: MarketId;
 };
@@ -144,7 +145,7 @@ export async function getInitEventIx(feepayer: Address, eventId: EventId, mmProg
 }
 
 /**
- * **`update_event_state`** — set `sequence` and `state_hash` on the event-state PDA (admin).
+ * **`update_event_state`** — set `sequence` and `game_state` on the event-state PDA (admin).
  *
  * **Rust:** `update_event_state::process` (discriminator **13**).
  */
@@ -153,17 +154,17 @@ export async function getUpdateEventStateIx(
    mmProgram: Address,
    eventId: EventId,
    sequence: number,
-   stateHash: Uint8Array,
+   gameState: EventGameState,
 ): Promise<Instruction> {
    validateEventId(eventId, 'eventId');
    validateU16(sequence, 'sequence');
-   validateBytes32(stateHash, 'stateHash');
+   validateEventGameState(gameState, 'gameState');
    const [configPda] = await getMmConfigPda(mmProgram);
    const [eventStatePda] = await getEventStatePda(mmProgram, eventId);
    return {
       programAddress: mmProgram,
       accounts: [ws(feepayer), ro(configPda), rw(eventStatePda)],
-      data: encodeMarketMakerInstructionData({ kind: 'updateEventState', eventId, sequence, stateHash }),
+      data: encodeMarketMakerInstructionData({ kind: 'updateEventState', eventId, sequence, gameState }),
    };
 }
 
@@ -239,7 +240,7 @@ export async function getMmGetQuoteIx(
       oddsScaled: quote.minOddsScaled,
       marketId: quote.marketId,
       side: quote.side,
-      eventStateHash: quote.eventStateHash,
+      eventGameState: quote.eventGameState,
       eventStateSequence: quote.eventStateSequence,
    };
    validateGetQuoteIxData(data, 'quote');
@@ -357,7 +358,7 @@ export type MarketMakerInstructionInput =
         mmProgram: Address;
         eventId: EventId;
         sequence: number;
-        stateHash: Uint8Array;
+        gameState: EventGameState;
      }
    | {
         kind: 'initMarket';
@@ -406,7 +407,7 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
             input.mmProgram,
             input.eventId,
             input.sequence,
-            input.stateHash,
+            input.gameState,
          );
       case 'initMarket':
          return getInitMarketIx(input.feepayer, input.mmProgram, input.marketId, input.oracleBody);

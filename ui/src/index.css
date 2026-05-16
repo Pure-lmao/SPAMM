@@ -1,0 +1,753 @@
+:root {
+   color-scheme: dark;
+   /* Match spread/total thead to body: line + gap + buttons */
+   --line-odds-gap: 0.65rem;
+   --bg: #0f1218;
+   --panel: #161b24;
+   --border: #2a3140;
+   --text: #e8ecf4;
+   --muted: #8b95a8;
+   --accent: #6ee7b7;
+   --sport-bg: #1a2230;
+   font-family: "Segoe UI", system-ui, sans-serif;
+   line-height: 1.45;
+}
+
+* {
+   box-sizing: border-box;
+}
+
+body {
+   margin: 0;
+   min-height: 100vh;
+   background: var(--bg);
+   color: var(--text);
+}
+
+#root {
+   max-width: 1200px;
+   margin: 0 auto;
+   padding: 1.25rem 1rem 3rem;
+}
+
+h1 {
+   font-size: 1.35rem;
+   font-weight: 600;
+   margin: 0 0 1rem;
+   letter-spacing: -0.02em;
+}
+
+.banner-error {
+   background: #3d1f24;
+   border: 1px solid #7f2d38;
+   color: #fecaca;
+   padding: 0.75rem 1rem;
+   border-radius: 8px;
+   margin-bottom: 1rem;
+}
+
+.sport-section {
+   margin-bottom: 2rem;
+   border: 1px solid var(--border);
+   border-radius: 10px;
+   overflow: hidden;
+   background: var(--sport-bg);
+}
+
+.sport-title {
+   margin: 0;
+   padding: 0.65rem 1rem;
+   font-size: 1.05rem;
+   font-weight: 600;
+   background: linear-gradient(90deg, #1e2838, #161d2a);
+   border-bottom: 1px solid var(--border);
+}
+
+.sport-title--toggle {
+   display: flex;
+   align-items: center;
+   gap: 0.5rem;
+   width: 100%;
+   border: none;
+   cursor: pointer;
+   font: inherit;
+   color: inherit;
+   text-align: left;
+}
+
+.sport-title--toggle:hover {
+   filter: brightness(1.06);
+}
+
+.collapse-chevron {
+   display: inline-block;
+   width: 1.1rem;
+   flex-shrink: 0;
+   font-size: 0.75rem;
+   color: var(--muted);
+}
+
+.league-block {
+   border-bottom: 1px solid var(--border);
+}
+
+.league-block:last-child {
+   border-bottom: none;
+}
+
+.league-row {
+   padding: 0.45rem 1rem;
+   font-size: 0.8rem;
+   font-weight: 600;
+   text-transform: uppercase;
+   letter-spacing: 0.04em;
+   color: var(--accent);
+   background: rgba(0, 0, 0, 0.2);
+}
+
+.league-row--toggle {
+   display: flex;
+   align-items: center;
+   gap: 0.5rem;
+   width: 100%;
+   border: none;
+   cursor: pointer;
+   font: inherit;
+   text-align: left;
+}
+
+.league-row--toggle:hover {
+   background: rgba(0, 0, 0, 0.35);
+}
+
+.events-table {
+   width: 100%;
+   border-collapse: collapse;
+   font-size: 0.875rem;
+}
+
+.events-table thead {
+   background: var(--panel);
+}
+
+.events-table th {
+   text-align: left;
+   padding: 0.5rem 0.75rem;
+   color: var(--muted);
+   font-weight: 500;
+   font-size: 0.72rem;
+   text-transform: uppercase;
+   letter-spacing: 0.05em;
+   border-bottom: 1px solid var(--border);
+   vertical-align: bottom;
+}
+
+.th-match {
+   vertical-align: middle;
+   min-width: 10rem;
+   text-align: left;
+}
+
+.thead-row-primary th:not(.th-match) {
+   text-align: center;
+}
+
+.thead-row-primary th {
+   font-size: 0.78rem;
+   font-weight: 600;
+   color: var(--text);
+   border-bottom: none;
+   padding-bottom: 0.2rem;
+}
+
+.thead-row-sub th {
+   padding-top: 0;
+   padding-bottom: 0.5rem;
+   font-size: 0.7rem;
+   font-weight: 500;
+   text-transform: none;
+   letter-spacing: 0.02em;
+   color: var(--muted);
+   border-bottom: 1px solid var(--border);
+}
+
+/* ML / 1X2 sub-header: same column grid as odds buttons */
+.th-sub-inner--grid-2 {
+   display: grid;
+   grid-template-columns: 1fr 1fr;
+   gap: 0.35rem;
+   width: 100%;
+}
+
+.th-sub-inner--grid-3 {
+   display: grid;
+   grid-template-columns: repeat(3, 1fr);
+   gap: 0.35rem;
+   width: 100%;
+}
+
+.th-sub-inner--grid-2 > span,
+.th-sub-inner--grid-3 > span {
+   text-align: center;
+   min-width: 0;
+}
+
+/* Spread / total sub-header: grid matches body — fixed line column + labels over buttons */
+.th-market-sub-header {
+   display: grid;
+   align-items: center;
+   column-gap: var(--line-odds-gap);
+   width: 100%;
+   min-width: 0;
+}
+
+.th-market-sub-header--spread {
+   grid-template-columns: 7ch 1fr;
+}
+
+.th-market-sub-header--total {
+   grid-template-columns: 5.75ch 1fr;
+}
+
+.th-market-sub-header--soccer.th-market-sub-header--spread {
+   grid-template-columns: 8.75ch 1fr;
+}
+
+.th-market-sub-header--soccer.th-market-sub-header--total {
+   grid-template-columns: 6.5ch 1fr;
+}
+
+.th-market-sub-header__line-slot {
+   visibility: hidden;
+   font-size: 1.125rem;
+   font-weight: 600;
+   font-variant-numeric: tabular-nums;
+   line-height: 1.2;
+   white-space: nowrap;
+   text-align: right;
+}
+
+.th-market-sub-header .th-sub-inner {
+   min-width: 0;
+}
+
+.events-table td {
+   padding: 0.55rem 0.75rem;
+   vertical-align: top;
+   border-bottom: 1px solid rgba(42, 49, 64, 0.6);
+}
+
+.events-table tr:last-child td {
+   border-bottom: none;
+}
+
+.match-main .teams {
+   font-weight: 600;
+}
+
+.match-main .vs {
+   color: var(--muted);
+   font-weight: 400;
+   margin: 0 0.2rem;
+}
+
+.match-main time {
+   display: block;
+   margin-top: 0.25rem;
+   font-size: 0.8rem;
+   color: var(--muted);
+}
+
+.odds-cell {
+   font-variant-numeric: tabular-nums;
+}
+
+.odds-stack {
+   display: flex;
+   flex-direction: column;
+   gap: 0.35rem;
+   min-width: 0;
+}
+
+.odds-line-with-buttons {
+   width: 100%;
+   min-width: 0;
+}
+
+.odds-line-with-buttons--spread,
+.odds-line-with-buttons--total {
+   display: grid;
+   align-items: center;
+   column-gap: var(--line-odds-gap);
+}
+
+.odds-line-with-buttons--spread {
+   grid-template-columns: 7ch 1fr;
+}
+
+.odds-line-with-buttons--total {
+   grid-template-columns: 5.75ch 1fr;
+}
+
+.odds-line-with-buttons--soccer.odds-line-with-buttons--spread {
+   grid-template-columns: 8.75ch 1fr;
+}
+
+.odds-line-with-buttons--soccer.odds-line-with-buttons--total {
+   grid-template-columns: 6.5ch 1fr;
+}
+
+.odds-line-with-buttons--spread .odds-line-value:not(.odds-line-value--empty),
+.odds-line-with-buttons--total .odds-line-value:not(.odds-line-value--empty) {
+   display: block;
+   text-align: right;
+}
+
+.odds-line-with-buttons--spread .odds-line-value--empty,
+.odds-line-with-buttons--total .odds-line-value--empty {
+   text-align: right;
+}
+
+.odds-line-value {
+   font-size: 1.125rem;
+   font-weight: 600;
+   font-variant-numeric: tabular-nums;
+   color: var(--text);
+   line-height: 1.2;
+}
+
+.odds-line-value--empty {
+   font-size: 1rem;
+   font-weight: 500;
+   color: var(--muted);
+}
+
+/* Soccer: tabular numerals; line width comes from grid column */
+.odds-line-value--soccer-asian {
+   font-variant-numeric: tabular-nums;
+   text-align: right;
+}
+
+.odds-buttons {
+   display: grid;
+   gap: 0.35rem;
+   min-width: 0;
+}
+
+.odd-btn {
+   font: inherit;
+   font-variant-numeric: tabular-nums;
+   padding: 0.35rem 0.5rem;
+   border-radius: 6px;
+   border: 1px solid var(--border);
+   background: var(--panel);
+   color: var(--text);
+   cursor: pointer;
+   text-align: center;
+   transition: background 0.12s, border-color 0.12s;
+}
+
+.odd-btn:hover:not(:disabled) {
+   background: #1e2635;
+   border-color: #3d4a62;
+}
+
+.odd-btn--empty {
+   cursor: default;
+   opacity: 0.65;
+}
+
+.loading {
+   color: var(--muted);
+}
+
+/* —— Bet modal (large sheet) —— */
+.bet-modal-overlay {
+   position: fixed;
+   inset: 0;
+   z-index: 1000;
+   display: flex;
+   align-items: flex-start;
+   justify-content: center;
+   padding: 4vh 1rem 2rem;
+   background: rgba(5, 8, 14, 0.72);
+   backdrop-filter: blur(4px);
+   overflow-y: auto;
+}
+
+.bet-modal-dialog {
+   width: min(560px, 100%);
+   max-height: min(92vh, 720px);
+   display: flex;
+   flex-direction: column;
+   background: linear-gradient(165deg, #1a2230 0%, #141a24 100%);
+   border: 1px solid var(--border);
+   border-radius: 14px;
+   box-shadow: 0 24px 64px rgba(0, 0, 0, 0.45);
+}
+
+.bet-modal-header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   padding: 1rem 1.1rem 0.75rem;
+   border-bottom: 1px solid var(--border);
+}
+
+.bet-modal-title {
+   margin: 0;
+   font-size: 1.15rem;
+   font-weight: 600;
+   letter-spacing: -0.02em;
+}
+
+.bet-modal-close {
+   font: inherit;
+   line-height: 1;
+   width: 2.25rem;
+   height: 2.25rem;
+   border-radius: 8px;
+   border: 1px solid transparent;
+   background: transparent;
+   color: var(--muted);
+   cursor: pointer;
+   font-size: 1.35rem;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+}
+
+.bet-modal-close:hover {
+   color: var(--text);
+   border-color: var(--border);
+   background: rgba(255, 255, 255, 0.04);
+}
+
+.bet-modal-body {
+   padding: 1rem 1.1rem 1.25rem;
+   overflow-y: auto;
+   flex: 1;
+   min-height: 0;
+}
+
+.bet-modal-meta {
+   margin: 0 0 1.25rem;
+}
+
+.bet-modal-meta-row {
+   display: grid;
+   grid-template-columns: 7.5rem 1fr;
+   gap: 0.5rem 1rem;
+   padding: 0.45rem 0;
+   border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+}
+
+.bet-modal-meta-row:last-child {
+   border-bottom: none;
+}
+
+.bet-modal-meta dt {
+   margin: 0;
+   font-size: 0.72rem;
+   font-weight: 600;
+   text-transform: uppercase;
+   letter-spacing: 0.06em;
+   color: var(--muted);
+}
+
+.bet-modal-meta dd {
+   margin: 0;
+   font-size: 0.95rem;
+   font-weight: 500;
+   color: var(--text);
+}
+
+.bet-modal-market-name {
+   font-weight: 600;
+   color: var(--accent);
+}
+
+.bet-modal-fields {
+   display: grid;
+   gap: 1rem;
+   margin-bottom: 1.25rem;
+}
+
+@media (min-width: 480px) {
+   .bet-modal-fields {
+      grid-template-columns: 1fr 1fr;
+   }
+}
+
+.bet-modal-field {
+   display: flex;
+   flex-direction: column;
+   gap: 0.35rem;
+}
+
+.bet-modal-field-label {
+   font-size: 0.72rem;
+   font-weight: 600;
+   text-transform: uppercase;
+   letter-spacing: 0.05em;
+   color: var(--muted);
+}
+
+.bet-modal-input {
+   font: inherit;
+   font-size: 1rem;
+   padding: 0.55rem 0.65rem;
+   border-radius: 8px;
+   border: 1px solid var(--border);
+   background: var(--bg);
+   color: var(--text);
+}
+
+.bet-modal-input:focus {
+   outline: none;
+   border-color: #3d5a4a;
+   box-shadow: 0 0 0 2px rgba(110, 231, 183, 0.15);
+}
+
+.bet-modal-placeholder {
+   padding: 0.85rem 1rem;
+   border-radius: 10px;
+   background: rgba(0, 0, 0, 0.25);
+   border: 1px dashed #3a4558;
+}
+
+.bet-modal-placeholder p {
+   margin: 0;
+   font-size: 0.85rem;
+   line-height: 1.5;
+   color: var(--muted);
+}
+
+.bet-modal-footer {
+   display: flex;
+   justify-content: flex-end;
+   gap: 0.65rem;
+   padding: 0.85rem 1.1rem 1rem;
+   border-top: 1px solid var(--border);
+   background: rgba(0, 0, 0, 0.15);
+   border-radius: 0 0 14px 14px;
+}
+
+.bet-modal-btn {
+   font: inherit;
+   font-size: 0.875rem;
+   font-weight: 600;
+   padding: 0.5rem 1.1rem;
+   border-radius: 8px;
+   cursor: pointer;
+   border: 1px solid var(--border);
+}
+
+.bet-modal-btn--ghost {
+   background: transparent;
+   color: var(--muted);
+}
+
+.bet-modal-btn--ghost:hover {
+   color: var(--text);
+   border-color: #3d4a62;
+}
+
+.bet-modal-btn--primary {
+   background: linear-gradient(180deg, #3d8f72, #2d6b55);
+   border-color: #3d8f72;
+   color: #fff;
+}
+
+.bet-modal-btn--primary:hover:not(:disabled) {
+   filter: brightness(1.06);
+}
+
+.bet-modal-btn--primary:disabled {
+   opacity: 0.45;
+   cursor: not-allowed;
+}
+
+.app-header {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 1rem;
+   flex-wrap: wrap;
+   margin-bottom: 1rem;
+}
+
+.app-header .app-title {
+   margin: 0;
+   flex: 1;
+   min-width: 0;
+   font-size: 1.25rem;
+}
+
+.wallet-bar {
+   position: relative;
+   flex-shrink: 0;
+   margin-left: auto;
+   display: flex;
+   justify-content: flex-end;
+}
+
+.wallet-bar__cluster {
+   display: flex;
+   flex-direction: column;
+   align-items: flex-end;
+   gap: 0.35rem;
+}
+
+.wallet-bar__connected {
+   display: flex;
+   align-items: center;
+   gap: 0.5rem;
+   flex-wrap: wrap;
+}
+
+.wallet-bar__addr {
+   font-size: 0.85rem;
+   font-weight: 600;
+   font-variant-numeric: tabular-nums;
+   color: var(--accent);
+}
+
+.wallet-bar__btn {
+   font: inherit;
+   font-size: 0.8rem;
+   font-weight: 600;
+   padding: 0.45rem 0.75rem;
+   border-radius: 8px;
+   border: 1px solid var(--border);
+   background: var(--panel);
+   color: var(--text);
+   cursor: pointer;
+}
+
+.wallet-bar__btn:hover:not(:disabled) {
+   border-color: #3d8f72;
+}
+
+.wallet-bar__btn:disabled {
+   opacity: 0.55;
+   cursor: not-allowed;
+}
+
+.wallet-bar__btn--ghost {
+   background: transparent;
+   color: var(--muted);
+   font-weight: 500;
+}
+
+.wallet-bar__btn--ghost:hover:not(:disabled) {
+   color: var(--text);
+}
+
+.wallet-bar__menu {
+   position: absolute;
+   top: 100%;
+   right: 0;
+   left: auto;
+   margin: 0.35rem 0 0;
+   padding: 0.35rem 0;
+   list-style: none;
+   min-width: 11rem;
+   background: var(--panel);
+   border: 1px solid var(--border);
+   border-radius: 8px;
+   box-shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+   z-index: 50;
+}
+
+.wallet-bar__menu-item {
+   display: block;
+   width: 100%;
+   text-align: right;
+   font: inherit;
+   font-size: 0.85rem;
+   padding: 0.45rem 0.75rem;
+   border: none;
+   background: transparent;
+   color: var(--text);
+   cursor: pointer;
+}
+
+.wallet-bar__menu-item:hover:not(:disabled) {
+   background: rgba(255, 255, 255, 0.06);
+}
+
+.wallet-bar__menu-item:disabled {
+   opacity: 0.45;
+   cursor: not-allowed;
+}
+
+.wallet-bar__menu-empty {
+   padding: 0.5rem 0.75rem;
+   font-size: 0.8rem;
+   color: var(--muted);
+   text-align: right;
+}
+
+.wallet-bar__err {
+   font-size: 0.72rem;
+   color: #fca5a5;
+   max-width: 16rem;
+}
+
+.bet-modal-banner {
+   padding: 0.65rem 0.85rem;
+   border-radius: 8px;
+   margin-bottom: 1rem;
+   font-size: 0.85rem;
+}
+
+.bet-modal-banner--warn {
+   background: rgba(120, 80, 20, 0.25);
+   border: 1px solid #6b5420;
+   color: #fde68a;
+}
+
+.bet-modal-quote {
+   margin-bottom: 1rem;
+}
+
+.bet-modal-quote-head {
+   font-size: 0.72rem;
+   font-weight: 600;
+   text-transform: uppercase;
+   letter-spacing: 0.05em;
+   color: var(--muted);
+   margin-bottom: 0.35rem;
+}
+
+.bet-modal-mm-list {
+   margin: 0;
+   padding-left: 1rem;
+   font-size: 0.8rem;
+   color: var(--text);
+}
+
+.bet-modal-mono {
+   font-family: ui-monospace, monospace;
+   font-size: 0.78rem;
+   word-break: break-all;
+}
+
+.bet-modal-muted {
+   margin: 0;
+   font-size: 0.85rem;
+   color: var(--muted);
+}
+
+.bet-modal-err {
+   margin: 0 0 0.75rem;
+   font-size: 0.85rem;
+   color: #fca5a5;
+}
+
+.bet-modal-ok {
+   margin: 0 0 0.75rem;
+   font-size: 0.85rem;
+   color: var(--accent);
+}

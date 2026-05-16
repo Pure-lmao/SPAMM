@@ -1,6 +1,6 @@
 import { loadKeypairSignerFromJsonFile } from "utils";
-import { createRpcClients, fetchAddressesByLookupTable, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
-import { decodeMmReturnData, getBetData, getBetPda, getEventHash, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, LOOKUP_TABLE_ID, ODDS_SCALE, Sport } from "spamm-aggregator-sdk";
+import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
+import { decodeMmReturnData, getBetData, getBetPda, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, getEventGameState, LOOKUP_TABLE_ID, ODDS_SCALE, Sport } from "spamm-aggregator-sdk";
 import type { Address } from "@solana/kit";
 const clients = createRpcClients();
 
@@ -39,24 +39,19 @@ const marketId2 = {
 
 const side = 0;
 const eventStateSequence = 1;
-const eventStateHash = await getEventHash(sport, "PG", {
-   homeScore: 0,
-   awayScore: 0,
-   homeReds: 0,
-   awayReds: 0,
-});
+const eventGameState = getEventGameState("PG", 0, 0, 0, 0);
 const legs = [
    {
       marketId: marketId,
       side: 0,
       eventStateSequence,
-      eventStateHash,
+      eventGameState,
    },
    {
       marketId: marketId2,
       side: 0,
       eventStateSequence,
-      eventStateHash,
+      eventGameState,
    },
 ]
 const amount = 5n * 10n ** 6n;
@@ -70,7 +65,7 @@ async function placeBet() {
          amount,
          minOddsScaled,
          eventStateSequence,
-         eventStateHash,
+         eventGameState,
       },
       USER_SIGNER.address,
       USER_SIGNER.address,
@@ -93,7 +88,7 @@ async function placeBetWithBestMm() {
          side,
          amount,
          minOddsScaled,
-         eventStateHash,
+         eventGameState,
          eventStateSequence,
       }, mmProgramAddress, USER_SIGNER.address);
 
@@ -121,7 +116,7 @@ async function placeBetWithBestMm() {
          amount,
          minOddsScaled,
          eventStateSequence,
-         eventStateHash,
+         eventGameState,
       },
       USER_SIGNER.address,
       USER_SIGNER.address,

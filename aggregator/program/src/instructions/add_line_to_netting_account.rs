@@ -12,7 +12,7 @@ use crate::{
 /// 2. `mm_config_pda` (readonly)
 /// 3. `netting_pda` (writable)
 /// 
-/// Data: (event_id: EventId, period: u8, mkt: u32)
+/// Data: (`event_id: EventId`, `period: u8`, `mkt: u16`)
 
 
 pub const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 51;

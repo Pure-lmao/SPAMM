@@ -53,13 +53,13 @@ import {
 import {
    BetResult,
    MM_RETURN_DATA_LEN,
-   MmReturnData,
    Sport,
    type AddLineToNettingIxData,
    type BetAccountData,
    type BetFiller,
    type ConfigPdaData,
    type DecodedAggregatorInstruction,
+   type EventGameState,
    type EventId,
    type EventStateData,
    type FillBetIxData,
@@ -75,6 +75,7 @@ import {
    type MmMarketDataPdaData,
    type MmParlayQuoteBuffer,
    type MmQuoteBuffer,
+   type MmReturnData,
    type NettingLine,
    type NettingPdaAccountData,
    type NettingPdaDataHeader,
@@ -112,12 +113,60 @@ import {
 
 import { validateFillParlayIxData, validateGetQuoteParlayIxData } from './validate.js';
 
-const getBytes32Encoder = () => fixEncoderSize(getBytesEncoder(), 32);
-const getBytes32Decoder = () => fixDecoderSize(getBytesDecoder(), 32);
+/** Rust `EventGameState.game_phase`: up to 4 ASCII bytes, NUL-padded (`other.rs`). Space is encoded as `0` on the wire. */
+function encodeGamePhaseAscii4(phase: string): Uint8Array {
+   const out = new Uint8Array(4);
+   if (phase.length > 4) {
+      throw new RangeError(`gamePhase must be at most 4 ASCII characters (got length ${phase.length})`);
+   }
+   for (let i = 0; i < phase.length; i++) {
+      const c = phase.charCodeAt(i)!;
+      if (c > 127) {
+         throw new RangeError(`gamePhase must be ASCII (code ${c} at index ${i})`);
+      }
+      out[i] = c === 32 ? 0 : c;
+   }
+   return out;
+}
 
-/** Accepts readonly or mutable 32-byte views for struct encoding. */
-const getBytes32FlexibleEncoder = (): Encoder<ReadonlyUint8Array | Uint8Array> =>
-   transformEncoder(getBytes32Encoder(), (v: ReadonlyUint8Array | Uint8Array) => new Uint8Array(v));
+function decodeGamePhaseAscii4(bytes: ReadonlyUint8Array): string {
+   if (bytes.length !== 4) {
+      throw new RangeError('gamePhase wire must be 4 bytes');
+   }
+   let s = '';
+   for (let i = 0; i < 4; i++) {
+      const b = bytes[i]!;
+      s += String.fromCharCode(b === 0 ? 32 : b);
+   }
+   while (s.length > 0 && s.charCodeAt(s.length - 1) === 32) {
+      s = s.slice(0, -1);
+   }
+   return s;
+}
+
+const getGamePhaseAscii4Encoder = (): Encoder<string> =>
+   fixEncoderSize(transformEncoder(getBytesEncoder(), (s: string) => encodeGamePhaseAscii4(s)), 4);
+
+const getGamePhaseAscii4Decoder = (): Decoder<string> =>
+   transformDecoder(fixDecoderSize(getBytesDecoder(), 4), decodeGamePhaseAscii4);
+
+export const getEventGameStateEncoder = (): Encoder<EventGameState> =>
+   getStructEncoder([
+      ['gamePhase', getGamePhaseAscii4Encoder()],
+      ['homePrimary', getU8Encoder()],
+      ['awayPrimary', getU8Encoder()],
+      ['homeSecondary', getU8Encoder()],
+      ['awaySecondary', getU8Encoder()],
+   ]);
+
+export const getEventGameStateDecoder = (): Decoder<EventGameState> =>
+   getStructDecoder([
+      ['gamePhase', getGamePhaseAscii4Decoder()],
+      ['homePrimary', getU8Decoder()],
+      ['awayPrimary', getU8Decoder()],
+      ['homeSecondary', getU8Decoder()],
+      ['awaySecondary', getU8Decoder()],
+   ]);
 
 const getBoolU8Encoder = (): Encoder<boolean> =>
    transformEncoder(getU8Encoder(), (v: boolean) => (v ? 1 : 0));
@@ -265,7 +314,7 @@ export const getBetAccountDataEncoder = (): Encoder<BetAccountData> =>
       ['amount', getU64Encoder()],
       ['payout', getU64Encoder()],
       ['eventStateSequence', getU16Encoder()],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
       ['result', getBetResultU8Encoder()],
       ['filler0', getBetFillerWireEncoder()],
       ['filler1', getBetFillerWireEncoder()],
@@ -286,7 +335,7 @@ export const getBetAccountDataDecoder = (): Decoder<BetAccountData> =>
       ['amount', getU64Decoder()],
       ['payout', getU64Decoder()],
       ['eventStateSequence', getU16Decoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
       ['result', getBetResultU8Decoder()],
       ['filler0', getBetFillerWireDecoder()],
       ['filler1', getBetFillerWireDecoder()],
@@ -389,7 +438,7 @@ export const getMmQuoteBufferEncoder = (): Encoder<MmQuoteBuffer> =>
       ['side', getU8Encoder()],
       ['maxAmount', getU64Encoder()],
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
       ['eventStateSequence', getU16Encoder()],
    ]);
 
@@ -402,7 +451,7 @@ export const getMmQuoteBufferDecoder = (): Decoder<MmQuoteBuffer> =>
       ['side', getU8Decoder()],
       ['maxAmount', getU64Decoder()],
       ['oddsScaled', getU32BigintDecoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
       ['eventStateSequence', getU16Decoder()],
    ]);
 
@@ -426,7 +475,7 @@ export const getEventStateDataEncoder = (): Encoder<EventStateData> =>
       ['bump', getU8Encoder()],
       ['eventId', getEventIdEncoder()],
       ['sequence', getU16Encoder()],
-      ['stateHash', getBytes32FlexibleEncoder()],
+      ['gameState', getEventGameStateEncoder()],
    ]);
 
 export const getEventStateDataDecoder = (): Decoder<EventStateData> =>
@@ -435,7 +484,7 @@ export const getEventStateDataDecoder = (): Decoder<EventStateData> =>
       ['bump', getU8Decoder()],
       ['eventId', getEventIdDecoder()],
       ['sequence', getU16Decoder()],
-      ['stateHash', getBytes32Decoder()],
+      ['gameState', getEventGameStateDecoder()],
    ]);
 
 export const getMmEncumbrancePdaDataEncoder = (): Encoder<MmEncumbrancePdaData> =>
@@ -531,7 +580,7 @@ export const getFillBetIxDataEncoder = (): Encoder<FillBetIxData> =>
       ['amount', getU64Encoder()],
       ['minOddsScaled', getU32BigintEncoder('minOddsScaled')],
       ['eventStateSequence', getU16Encoder()],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
    ]);
 
 export const getFillBetIxDataDecoder = (): Decoder<FillBetIxData> =>
@@ -542,7 +591,7 @@ export const getFillBetIxDataDecoder = (): Decoder<FillBetIxData> =>
       ['amount', getU64Decoder()],
       ['minOddsScaled', getU32BigintDecoder()],
       ['eventStateSequence', getU16Decoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
    ]);
 
 export const getParlayLegWireEncoder = (): Encoder<ParlayLegWire> =>
@@ -550,7 +599,7 @@ export const getParlayLegWireEncoder = (): Encoder<ParlayLegWire> =>
       ['marketId', getMarketIdEncoder()],
       ['side', getU8Encoder()],
       ['eventStateSequence', getU16Encoder()],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
    ]);
 
 export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
@@ -558,7 +607,7 @@ export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
       ['marketId', getMarketIdDecoder()],
       ['side', getU8Decoder()],
       ['eventStateSequence', getU16Decoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
    ]);
 
 /** Pad `ParlayLegTable` wire to `MAX_PARLAY_LEGS` slots; unused slots are zero. */
@@ -770,7 +819,7 @@ export const getGetQuoteIxDataEncoder = (): Encoder<GetQuoteIxData> =>
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
       ['marketId', getMarketIdEncoder()],
       ['side', getU8Encoder()],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
       ['eventStateSequence', getU16Encoder()],
    ]);
 
@@ -781,7 +830,7 @@ export const getGetQuoteIxDataDecoder = (): Decoder<GetQuoteIxData> =>
       ['oddsScaled', getU32BigintDecoder()],
       ['marketId', getMarketIdDecoder()],
       ['side', getU8Decoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
       ['eventStateSequence', getU16Decoder()],
    ]);
 
@@ -792,7 +841,7 @@ export const getFillQuoteIxDataEncoder = (): Encoder<FillQuoteIxData> =>
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
       ['marketId', getMarketIdEncoder()],
       ['side', getU8Encoder()],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
       ['eventStateSequence', getU16Encoder()],
       ['amountToSend', getU64Encoder()],
    ]);
@@ -804,7 +853,7 @@ export const getFillQuoteIxDataDecoder = (): Decoder<FillQuoteIxData> =>
       ['oddsScaled', getU32BigintDecoder()],
       ['marketId', getMarketIdDecoder()],
       ['side', getU8Decoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
       ['eventStateSequence', getU16Decoder()],
       ['amountToSend', getU64Decoder()],
    ]);

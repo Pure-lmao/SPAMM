@@ -1,0 +1,13 @@
+---
+description: Do not use legacy @solana/web3.js; use @solana/kit and Wallet Standard paths only.
+alwaysApply: true
+---
+
+# No `@solana/web3.js`
+
+- Do **not** add `import … from '@solana/web3.js'` (or `require('@solana/web3.js')`) anywhere in this repository.
+- Do **not** add `@solana/web3.js` as a direct dependency. Some packages list it as an **optional** peer; leave it uninstalled unless a dependency truly breaks without it (prefer alternatives first).
+- For RPC, addresses, transactions, and signing, use **`@solana/kit`** and related Kit-first packages (`@solana/addresses`, `@solana/signers`, `@solana-program/*`, etc.).
+- For wallet UI, prefer **`@solana/connector`** hooks that target Kit (e.g. `useKitTransactionSigner`, `useSolanaClient`) rather than `useTransactionSigner` (legacy web3.js adapter).
+
+If a third-party library only exposes web3.js types, isolate behind a small adapter or replace the library; do not spread web3.js usage across the codebase.

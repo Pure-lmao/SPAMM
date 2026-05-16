@@ -1,4 +1,4 @@
-import { getAddressEncoder, getProgramDerivedAddress, ProgramDerivedAddressBump, type Address } from '@solana/kit';
+import { getAddressEncoder, getProgramDerivedAddress, type ProgramDerivedAddressBump, type Address } from '@solana/kit';
 
 import {
    EVENT_STATE_SEED,
@@ -11,7 +11,7 @@ import {
    SPL_TOKEN_PROGRAM_ID,
 } from './constants.js';
 import { encodeEventIdWire, getMarketIdEncoder } from './wire_codecs.js';
-import type { EventId, MarketId } from './types.js';
+import type { EventGameState, EventId, MarketId } from './types.js';
 
 const addressEncoder = getAddressEncoder();
 const marketIdEncoder = getMarketIdEncoder();
@@ -77,4 +77,20 @@ export async function getAta(
       ],
    });
    return ata;
+}
+
+export function getEventGameState(
+   gamePhase: string,
+   homePrimary: number,
+   awayPrimary: number,
+   homeSecondary: number,
+   awaySecondary: number,
+): EventGameState {
+   return {
+      gamePhase,
+      homePrimary,
+      awayPrimary,
+      homeSecondary,
+      awaySecondary,
+   };
 }

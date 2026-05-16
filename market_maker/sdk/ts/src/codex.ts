@@ -57,6 +57,7 @@ import {
    UPDATE_ORACLE_IX_PAYLOAD_LEN_TWO_OUTCOME,
    UPDATE_EVENT_STATE_IX_PAYLOAD_LEN,
    type DecodedMarketMakerInstruction,
+   type EventGameState,
    type EventId,
    type EventStateData,
    type FillParlayQuoteIxData,
@@ -70,7 +71,7 @@ import {
    type MmParlayQuoteBuffer,
    type MmQuoteBuffer,
    type ParlayLegWire,
-   MmReturnData,
+   type MmReturnData,
 } from './types.js';
 
 import { validateFillParlayQuoteIxData, validateGetQuoteParlayIxData } from './validate.js';
@@ -88,11 +89,60 @@ export const CLOSE_MARKET_IX_DISCRIMINATOR = 12;
 export const UPDATE_EVENT_STATE_IX_DISCRIMINATOR = 13;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
-const getBytes32Encoder = () => fixEncoderSize(getBytesEncoder(), 32);
-const getBytes32Decoder = () => fixDecoderSize(getBytesDecoder(), 32);
+/** Rust `EventGameState.game_phase` (`other.rs`). Space (U+0020) is stored as byte `0`; decode maps `0` → space, then trims trailing spaces. */
+function encodeGamePhaseAscii4(phase: string): Uint8Array {
+   const out = new Uint8Array(4);
+   if (phase.length > 4) {
+      throw new RangeError(`gamePhase must be at most 4 ASCII characters (got length ${phase.length})`);
+   }
+   for (let i = 0; i < phase.length; i++) {
+      const c = phase.charCodeAt(i)!;
+      if (c > 127) {
+         throw new RangeError(`gamePhase must be ASCII (code ${c} at index ${i})`);
+      }
+      out[i] = c === 32 ? 0 : c;
+   }
+   return out;
+}
 
-const getBytes32FlexibleEncoder = (): Encoder<ReadonlyUint8Array | Uint8Array> =>
-   transformEncoder(getBytes32Encoder(), (v: ReadonlyUint8Array | Uint8Array) => new Uint8Array(v));
+function decodeGamePhaseAscii4(bytes: ReadonlyUint8Array): string {
+   if (bytes.length !== 4) {
+      throw new RangeError('gamePhase wire must be 4 bytes');
+   }
+   let s = '';
+   for (let i = 0; i < 4; i++) {
+      const b = bytes[i]!;
+      s += String.fromCharCode(b === 0 ? 32 : b);
+   }
+   while (s.length > 0 && s.charCodeAt(s.length - 1) === 32) {
+      s = s.slice(0, -1);
+   }
+   return s;
+}
+
+const getGamePhaseAscii4Encoder = (): Encoder<string> =>
+   fixEncoderSize(transformEncoder(getBytesEncoder(), (str: string) => encodeGamePhaseAscii4(str)), 4);
+
+const getGamePhaseAscii4Decoder = (): Decoder<string> =>
+   transformDecoder(fixDecoderSize(getBytesDecoder(), 4), decodeGamePhaseAscii4);
+
+export const getEventGameStateEncoder = (): Encoder<EventGameState> =>
+   getStructEncoder([
+      ['gamePhase', getGamePhaseAscii4Encoder()],
+      ['homePrimary', getU8Encoder()],
+      ['awayPrimary', getU8Encoder()],
+      ['homeSecondary', getU8Encoder()],
+      ['awaySecondary', getU8Encoder()],
+   ]);
+
+export const getEventGameStateDecoder = (): Decoder<EventGameState> =>
+   getStructDecoder([
+      ['gamePhase', getGamePhaseAscii4Decoder()],
+      ['homePrimary', getU8Decoder()],
+      ['awayPrimary', getU8Decoder()],
+      ['homeSecondary', getU8Decoder()],
+      ['awaySecondary', getU8Decoder()],
+   ]);
 
 const U32_MAX = 0xffff_ffffn;
 
@@ -204,7 +254,7 @@ export const getMmQuoteBufferEncoder = (): Encoder<MmQuoteBuffer> =>
       ['side', getU8Encoder()],
       ['maxAmount', getU64Encoder()],
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
       ['eventStateSequence', getU16Encoder()],
    ]);
 
@@ -217,7 +267,7 @@ export const getMmQuoteBufferDecoder = (): Decoder<MmQuoteBuffer> =>
       ['side', getU8Decoder()],
       ['maxAmount', getU64Decoder()],
       ['oddsScaled', getU32BigintDecoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
       ['eventStateSequence', getU16Decoder()],
    ]);
 
@@ -227,7 +277,7 @@ export const getEventStateDataEncoder = (): Encoder<EventStateData> =>
       ['bump', getU8Encoder()],
       ['eventId', getEventIdEncoder()],
       ['sequence', getU16Encoder()],
-      ['stateHash', getBytes32FlexibleEncoder()],
+      ['gameState', getEventGameStateEncoder()],
    ]);
 
 export const getEventStateDataDecoder = (): Decoder<EventStateData> =>
@@ -236,7 +286,7 @@ export const getEventStateDataDecoder = (): Decoder<EventStateData> =>
       ['bump', getU8Decoder()],
       ['eventId', getEventIdDecoder()],
       ['sequence', getU16Decoder()],
-      ['stateHash', getBytes32Decoder()],
+      ['gameState', getEventGameStateDecoder()],
    ]);
 
 export const getMmAccountConfigEncoder = (): Encoder<MmAccountConfig> =>
@@ -260,7 +310,7 @@ export const getGetQuoteIxDataEncoder = (): Encoder<GetQuoteIxData> =>
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
       ['marketId', getMarketIdEncoder()],
       ['side', getU8Encoder()],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
       ['eventStateSequence', getU16Encoder()],
    ]);
 
@@ -271,7 +321,7 @@ export const getGetQuoteIxDataDecoder = (): Decoder<GetQuoteIxData> =>
       ['oddsScaled', getU32BigintDecoder()],
       ['marketId', getMarketIdDecoder()],
       ['side', getU8Decoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
       ['eventStateSequence', getU16Decoder()],
    ]);
 
@@ -280,7 +330,7 @@ export const getParlayLegWireEncoder = (): Encoder<ParlayLegWire> =>
       ['marketId', getMarketIdEncoder()],
       ['side', getU8Encoder()],
       ['eventStateSequence', getU16Encoder()],
-      ['eventStateHash', getBytes32FlexibleEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
    ]);
 
 export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
@@ -288,7 +338,7 @@ export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
       ['marketId', getMarketIdDecoder()],
       ['side', getU8Decoder()],
       ['eventStateSequence', getU16Decoder()],
-      ['eventStateHash', getBytes32Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
    ]);
 
 /** Pad `ParlayLegTable` wire to `MAX_PARLAY_LEGS` slots; unused slots are zero. */
@@ -466,23 +516,23 @@ const getUpdateOracleBodyThreeDecoder = (): Decoder<{
 const getUpdateEventStateIxPayloadEncoder = (): Encoder<{
    eventId: EventId;
    sequence: number;
-   stateHash: ReadonlyUint8Array | Uint8Array;
+   gameState: EventGameState;
 }> =>
    getStructEncoder([
       ['eventId', getEventIdEncoder()],
       ['sequence', getU16Encoder()],
-      ['stateHash', getBytes32FlexibleEncoder()],
+      ['gameState', getEventGameStateEncoder()],
    ]);
 
 const getUpdateEventStateIxPayloadDecoder = (): Decoder<{
    eventId: EventId;
    sequence: number;
-   stateHash: ReadonlyUint8Array;
+   gameState: EventGameState;
 }> =>
    getStructDecoder([
       ['eventId', getEventIdDecoder()],
       ['sequence', getU16Decoder()],
-      ['stateHash', getBytes32Decoder()],
+      ['gameState', getEventGameStateDecoder()],
    ]);
 
 function concatDiscriminator(disc: number, payload: ReadonlyUint8Array | Uint8Array): Uint8Array {
@@ -556,7 +606,7 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
          const p = getUpdateEventStateIxPayloadEncoder().encode({
             eventId: ix.eventId,
             sequence: ix.sequence,
-            stateHash: ix.stateHash,
+            gameState: ix.gameState,
          });
          if (p.length !== UPDATE_EVENT_STATE_IX_PAYLOAD_LEN) {
             throw new RangeError(`updateEventState payload len ${p.length}; expected ${UPDATE_EVENT_STATE_IX_PAYLOAD_LEN}`);

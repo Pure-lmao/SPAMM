@@ -1,5 +1,5 @@
-import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport } from 'spamm-market-maker-sdk';
-import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getEventHash, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda } from 'spamm-aggregator-sdk';
+import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda } from 'spamm-market-maker-sdk';
+import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from 'utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
@@ -26,8 +26,8 @@ registerMM().catch(console.error);
 // getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
 const sport = 1 as Sport;
-const league = 1;
-const event = 2n;
+const league = 1827;
+const event = 740957n;
 const eventId = {
    sport,
    league,
@@ -75,25 +75,33 @@ async function closeNettingAccount() {
 }
 // closeNettingAccount().catch(console.error);
 
-async function updateEventState(sport: Sport, eventId: EventId, sequence: number, timePeriod: string, gameInfo: {
+async function updateEventState( 
+   eventId: EventId, sequence: number, 
+   timePeriod: string, gameInfo: {
    homeScore?: number,
    awayScore?: number,
    homeReds?: number,
    awayReds?: number,
 }) {
-   const hash = await getEventHash(sport, timePeriod, gameInfo)
+   const gameState = getEventGameState(
+      timePeriod,
+      gameInfo.homeScore ?? 0,
+      gameInfo.awayScore ?? 0,
+      gameInfo.homeReds ?? 0,
+      gameInfo.awayReds ?? 0,
+   );
    const eventStateIx = await getUpdateEventStateIx(
       ADMIN_SIGNER.address,
       MARKET_MAKER_PROGRAM_ID,
       eventId,
       sequence,
-      hash,
+      gameState,
    );
    const txResult = await sendAndConfirmInstructions([eventStateIx], [ADMIN_SIGNER]);
    console.log(txResult);
 }
 // updateEventState(
-//    1 as Sport, eventId, 1, "PG", { homeScore: 0, awayScore: 0, homeReds: 0, awayReds: 0 }
+//    eventId, 1, "PG", { homeScore: 0, awayScore: 0, homeReds: 0, awayReds: 0 }
 // ).catch(console.error);
 
 async function closeEvent() {
@@ -150,7 +158,7 @@ async function getQuote() {
          amount: 1n * 10n * 6n,
          minOddsScaled: 20n*ODDS_SCALE/10n,
          side: 0,
-         eventStateHash: await getEventHash(sport, "PG", { homeScore: 0, awayScore: 0, homeReds: 0, awayReds: 0 }),
+         eventGameState: getEventGameState("PG", 0, 0, 0, 0),
          eventStateSequence: 1,
          marketId,
       },
@@ -185,6 +193,8 @@ async function forceClosePda(pda: Address) {
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-// forceClosePda((await getEventStatePda(MARKET_MAKER_PROGRAM_ID, eventId))[0]).catch(console.error);
+// forceClosePda(
+//    (await getMmConfigPda(MARKET_MAKER_PROGRAM_ID))[0]
+// ).catch(console.error);
 
 

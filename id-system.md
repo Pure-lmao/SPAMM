@@ -74,22 +74,22 @@ Digits 3-6 are the country code from ISO 3166-1 numeric with additions for non-I
 
 mkt start | mkt end | market | sides count | logic | sides meaning
 |-------|-------|-------|-------|-------|-------|
-|0	|-| ml	| 2	| fixed	| home, away
-|1 |-|1X2	|3	|fixed	|home, away, draw
-|4	|-|btts	|2	|fixed	|yes, no
-|5	|-|dc	|3	|fixed	|not home, not away, not draw
-|6	|-|ft+btts	|6	|fixed	|h-y, a-y, d-y, h-n, a-n, d-n
-|7	|-|ht/ft	|9	|fixed	|h/h, h/a, h/d, a/h, a/a, a/d, d/h, d/a, d/d
-|10	|50	|mo	|2	|fixed	|win, not win
-|51	|99	|ou (x.25)	|2	|50+4*L	|over, under
-|100	|299	|ah (x.5)	|2	|200+2*L	|home, away
-|300	|499	|ah (x.25)	|2	|400+4*L	|home, away
-|1000	|1999	|ou (x.5)	|2	|1000+2*L	|over, under
-|2000	|2999	|hou	|2	|2000+2*L	|over, under
-|3000	|3999	|aou	|2	|3000+2*L	|over, under
-|4000	|4999	|btts+ou	|4	|4000+2*L	|y-o, y-u, n-o, n-u
-|5000	|5999	|ft+ou	|6	|5000+2*L	|h-o, a-o, d-o, h-u, a-u, d-u
-|10000	|100909	|cs	|1	|[10][0, home score][0, away score] - scores max at 9	|
+| 0 |-| ml | 2 | fixed | home, away
+| 1 |-| 1X2 | 3 | fixed | home, away, draw
+| 4 |-| btts | 2 | fixed | yes, no
+| 5 |-| dc | 3 | fixed | not home, not away, not draw
+| 6 |-| ft+btts | 6 | fixed | h-y, a-y, d-y, h-n, a-n, d-n
+| 7 |-| ht/ft | 9 | fixed | h/h, h/a, h/d, a/h, a/a, a/d, d/h, d/a, d/d
+| 10 | 50 | mo | 2 | fixed | win, not win
+| 51 | 99 | ou (x.25) | 2 | 50+4*L | over, under
+| 100 | 299 | ah (x.5) | 2 | 200+2*L | home, away
+| 300 | 499 | ah (x.25) | 2 | 400+4*L | home, away
+| 1000 | 1999 | ou (x.5) | 2 | 1000+2*L | over, under
+| 2000 | 2999 | hou | 2 | 2000+2*L | over, under
+| 3000 | 3999 | aou | 2 | 3000+2*L | over, under
+| 4000 | 4999 | btts+ou | 4 | 4000+2*L | y-o, y-u, n-o, n-u
+| 5000 | 5999 | ft+ou | 6 | 5000+2*L | h-o, a-o, d-o, h-u, a-u, d-u
+| 10000 | 100909 | cs | 1 | [10][0, home score][0, away score] - scores max at 9	|
 
 
 ## Player (u64 - max 18,446,744,073,709,551,615)

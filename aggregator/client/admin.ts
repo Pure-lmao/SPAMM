@@ -1,8 +1,9 @@
-import { getBetPda, getChangeConfigStatusIx, getConfigPda, getEventHash, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getMmListPda, getParlayBetPda, getRecentSlot, getWriteArbitraryDataIx } from "spamm-aggregator-sdk";
+import { getBetPda, getChangeConfigStatusIx, getConfigPda, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getMmListData, getMmListPda, getParlayBetPda, getRecentSlot, getWriteArbitraryDataIx } from "spamm-aggregator-sdk";
 import { loadKeypairSignerFromJsonFile } from "utils";
 import { createRpcClients, sendAndConfirmInstructions } from "./txSend.ts"
 import type { Address } from "@solana/kit";
 import { USER_SIGNER } from "user.ts";
+const clients = createRpcClients();
 
 
 const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile('./admin_keypair.json');
@@ -53,3 +54,5 @@ async function writeArbitraryData(
 }
 // writeArbitraryData("CpmHPq7wwEpFibQ6LcFmuwhgNayonyDbne8jRwMGumP7" as Address, 
 //    new Uint8Array([4, 255, 0, 0, 0, 0, 0, 0, 0, 0])).catch(console.error);
+
+// getMmListData(clients.rpc).then(console.log).catch(console.error);

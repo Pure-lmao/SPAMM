@@ -1,4 +1,11 @@
-import { getAddressEncoder, getProgramDerivedAddress, ProgramDerivedAddressBump, Rpc, SolanaRpcApi, type Address } from '@solana/kit';
+import {
+   getAddressEncoder,
+   getProgramDerivedAddress,
+   type ProgramDerivedAddressBump,
+   type Rpc,
+   type SolanaRpcApi,
+   type Address,
+} from '@solana/kit';
 
 import {
    AGGREGATOR_PROGRAM_ID,
@@ -18,8 +25,7 @@ import {
    SPL_TOKEN_PROGRAM_ID,
 } from './constants.js';
 import { getEventIdEncoder, getMarketIdEncoder } from './codex.js';
-import { EventId, MarketId, Sport } from './types.js';
-import { validateSportEnum } from './validate.js';
+import type { EventGameState, EventId, MarketId } from './types.js';
 
 const addressEncoder = getAddressEncoder();
 const eventIdEncoder = getEventIdEncoder();
@@ -251,70 +257,12 @@ export async function getAta(
    return ata;
 }
 
-const textEncoder = new TextEncoder();
-
-function concatUint8Arrays(parts: readonly Uint8Array[]): Uint8Array {
-   let total = 0;
-   for (const p of parts) total += p.length;
-   const out = new Uint8Array(total);
-   let o = 0;
-   for (const p of parts) {
-      out.set(p, o);
-      o += p.length;
-   }
-   return out;
-}
-
-function requireU8Score(n: number | undefined, label: string): number {
-   if (n === undefined || !Number.isInteger(n) || n < 0 || n > 255) {
-      throw new RangeError(`${label} is required and must be an integer in [0, 255]`);
-   }
-   return n;
-}
-
-/** Web Crypto digest without requiring `"lib": ["DOM"]` in consumers. */
-async function sha256(preimage: Uint8Array): Promise<Uint8Array> {
-   const subtle = (globalThis as { crypto?: { subtle?: { digest(alg: string, data: ArrayBufferView): Promise<ArrayBuffer> } } })
-      .crypto?.subtle;
-   if (!subtle) {
-      throw new TypeError('SHA-256 requires a runtime with Web Crypto (globalThis.crypto.subtle), e.g. Bun, Node 19+, or a browser');
-   }
-   const digest = await subtle.digest('SHA-256', preimage);
-   return new Uint8Array(digest);
-}
-
-/**
- * **`event_state_hash`** preimage: `sha256(sport_u8 || time_period_utf8 || …scores…)`.
- *
- * **Basketball:** only sport + UTF-8 `timePeriod` (period label, e.g. `"PG"` / `"T1"`).
- * **Other sports:** + home/away score as `u8`. **Soccer:** + home/away red cards as `u8`.
- *
- * @returns **`Promise<Uint8Array>`** — length 32 (raw SHA-256). **Note:** async because `crypto.subtle.digest` is async in Web Crypto.
- */
-export async function getEventHash(
-   sport: Sport,
-   timePeriod: string,
-   gameInfo: {
-      homeScore?: number;
-      awayScore?: number;
-      homeReds?: number;
-      awayReds?: number;
-   },
-): Promise<Uint8Array> {
-   validateSportEnum(sport);
-
-   const preimage: Uint8Array[] = [new Uint8Array([sport]), textEncoder.encode(timePeriod)];
-
-   if (sport !== Sport.Basketball) {
-      const home = requireU8Score(gameInfo.homeScore, 'homeScore');
-      const away = requireU8Score(gameInfo.awayScore, 'awayScore');
-      preimage.push(new Uint8Array([home]), new Uint8Array([away]));
-
-      if (sport === Sport.Soccer) {
-         const homeReds = requireU8Score(gameInfo.homeReds, 'homeReds');
-         const awayReds = requireU8Score(gameInfo.awayReds, 'awayReds');
-         preimage.push(new Uint8Array([homeReds]), new Uint8Array([awayReds]));
-      }
-   }
-   return sha256(concatUint8Arrays(preimage));
+export function getEventGameState(gamePhase: string, homePrimary: number, awayPrimary: number, homeSecondary: number, awaySecondary: number): EventGameState {
+   return {
+      gamePhase: gamePhase,
+      homePrimary: homePrimary,
+      awayPrimary: awayPrimary,
+      homeSecondary: homeSecondary,
+      awaySecondary: awaySecondary,
+   };
 }

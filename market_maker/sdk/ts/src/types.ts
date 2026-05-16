@@ -1,19 +1,23 @@
-import type { Address, ReadonlyUint8Array } from '@solana/kit';
+import type { Address } from '@solana/kit';
 
-/** Wire sizes from `aggregator/program` / MM program packed layouts. */
-export const EVENT_ID_WIRE_SIZE = 13;
+/** Wire sizes from `spamm_aggregator` / MM program packed layouts (no padding). */
+export const EVENT_ID_WIRE_SIZE = 11;
+/** Packed `EventGameState` (`aggregator/program` `other.rs`): 4-byte phase + 4 scores. */
+export const EVENT_GAME_STATE_LEN = 8;
 
-/** `update_event_state` payload length (after discriminator byte). */
-export const UPDATE_EVENT_STATE_IX_PAYLOAD_LEN = EVENT_ID_WIRE_SIZE + 2 + 32;
-export const MARKET_ID_WIRE_SIZE = 27;
+/** `update_event_state` payload length (after discriminator byte). `EventId::WIRE_SIZE` + `u16` + `EventGameState`. */
+export const UPDATE_EVENT_STATE_IX_PAYLOAD_LEN = EVENT_ID_WIRE_SIZE + 2 + EVENT_GAME_STATE_LEN;
+export const MARKET_ID_WIRE_SIZE = EVENT_ID_WIRE_SIZE + 8 + 2 + 1 + 1;
 export const CONFIG_PDA_LEN = 34;
-export const EVENT_STATE_LEN = 49;
-export const MM_QUOTE_BUFFER_LEN = 108;
+/** `EventStateData` on-chain (`other.rs`). */
+export const EVENT_STATE_LEN = 1 + 1 + EVENT_ID_WIRE_SIZE + 2 + EVENT_GAME_STATE_LEN;
+export const MM_QUOTE_BUFFER_LEN = 1 + 1 + 32 + MARKET_ID_WIRE_SIZE + 1 + 8 + 4 + EVENT_GAME_STATE_LEN + 2;
 export const MM_ACCOUNT_CONFIG_MIN_LEN = 34;
 export const INIT_PROGRAM_IX_DATA_LEN = 32;
-export const GET_QUOTE_IX_WIRE_LEN = 75;
+/** Full MM `get_quote` ix data (includes leading discriminator). */
+export const GET_QUOTE_IX_WIRE_LEN = 1 + 8 + 4 + MARKET_ID_WIRE_SIZE + 1 + EVENT_GAME_STATE_LEN + 2;
 export const MAX_PARLAY_LEGS = 8;
-export const PARLAY_LEG_WIRE_LEN = 62;
+export const PARLAY_LEG_WIRE_LEN = MARKET_ID_WIRE_SIZE + 1 + 2 + EVENT_GAME_STATE_LEN;
 export const PARLAY_LEG_TABLE_LEN = MAX_PARLAY_LEGS * PARLAY_LEG_WIRE_LEN;
 export const GET_QUOTE_PARLAY_IX_WIRE_LEN = 1 + 8 + 4 + 1 + PARLAY_LEG_TABLE_LEN;
 export const FILL_QUOTE_PARLAY_IX_WIRE_LEN = 21;
@@ -53,6 +57,15 @@ export type MarketId = {
    isPregame: boolean;
 };
 
+/** Packed live snapshot (`aggregator/program` `other.rs`). */
+export type EventGameState = {
+   gamePhase: string;
+   homePrimary: number;
+   awayPrimary: number;
+   homeSecondary: number;
+   awaySecondary: number;
+};
+
 /** MM quote buffer account (`MM_QUOTE_BUFFER_DISCRIMINATOR`). */
 export const MM_QUOTE_BUFFER_DISCRIMINATOR = 2;
 
@@ -63,7 +76,7 @@ export type ParlayLegWire = {
    marketId: MarketId;
    side: number;
    eventStateSequence: number;
-   eventStateHash: ReadonlyUint8Array;
+   eventGameState: EventGameState;
 };
 
 export type MmParlayQuoteBuffer = {
@@ -99,7 +112,7 @@ export type MmQuoteBuffer = {
    side: number;
    maxAmount: bigint;
    oddsScaled: bigint;
-   eventStateHash: ReadonlyUint8Array;
+   eventGameState: EventGameState;
    eventStateSequence: number;
 };
 
@@ -120,7 +133,7 @@ export type EventStateData = {
    bump: number;
    eventId: EventId;
    sequence: number;
-   stateHash: ReadonlyUint8Array;
+   gameState: EventGameState;
 };
 
 /** Oracle / market-data PDA: two `u32` odds (LE). */
@@ -152,7 +165,7 @@ export type GetQuoteIxData = {
    oddsScaled: bigint;
    marketId: MarketId;
    side: number;
-   eventStateHash: ReadonlyUint8Array;
+   eventGameState: EventGameState;
    eventStateSequence: number;
 };
 
@@ -177,7 +190,7 @@ export type DecodedMarketMakerInstruction =
         kind: 'updateEventState';
         eventId: EventId;
         sequence: number;
-        stateHash: ReadonlyUint8Array | Uint8Array;
+        gameState: EventGameState;
      }
    | { kind: 'closeEvent'; eventId: EventId }
    | { kind: 'closeMarket'; marketId: MarketId }

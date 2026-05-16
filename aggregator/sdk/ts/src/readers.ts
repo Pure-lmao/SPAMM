@@ -53,7 +53,7 @@ const MAX_GET_PROGRAM_ACCOUNTS_FILTERS = 4;
 
 /**
  * Byte offsets for on-chain `BetAccountDataZc` (`account_bet.rs` `to_zc`).
- * `1 + 1 + 32 + 32 + 8 + 27 + 1 + 8 + 8 + 2 + 32 + 1 = 153` bytes before fillers; `BET_RESULT_OFFSET` in Rust is 152.
+ * `1 + 1 + 32 + 32 + 8 + 23 + 1 + 8 + 8 + 2 + 8 + 1 = 125` bytes before fillers; `BET_RESULT_OFFSET` in Rust matches `result` below.
  */
 export const BET_ACCOUNT_WIRE_OFFSETS = {
    discriminator: 0,
@@ -62,13 +62,13 @@ export const BET_ACCOUNT_WIRE_OFFSETS = {
    feepayer: 34,
    betId: 66,
    marketId: 74,
-   side: 101,
-   amount: 102,
-   payout: 110,
-   eventStateSequence: 118,
-   eventStateHash: 120,
-   result: 152,
-   filler0: 153,
+   side: 97,
+   amount: 98,
+   payout: 106,
+   eventStateSequence: 114,
+   eventGameState: 116,
+   result: 124,
+   filler0: 125,
 } as const;
 
 export type ProgramAccountRaw = Readonly<{

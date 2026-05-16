@@ -7,8 +7,8 @@
 import {
    getStructDecoder,
    getStructEncoder,
-   getU32Decoder,
-   getU32Encoder,
+   getU16Decoder,
+   getU16Encoder,
    getU64Decoder,
    getU64Encoder,
    getU8Decoder,
@@ -70,14 +70,14 @@ const getSportU8Decoder = (): Decoder<Sport> => transformDecoder(getU8Decoder(),
 export const getEventIdEncoder = (): Encoder<EventId> =>
    getStructEncoder([
       ['event', getU64Encoder()],
-      ['league', getU32Encoder()],
+      ['league', getU16Encoder()],
       ['sport', getSportU8Encoder()],
    ]);
 
 export const getEventIdDecoder = (): Decoder<EventId> =>
    getStructDecoder([
       ['event', getU64Decoder()],
-      ['league', getU32Decoder()],
+      ['league', getU16Decoder()],
       ['sport', getSportU8Decoder()],
    ]);
 
@@ -85,7 +85,7 @@ export const getMarketIdEncoder = (): Encoder<MarketId> =>
    getStructEncoder([
       ['eventId', getEventIdEncoder()],
       ['player', getU64Encoder()],
-      ['mkt', getU32Encoder()],
+      ['mkt', getU16Encoder()],
       ['period', getU8Encoder()],
       ['isPregame', getBoolU8Encoder()],
    ]);
@@ -94,7 +94,7 @@ export const getMarketIdDecoder = (): Decoder<MarketId> =>
    getStructDecoder([
       ['eventId', getEventIdDecoder()],
       ['player', getU64Decoder()],
-      ['mkt', getU32Decoder()],
+      ['mkt', getU16Decoder()],
       ['period', getU8Decoder()],
       ['isPregame', getBoolU8Decoder()],
    ]);

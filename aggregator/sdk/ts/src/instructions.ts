@@ -38,6 +38,7 @@ import {
 import type {
    BetAccountData,
    BetFiller,
+   EventGameState,
    EventId,
    FillBetIxData,
    FillParlayIxData,
@@ -48,6 +49,7 @@ import type {
 import {
    validateBetSide,
    validateChangeConfigStatus,
+   validateEventGameState,
    validateEventId,
    validateFillBetIxData,
    validateFillParlayIxData,
@@ -57,7 +59,6 @@ import {
    validatePositiveU64,
    validateU16,
    validateU32Bigint,
-   validateU32Number,
    validateU8,
 } from './validate.js';
 
@@ -89,13 +90,13 @@ export const MM_FILL_QUOTE_PARLAY_IX_DISCRIMINATOR = 8;
  *
  * @remarks
  * - **TS:** `MmGetQuote` — `amount` / `minOddsScaled` as `bigint` where wire uses `u64` / `u32` odds scale.
- * - **Rust:** `spamm_aggregator::state::GetQuoteIxData` (discriminator + amount + odds_scaled + `MarketId` + side + hash + sequence).
+ * - **Rust:** `spamm_aggregator::state::GetQuoteIxData` (discriminator + amount + odds_scaled + `MarketId` + side + `EventGameState` + sequence).
  */
 export type MmGetQuote = {
    amount: bigint;
    minOddsScaled: bigint;
    side: number;
-   eventStateHash: Uint8Array;
+   eventGameState: EventGameState;
    eventStateSequence: number;
    marketId: MarketId;
 };
@@ -225,7 +226,7 @@ export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Pro
 /**
  * **`fill_bet`** — CPI MM `get_quote` / `fill_quote`, open bet PDA + bet ATA, move collateral per best quotes (up to {@link MAX_NUMBER_OF_MMS} MMs).
  *
- * **Rust:** `aggregator::instructions::fill_bet::fill_bet` (`FILL_BET_IX_DISCRIMINATOR` = 3). Parsed body: `bet_id: u64`, `MarketId`, `side: u8`, `amount: u64`, `min_odds_scaled: u32`, `event_state_sequence: u16`, `event_state_hash: [u8; 32]`.
+ * **Rust:** `aggregator::instructions::fill_bet::fill_bet` (`FILL_BET_IX_DISCRIMINATOR` = 3). Parsed body: `bet_id: u64`, `MarketId`, `side: u8`, `amount: u64`, `min_odds_scaled: u32`, `event_state_sequence: u16`, `event_game_state: EventGameState`.
  *
  * @param fill - **TS:** {@link FillBetIxData} — wire-aligned bet request. **Rust:** same fields as `parse_fill_bet_data` output.
  * @param feepayer - **TS:** `Address` — writable signer paying rent and fees. **Rust:** `feepayer` (writable signer).
@@ -412,10 +413,10 @@ export async function getMmGetQuoteParlayIx(
  *
  * **Rust:** MM program `get_quote` handler (`GET_QUOTE_IX_DISCRIMINATOR` = 5); accounts match CPI slice in `fill_bet.rs` (user, market data, event state, MM config, quote buffer).
  *
- * @param quote - **TS:** {@link MmGetQuote} — amount, min odds (scaled), side, event state hash/sequence, `marketId`. **Rust:** `GetQuoteIxData` (includes MM ix discriminator byte + fields).
+ * @param quote - **TS:** {@link MmGetQuote} — amount, min odds (scaled), side, `eventGameState` / sequence, `marketId`. **Rust:** `GetQuoteIxData` (includes MM ix discriminator byte + fields).
  * @param mmProgram - **TS:** `Address` — MM program id (`programAddress` of returned instruction). **Rust:** MM `program_id` for the ix.
  * @param user - **TS:** `Address` — user pubkey passed as first account. **Rust:** first CPI account (readonly).
- * @returns **`Promise<Instruction>`** — `programAddress` = `mmProgram`; five accounts; `data` = encoded MM get-quote payload. **Note:** validates odds, side, market, sequence, and 32-byte hash before encoding.
+ * @returns **`Promise<Instruction>`** — `programAddress` = `mmProgram`; five accounts; `data` = encoded MM get-quote payload. **Note:** validates odds, side, market, sequence, and game state before encoding.
  */
 export async function getMmGetQuoteIx(
    quote: MmGetQuote,
@@ -433,9 +434,7 @@ export async function getMmGetQuoteIx(
    if (quote.eventStateSequence === 0) {
       throw new RangeError('quote.eventStateSequence must be > 0');
    }
-   if (quote.eventStateHash.byteLength !== 32) {
-      throw new RangeError('quote.eventStateHash must be 32 bytes');
-   }
+   validateEventGameState(quote.eventGameState, 'quote.eventGameState');
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, quote.marketId);
    const [eventStatePda] = await getEventStatePda(mmProgram, quote.marketId.eventId);
@@ -446,7 +445,7 @@ export async function getMmGetQuoteIx(
       oddsScaled: quote.minOddsScaled,
       marketId: quote.marketId,
       side: quote.side,
-      eventStateHash: quote.eventStateHash,
+      eventGameState: quote.eventGameState,
       eventStateSequence: quote.eventStateSequence,
    });
    return {
@@ -607,11 +606,11 @@ export async function getCreateNettingAccountIx(
 /**
  * **`add_line_to_netting_account`** — MM admin adds `(event_id, period, mkt)` line to an existing netting account.
  *
- * **Rust:** `aggregator::instructions::add_line_to_netting_account::process` (`ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 51). Payload: `EventId` + `period: u8` + `mkt: u32` (`AddLineToLiabilityNettingIxData`).
+ * **Rust:** `aggregator::instructions::add_line_to_netting_account::process` (`ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 51). Payload: `EventId` + `period: u8` + `mkt: u16` (`AddLineToLiabilityNettingIxData`).
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `event_id` in parsed ix data.
  * @param period - **TS:** `number` — `u8` market period. **Rust:** `u8` / `period`.
- * @param mkt - **TS:** `number` — `u32` market index. **Rust:** `u32` / `mkt`.
+ * @param mkt - **TS:** `number` — `u16` market index. **Rust:** `u16` / `mkt`.
  * @param admin - **TS:** `Address` — MM admin signer. **Rust:** `admin` (signer).
  * @param mmProgram - **TS:** `Address` — MM program id. **Rust:** `mm_program`.
  * @returns **`Promise<Instruction>`** — four accounts: admin, mm program (readonly), mm config (readonly), netting PDA (writable).
@@ -625,7 +624,7 @@ export async function getAddLineToNettingAccountIx(
 ): Promise<Instruction> {
    validateEventId(eventId, 'eventId');
    validateU8(period, 'period');
-   validateU32Number(mkt, 'mkt');
+   validateU16(mkt, 'mkt');
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [nettingPda] = await getNettingPda(mmProgram, eventId);
    return {
@@ -645,7 +644,7 @@ export async function getAddLineToNettingAccountIx(
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `event_id`.
  * @param period - **TS:** `number` — `u8`. **Rust:** `u8`.
- * @param mkt - **TS:** `number` — `u32`. **Rust:** `u32`.
+ * @param mkt - **TS:** `number` — `u16`. **Rust:** `u16`.
  * @param admin - **TS:** `Address`. **Rust:** `admin` (signer).
  * @param mmProgram - **TS:** `Address`. **Rust:** `mm_program`.
  * @returns **`Promise<Instruction>`** — same four-account layout as add-line.
@@ -659,7 +658,7 @@ export async function getRemoveLineFromNettingAccountIx(
 ): Promise<Instruction> {
    validateEventId(eventId, 'eventId');
    validateU8(period, 'period');
-   validateU32Number(mkt, 'mkt');
+   validateU16(mkt, 'mkt');
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [nettingPda] = await getNettingPda(mmProgram, eventId);
    return {

@@ -2,6 +2,7 @@ import { ODDS_SCALE } from './constants.js';
 import {
    MAX_PARLAY_LEGS,
    Sport,
+   type EventGameState,
    type EventId,
    type FillParlayQuoteIxData,
    type GetQuoteIxData,
@@ -31,6 +32,25 @@ export function validateBytes32(b: Uint8Array, label = 'value'): void {
    if (b.length !== 32) {
       throw new RangeError(`${label} must be exactly 32 bytes`);
    }
+}
+
+export function validateEventGameState(g: EventGameState, label = 'eventGameState'): void {
+   if (typeof g.gamePhase !== 'string') {
+      throw new TypeError(`${label}.gamePhase must be a string`);
+   }
+   if (g.gamePhase.length > 4) {
+      throw new RangeError(`${label}.gamePhase must be at most 4 ASCII characters`);
+   }
+   for (let i = 0; i < g.gamePhase.length; i++) {
+      const c = g.gamePhase.charCodeAt(i)!;
+      if (c > 127) {
+         throw new RangeError(`${label}.gamePhase must be ASCII (code ${c} at index ${i})`);
+      }
+   }
+   validateU8(g.homePrimary, `${label}.homePrimary`);
+   validateU8(g.awayPrimary, `${label}.awayPrimary`);
+   validateU8(g.homeSecondary, `${label}.homeSecondary`);
+   validateU8(g.awaySecondary, `${label}.awaySecondary`);
 }
 
 export function validateU32Number(n: number, label = 'value'): void {
@@ -64,7 +84,7 @@ export function validatePositiveU64(n: bigint, label = 'value'): void {
    }
 }
 
-export function validateBetSide(side: number, mkt: number, label = 'side'): void {
+export function validateBetSide(_side: number, _mkt: number, _label = 'side'): void {
    // SIDECHECK
    //temporary disable side validation until I can be bothered coding it
    return;
@@ -85,14 +105,14 @@ export function validateSportEnum(sport: Sport, label = 'sport'): void {
 
 export function validateEventId(e: EventId, label = 'eventId'): void {
    validateU64(e.event, `${label}.event`);
-   validateU32Number(e.league, `${label}.league`);
+   validateU16(e.league, `${label}.league`);
    validateSportEnum(e.sport, `${label}.sport`);
 }
 
 export function validateMarketId(m: MarketId, label = 'marketId'): void {
    validateEventId(m.eventId, `${label}.eventId`);
    validateU64(m.player, `${label}.player`);
-   validateU32Number(m.mkt, `${label}.mkt`);
+   validateU16(m.mkt, `${label}.mkt`);
    validateU8(m.period, `${label}.period`);
    if (typeof m.isPregame !== 'boolean') {
       throw new TypeError(`${label}.isPregame must be a boolean`);
@@ -108,9 +128,7 @@ export function validateGetQuoteIxData(data: GetQuoteIxData, label = 'getQuote')
    if (data.eventStateSequence === 0) {
       throw new RangeError(`${label}.eventStateSequence must be > 0`);
    }
-   if (data.eventStateHash.byteLength !== 32) {
-      throw new RangeError(`${label}.eventStateHash must be 32 bytes`);
-   }
+   validateEventGameState(data.eventGameState, `${label}.eventGameState`);
 }
 
 export function validateParlayLegWire(leg: ParlayLegWire, label: string): void {
@@ -120,9 +138,7 @@ export function validateParlayLegWire(leg: ParlayLegWire, label: string): void {
    if (leg.eventStateSequence === 0) {
       throw new RangeError(`${label}.eventStateSequence must be > 0`);
    }
-   if (leg.eventStateHash.byteLength !== 32) {
-      throw new RangeError(`${label}.eventStateHash must be 32 bytes`);
-   }
+   validateEventGameState(leg.eventGameState, `${label}.eventGameState`);
 }
 
 export function validateGetQuoteParlayIxData(ix: GetQuoteParlayIxData, label = 'getQuoteParlay'): void {
