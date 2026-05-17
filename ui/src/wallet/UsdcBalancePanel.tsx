@@ -176,8 +176,8 @@ export function UsdcBalancePanel(): ReactElement | null {
    return (
       <div className="usdc-balance-panel">
          <div className="usdc-balance-panel__stack">
-            <div className="usdc-balance-panel__main">
-               {showUsdcAirdrop && (
+            <div className="usdc-balance-panel__balance-grid" aria-label="Token balances">
+               {showUsdcAirdrop ? (
                   <button
                      type="button"
                      className="usdc-balance-panel__airdrop"
@@ -186,18 +186,22 @@ export function UsdcBalancePanel(): ReactElement | null {
                   >
                      {usdcAirdropBusy ? "Airdropping…" : "Airdrop 100 USDC"}
                   </button>
+               ) : (
+                  <span className="usdc-balance-panel__lead-slot" aria-hidden="true" />
                )}
-               <div className="usdc-balance-panel__row">
-                  <span className="usdc-balance-panel__label">USDC</span>
-                  {balanceBase === null && loadErr == null && <span className="usdc-balance-panel__value">…</span>}
+               <span className="usdc-balance-panel__amount-cell" aria-label="USDC balance">
+                  {balanceBase === null && loadErr == null && <span className="usdc-balance-panel__amount-dim">…</span>}
                   {balanceBase !== null && (
-                     <span className="usdc-balance-panel__value">{formatUsdcBaseUnitsForUi(balanceBase)}</span>
+                     <span className="usdc-balance-panel__amount">{formatUsdcBaseUnitsForUi(balanceBase)}</span>
                   )}
-                  {loadErr != null && balanceBase === null && <span className="usdc-balance-panel__err" title={loadErr}>—</span>}
-               </div>
-            </div>
-            <div className="usdc-balance-panel__main">
-               {showSolAirdrop && (
+                  {loadErr != null && balanceBase === null && (
+                     <span className="usdc-balance-panel__err" title={loadErr}>
+                        —
+                     </span>
+                  )}
+               </span>
+               <span className="usdc-balance-panel__suffix">USDC</span>
+               {showSolAirdrop ? (
                   <button
                      type="button"
                      className="usdc-balance-panel__airdrop"
@@ -206,13 +210,21 @@ export function UsdcBalancePanel(): ReactElement | null {
                   >
                      {solAirdropBusy ? "Sending…" : "Airdrop SOL"}
                   </button>
+               ) : (
+                  <span className="usdc-balance-panel__lead-slot" aria-hidden="true" />
                )}
-               <div className="usdc-balance-panel__row">
-                  <span className="usdc-balance-panel__label">SOL</span>
-                  {solLamports === null && loadErr == null && <span className="usdc-balance-panel__value">…</span>}
-                  {solLamports !== null && <span className="usdc-balance-panel__value">{formatSolFromLamports(solLamports)}</span>}
-                  {loadErr != null && solLamports === null && <span className="usdc-balance-panel__err" title={loadErr}>—</span>}
-               </div>
+               <span className="usdc-balance-panel__amount-cell" aria-label="SOL balance">
+                  {solLamports === null && loadErr == null && <span className="usdc-balance-panel__amount-dim">…</span>}
+                  {solLamports !== null && (
+                     <span className="usdc-balance-panel__amount">{formatSolFromLamports(solLamports)}</span>
+                  )}
+                  {loadErr != null && solLamports === null && (
+                     <span className="usdc-balance-panel__err" title={loadErr}>
+                        —
+                     </span>
+                  )}
+               </span>
+               <span className="usdc-balance-panel__suffix">SOL</span>
             </div>
          </div>
          {(solAirdropErr != null || usdcAirdropErr != null) && (

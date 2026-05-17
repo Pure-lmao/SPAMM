@@ -1130,12 +1130,19 @@ h1 {
 .app-header__brand {
    justify-self: start;
    min-width: 0;
+   font-family: Tinos, "Times New Roman", Times, serif;
 }
 
 .app-header__brand .app-title {
+   display: inline-block;
    margin: 0;
    min-width: 0;
-   font-size: 1.25rem;
+   font-size: 1.5rem;
+   font-weight: 400;
+   letter-spacing: 0.05em;
+   transform: scaleY(1.1);
+   transform-origin: left center;
+   text-transform: uppercase;
 }
 
 .app-header .app-top-nav {
@@ -1192,6 +1199,8 @@ h1 {
    display: flex;
    flex-direction: column;
    align-items: flex-end;
+   width: 100%;
+   max-width: 16rem;
 }
 
 .usdc-balance-panel__errs {
@@ -1201,40 +1210,65 @@ h1 {
    gap: 0.2rem;
 }
 
-.usdc-balance-panel__main {
-   display: flex;
-   flex-direction: row;
+.usdc-balance-panel__balance-grid {
+   display: grid;
+   grid-template-columns: auto minmax(0, 1fr) minmax(3.25rem, max-content);
+   column-gap: 0.45rem;
+   row-gap: 0.28rem;
+   width: 100%;
+   font-size: 0.68rem;
    align-items: center;
-   justify-content: flex-end;
-   gap: 0.65rem;
-   flex-wrap: wrap;
 }
 
-.usdc-balance-panel__row {
-   display: flex;
-   align-items: baseline;
-   gap: 0.4rem;
-   font-size: 0.68rem;
+.usdc-balance-panel__lead-slot {
+   justify-self: start;
+   min-width: 0;
+   min-height: 1em;
 }
 
-.usdc-balance-panel__label {
+.usdc-balance-panel__balance-grid > .usdc-balance-panel__airdrop {
+   justify-self: start;
+}
+
+.usdc-balance-panel__amount-cell {
+   justify-self: end;
+   text-align: right;
+   font-variant-numeric: tabular-nums;
+   min-width: 0;
+}
+
+.usdc-balance-panel__balance-grid > .usdc-balance-panel__suffix {
+   justify-self: start;
+   text-align: left;
+}
+
+.usdc-balance-panel__amount {
    font-weight: 700;
-   font-size: 0.55rem;
-   letter-spacing: 0.05em;
-   text-transform: uppercase;
-   color: var(--muted);
-}
-
-.usdc-balance-panel__value {
-   font-size: 0.68rem;
-   font-weight: 600;
    font-variant-numeric: tabular-nums;
    color: var(--accent);
 }
 
+.usdc-balance-panel__amount-dim {
+   font-weight: 700;
+   color: var(--muted);
+}
+
+.usdc-balance-panel__suffix {
+   font-weight: 700;
+   letter-spacing: 0.02em;
+   text-transform: uppercase;
+   color: var(--text);
+}
+
 .usdc-balance-panel__err {
+   text-align: right;
    font-size: 0.78rem;
    color: var(--danger);
+}
+
+.usdc-balance-panel__amount-cell .usdc-balance-panel__err {
+   font-size: inherit;
+   font-weight: 700;
 }
 
 .usdc-balance-panel__airdrop {
@@ -1351,6 +1385,8 @@ h1 {
       font-size: 1rem;
       line-height: 1.2;
       margin: 0;
+      font-weight: 400;
+      letter-spacing: 0.03em;
    }
 
    .app-header__brand .app-title .inline-nav-link {
@@ -1442,28 +1478,28 @@ h1 {
       gap: 0.35rem;
    }
 
-   .app-header__wallet-panel .usdc-balance-panel__main {
-      justify-content: flex-start;
-      flex-wrap: wrap;
-      max-width: 100%;
-      gap: 0.45rem;
-   }
-
-   .app-header__wallet-panel .usdc-balance-panel__row {
+   .app-header__wallet-panel .usdc-balance-panel__balance-grid {
       font-size: 0.68rem;
+      column-gap: 0.35rem;
    }
 
-   .app-header__wallet-panel .usdc-balance-panel__label {
-      font-size: 0.55rem;
-   }
-
-   .app-header__wallet-panel .usdc-balance-panel__value {
+   .app-header__wallet-panel .usdc-balance-panel__amount,
+   .app-header__wallet-panel .usdc-balance-panel__suffix,
+   .app-header__wallet-panel .usdc-balance-panel__amount-dim {
       font-size: 0.68rem;
    }
 
    .app-header__wallet-panel .usdc-balance-panel__airdrop {
       font-size: 0.72rem;
       padding: 0.3rem 0.5rem;
+   }
+
+   .sport-title {
+      font-size: 1.2rem;
+   }
+
+   .event-page-title {
+      font-size: 1.2rem;
    }
 }
 
