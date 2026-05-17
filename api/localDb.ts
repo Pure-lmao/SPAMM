@@ -1,8 +1,11 @@
 
 import { Database } from "bun:sqlite";
 import type { Sport, League, Event, Market, GroupedSport, GroupedLeague, GroupedEvent } from "./types";
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-export const DB_PATH = "data.db";
+export const DB_PATH = path.join(__dirname, "data.db");
 
 export const DB_BUSY_TIMEOUT_MS = 10_000;
 
@@ -40,7 +43,7 @@ function initLeagueTable(): void {
          country_name TEXT NOT NULL,
          country_rank INTEGER NOT NULL,
          api_id TEXT NOT NULL,
-         FOREIGN KEY (sport_id) REFERENCES sports (id)
+         FOREIGN KEY (sport_id) REFERENCES sports (id),
          PRIMARY KEY (id, sport_id)
       );
    `);
@@ -61,7 +64,7 @@ function initEventTable(): void {
          home_score INTEGER,
          away_score INTEGER,
          FOREIGN KEY (sport_id) REFERENCES sports (id),
-         FOREIGN KEY (league_id) REFERENCES leagues (id)
+         FOREIGN KEY (league_id) REFERENCES leagues (id),
          PRIMARY KEY (id, league_id, sport_id)
       );
    `);
@@ -75,6 +78,8 @@ function initMarketTable(): void {
          event_id INTEGER NOT NULL,
          league_id INTEGER NOT NULL,
          sport_id INTEGER NOT NULL,
+         period_id INTEGER NOT NULL,
+         line_value DECIMAL(5, 2),
          last_odds TEXT NOT NULL,
          last_update INTEGER NOT NULL,
          mkt_string TEXT NOT NULL,
@@ -119,14 +124,26 @@ export function fetchSports(ids: number[] = []): Map<number, Sport> {
    return map;
 }
 
-export function fetchLeagues(ids: number[] = []): Map<number, League> {
+export function fetchLeagues(ids: number[] = []): Map<string, League> {
    const database = getDb();
    const rows = database.query<League, string[]>(
       `SELECT * FROM leagues ${ids.length > 0 ? `WHERE id IN (${ids.map(() => `?`).join(",")})` : ""}`
    ).all(...ids.map((id) => id.toString()));
+   const map = new Map<string, League>();
+   for (const r of rows) {
+      map.set(`${r.sport_id}:${r.id}`, r);
+   }
+   return map;
+}
+
+export function fetchLeaguesBySport(sportId: number): Map<number, League> {
+   const database = getDb();
+   const rows = database.query<League, string[]>(
+      `SELECT * FROM leagues WHERE sport_id = ?`
+   ).all(sportId.toString());
    const map = new Map<number, League>();
    for (const r of rows) {
-      map.set(r.id, r);
+      map.set(r.sport_id, r);
    }
    return map;
 }
@@ -141,6 +158,8 @@ const MARKETS_AGG_JOIN = `
                'event_id', event_id,
                'league_id', league_id,
                'sport_id', sport_id,
+               'period_id', period_id,
+               'line_value', line_value,
                'last_odds', last_odds,
                'last_update', last_update,
                'mkt_string', mkt_string
@@ -203,9 +222,9 @@ export function fetchEventsGrouped(withMarkets: boolean = false): GroupedSport[]
    type EvRow = { sport_id: number; league_id: number; start_time: number };
    let rawRows: (Event | EventMarketsRow)[];
    if (withMarkets) {
-      rawRows = database.query<EventMarketsRow, []>(
-         `SELECT e.*, COALESCE(m.markets_json, '[]') AS markets_json FROM events e ${MARKETS_AGG_JOIN} ORDER BY e.sport_id, e.league_id, e.start_time`
-      ).all();
+      rawRows = database.query<EventMarketsRow, string[]>(
+         `SELECT e.*, COALESCE(m.markets_json, '[]') AS markets_json FROM events e ${MARKETS_AGG_JOIN} WHERE e.start_time > ? ORDER BY e.sport_id, e.league_id, e.start_time`
+      ).all(Date.now().toString());
    } else {
       rawRows = database.query<Event, []>(
          "SELECT * FROM events ORDER BY sport_id, league_id, start_time"
@@ -340,6 +359,24 @@ export function fetchEventsByLeague(sportId: number, leagueIds: number[] = [], w
    }
 }
 
+export function fetchMarkets(): Map<string, Market> {
+   const database = getDb();
+   const rows = database.query<Market, []>("SELECT * FROM markets").all();
+   const map = new Map<string, Market>();
+   for (const r of rows) {
+      map.set(`${r.sport_id}:${r.league_id}:${r.event_id}:${r.period_id}:${r.mkt_string}`, r);
+   }
+   return map;
+}
+
+function fetchMarket(marketId: number, eventId: number, leagueId: number, sportId: number): Market | null {
+   const database = getDb();
+   const row = database.query<Market, string[]>(
+      "SELECT * FROM markets WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ?"
+   ).get(marketId.toString(), eventId.toString(), leagueId.toString(), sportId.toString());
+   return row;
+}
+
 // ---- Add / upsert ----
 
 export function addSport(sportId: number, meta: Sport): void {
@@ -382,8 +419,58 @@ export function updateEvent(eventId: number, leagueId: number, sportId: number, 
 export function addMarket(meta: Market): void {
    const database = getDb();
    database.query(
-      "INSERT OR REPLACE INTO markets (id, event_id, league_id, sport_id, last_odds, last_update, mkt_string) VALUES (?, ?, ?, ?, ?, ?, ?)"
-   ).run(meta.id, meta.event_id, meta.league_id, meta.sport_id, meta.last_odds, meta.last_update, meta.mkt_string);
+      "INSERT OR REPLACE INTO markets (id, event_id, league_id, sport_id, period_id, line_value, last_odds, last_update, mkt_string) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+   ).run(
+      meta.id,
+      meta.event_id,
+      meta.league_id,
+      meta.sport_id,
+      meta.period_id,
+      meta.line_value,
+      meta.last_odds,
+      meta.last_update,
+      meta.mkt_string
+   );
+}
+// addMarket({
+//    id: 0,
+//    event_id: 740963,
+//    league_id: 11827,
+//    sport_id: 1,
+//    period_id: 0,
+//    line_value: null,
+//    last_odds: "[20000, 20000]",
+//    last_update: 1,
+//    mkt_string: "TQ",
+// });
+// addMarket({
+//    id: 61,
+//    event_id: 740963,
+//    league_id: 11827,
+//    sport_id: 1,
+//    period_id: 1,
+//    line_value: null,
+//    last_odds: "[19000, 18000]",
+//    last_update: 1,
+//    mkt_string: "OU 2.75",
+// });
+// addMarket({
+//    id: 396,
+//    event_id: 740963,
+//    league_id: 11827,
+//    sport_id: 1,
+//    period_id: 1,
+//    line_value: null,
+//    last_odds: "[21000, 18000]",
+//    last_update: 1,
+//    mkt_string: "AH -1.0",
+// });
+
+export function updateMarket(marketId: number, eventId: number, leagueId: number, sportId: number, odds: string, timestamp: number): void {
+   const database = getDb();
+   database.query(
+      "UPDATE markets SET last_odds = ?, last_update = ? WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ?"
+   ).run(odds, timestamp, marketId, eventId, leagueId, sportId);
 }
 
 export function getLeagues(): { api_id: string; sport_id: number; id: number }[] {

@@ -19,11 +19,10 @@ Digit 2 is the type of competition:
 |---------|------|
 | 1       | Men's league|
 | 2       | Men's cup |
-| 3       | Men's secondary cup (e.g.League Cup) |
-| 4       | Youth league |
-| 5       | Youth cup |
-| 6       | Women's league |
-| 7       | Women's cup |
+| 3       | Youth league |
+| 4       | Youth cup |
+| 5       | Women's league |
+| 6       | Women's cup |
 
 Digits 3-6 are the country code from ISO 3166-1 numeric with additions for non-ISO countries and non-countries (e.g. UEFA) as follows:
 

@@ -36,6 +36,7 @@ export const MM_ORACLE_ACCOUNT_LEN_THREE_OUTCOME = 18;
 
 /** Wire `u8` (`state/ids.rs`). */
 export enum Sport {
+   None = 0,
    Soccer = 1,
    AmericanFootball = 2,
    Baseball = 3,

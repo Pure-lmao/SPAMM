@@ -1,0 +1,14 @@
+{
+  "name": "backend",
+  "module": "index.ts",
+  "type": "module",
+  "private": true,
+  "devDependencies": {
+    "@types/bun": "latest",
+    "spamm-market-maker-sdk": "file:../sdk/ts",
+    "spamm-aggregator-sdk": "file:../../aggregator/sdk/ts"
+  },
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

@@ -12,7 +12,8 @@
     "@solana/connector": "^0.2.4",
     "@solana/kit": "^6.9.0",
     "react": "^19.0.0",
-    "react-dom": "^19.0.0"
+    "react-dom": "^19.0.0",
+    "react-router-dom": "^7.15.1"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

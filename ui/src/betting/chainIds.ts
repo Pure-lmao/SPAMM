@@ -8,11 +8,17 @@ export function apiSportToSdk(sportId: number): Sport {
    return sportId as Sport;
 }
 
-export function buildMarketId(eventId: number, leagueId: number, sport: Sport, mktWireId: number) {
+export function buildMarketId(
+   eventId: number,
+   leagueId: number,
+   sport: Sport,
+   mktWireId: number,
+   period: number,
+) {
    return {
       eventId: { event: BigInt(eventId), league: leagueId, sport },
       mkt: mktWireId,
-      period: sport === Sport.Soccer ? 1 : 0,
+      period,
       isPregame: true,
       player: 0n,
    };

@@ -3,8 +3,9 @@ export const USDC_DECIMALS = 6;
 export const USDC_BASE_UNITS_PER_TOKEN = 10n ** BigInt(USDC_DECIMALS);
 
 /** Parse a human USDC decimal string (e.g. `10`, `1.5`) into on-chain base units. */
-export function parseUsdcAmountUiToBaseUnits(raw: string): bigint | null {
-   const t = raw.trim().replace(/,/g, "");
+export function parseUsdcAmountUiToBaseUnits(raw: string | number): bigint | null {
+   const n = typeof raw === "number" ? raw.toString() : raw;
+   const t = n.trim().replace(/,/g, "");
    if (!t || !/^\d*\.?\d*$/.test(t) || t === ".") {
       return null;
    }

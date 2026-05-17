@@ -36,6 +36,8 @@ export type Market = {
    event_id: number;
    league_id: number;
    sport_id: number;
+   period_id: number;
+   line_value: number | null;
    last_odds: string;
    last_update: number;
    mkt_string: string;
@@ -134,6 +136,7 @@ export type ESPNTeam = {
 };
 
 export type ESPNOdds = {
+   error?: {message: string, code: number};
    count: number;
    pageIndex: number;
    pageSize: number;
@@ -148,13 +151,78 @@ export type ESPNOdds = {
       price: number;
       overOdds: number;
       underOdds: number;
-      awayTeamOdds: any;
-      homeTeamOdds: any;
+      awayTeamOdds: ESPNTeamOdds;
+      homeTeamOdds: ESPNTeamOdds;
       links: any;
       moneylineWinner: false | string;
       spreadWinner: false | string;
-      open: any;
-      close: any;
-      current: any;
+      open: ESPNOddsSet;
+      close: ESPNOddsSet;
+      current: ESPNOddsSet;
    }[]
+}
+
+type ESPNTeamOdds = {
+   favorite: boolean;
+   underdog: boolean;
+   moneyline: number;
+   open: ESPNTeamOddsSet;
+   close: ESPNTeamOddsSet;
+   current: ESPNTeamOddsSet;
+   team: any;
+}
+
+type ESPNTeamOddsSet = {
+   favorite: boolean;
+   pointSpread: {
+      alternateDisplayValue: string;
+      american: string;
+   };
+   spread: {
+      value: number;
+      displayValue: string;
+      alternateDisplayValue: string;
+      decimal: number;
+      fraction: string;
+      american: string;
+   };
+   moneyLine: {
+      value: number;
+      displayValue: string;
+      alternateDisplayValue: string;
+      decimal: number;
+      fraction: string;
+      american: string;
+   };
+};
+
+type ESPNOddsSet = {
+   over: {
+      value: number;
+      displayValue: string;
+      alternateDisplayValue: string;
+      decimal: number;
+      fraction: string;
+      american: string;
+   };
+   under: {
+      value: number;
+      displayValue: string;
+      alternateDisplayValue: string;
+      decimal: number;
+      fraction: string;
+      american: string;
+   };
+   total: {
+      alternateDisplayValue: string;
+      american: string;
+   };
+   draw?: {
+      value: number;
+      displayValue: string;
+      alternateDisplayValue: string;
+      decimal: number;
+      fraction: string;
+      american: string;
+   };
 }

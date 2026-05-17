@@ -5,6 +5,9 @@
   "scripts": {
     "start": "bun run index.ts"
   },
+  "dependencies": {
+    "spamm-aggregator-sdk": "file:../aggregator/sdk/ts"
+  },
   "devDependencies": {
     "@types/bun": "latest"
   },

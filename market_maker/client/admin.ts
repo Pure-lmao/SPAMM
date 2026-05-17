@@ -3,8 +3,14 @@ import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData,
 import { loadKeypairSignerFromJsonFile } from 'utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile('./admin_keypair.json');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
+   path.join(__dirname, 'admin_keypair.json'),
+);
 const clients = createRpcClients();
 
 
@@ -20,14 +26,14 @@ async function registerMM() {
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-registerMM().catch(console.error);
+// registerMM().catch(console.error);
 
 // getMmEncumbranceData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 // getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
-const sport = 1 as Sport;
-const league = 1827;
-const event = 740957n;
+const sport = 3 as Sport;
+const league = 11840;
+const event = 401815362n;
 const eventId = {
    sport,
    league,

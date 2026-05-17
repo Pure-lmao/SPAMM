@@ -1,11 +1,17 @@
-import { loadKeypairSignerFromJsonFile } from "utils";
+import { loadKeypairSignerFromJsonFile } from "./utils.ts";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
 import { decodeMmReturnData, getBetData, getBetPda, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, getEventGameState, LOOKUP_TABLE_ID, ODDS_SCALE, Sport } from "spamm-aggregator-sdk";
 import type { Address } from "@solana/kit";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clients = createRpcClients();
 
 
-export const USER_SIGNER = await loadKeypairSignerFromJsonFile('./user_keypair.json');
+export const USER_SIGNER = await loadKeypairSignerFromJsonFile(
+   path.join(__dirname, "user_keypair.json"),
+);
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
 const DumbMarketMaker2 = "DUMBu5faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
 const DumbMarketMaker3 = "DUMBu6faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;

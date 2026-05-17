@@ -174,11 +174,12 @@ export async function simulateTransaction(
       signers,
       useALT,
    });
-   const wireBytes = getTransactionSize(transaction);
-   console.log(`wire transaction size: ${wireBytes} bytes (useALT=${useALT})`);
+   // const wireBytes = getTransactionSize(transaction);
+   // console.log(`wire transaction size: ${wireBytes} bytes (useALT=${useALT})`);
    const encodedTransaction = getBase64EncodedWireTransaction(transaction);
    const simulation = await rpc
       .simulateTransaction(encodedTransaction, { encoding: 'base64', sigVerify: false })
       .send();
+   // console.log(simulation);
    return simulation.value.returnData?.data;
 }

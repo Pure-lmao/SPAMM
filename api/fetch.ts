@@ -1,7 +1,10 @@
-import { fetch } from "bun";
+import { fetch, sleep } from "bun";
 import type { ESPNEvent, ESPNOdds, Event } from "./types";
-import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, getLeagues, updateEvent } from "./localDb";
+import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchMarkets, fetchSports, getLeagues, updateEvent, updateMarket } from "./localDb";
 import { safeJSONStringify } from "./utils";
+import { decodeMmReturnData, getEventGameState, getMmGetQuoteIx, getMmListData, ODDS_SCALE, type MarketId } from "spamm-aggregator-sdk";
+import { createRpcClients, simulateTransaction } from "../aggregator/client/txSend";
+import { ADMIN_SIGNER } from "../aggregator/client/admin";
 
 async function getScoreboard(sport: string, league: string, date: string): Promise<ESPNEvent[]> {
    const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/scoreboard?dates=${date}`
@@ -76,44 +79,59 @@ async function setUpcomingEvents() {
    console.log("Setting upcoming events");
    const now = new Date();
    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().split('T')[0]!.replace(/-/g, '');
-   const FiveDaysFromNow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 5).toISOString().split('T')[0]!.replace(/-/g, '');
+   const fiveDaysFromNow = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 5).toISOString().split('T')[0]!.replace(/-/g, '');
    
    const leagues = fetchLeagues();
    const sports = fetchSports();
    const events = fetchEvents();
+   const markets = fetchMarkets();
+
+   const marketIdSet = new Set<string>();
+   for (const [marketId, market] of markets) {
+      marketIdSet.add(`${market.sport_id}-${market.league_id}-${market.event_id}-${market.id}`);
+   }
 
    for (const [id, league] of leagues) {
       const sport = sports.get(league.sport_id)!;
-      const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${today}-${FiveDaysFromNow}`);
+      const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${today}-${fiveDaysFromNow}`);
       for (const event of scoreboard) {
-         if (events.has(Number(event.id))) {
-            continue;
-         }
+         let eventExists = events.has(Number(event.id)) || false;
+
          const dbEvent = getUpcomingEvent(event, sport.id, league.id);
          if (dbEvent) {
-            addEvent(dbEvent.id, dbEvent);
+            if (!eventExists) {
+               addEvent(dbEvent.id, dbEvent);
+            }
             const last_update = new Date().getTime();
             // Create ML/FT
             if (sport.id === 1) {
-               addMarket({
-                  id: 1,
-                  event_id: dbEvent.id,
-                  league_id: league.id,
-                  sport_id: sport.id,
-                  last_odds: safeJSONStringify([0,0,0]),
-                  last_update,
-                  mkt_string: "1X2",
-               });
+               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-1`)) {
+                  addMarket({
+                     id: 1,
+                     event_id: dbEvent.id,
+                     league_id: league.id,
+                     sport_id: sport.id,
+                     last_odds: safeJSONStringify([0,0,0]),
+                     last_update,
+                     mkt_string: "1X2",
+                     period_id: 1,
+                     line_value: null,
+                  });
+               }
             } else {
-               addMarket({
-                  id: 0,
-                  event_id: dbEvent.id,
-                  league_id: league.id,
-                  sport_id: sport.id,
-                  last_odds: safeJSONStringify([0,0]),
-                  last_update,
-                  mkt_string: "ML",
-               });
+               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-0`)) {
+                  addMarket({
+                     id: 0,
+                     event_id: dbEvent.id,
+                     league_id: league.id,
+                     sport_id: sport.id,
+                     last_odds: safeJSONStringify([0,0]),
+                     last_update,
+                     mkt_string: "ML",
+                     period_id: 0,
+                     line_value: null,
+                  });
+               }
             }  
 
             const lines = await getMarketLines(sport.api_id, league.api_id, event.id);
@@ -121,29 +139,37 @@ async function setUpcomingEvents() {
             if (lines.total !== null) {
                let id = sport.id === 1 ? 50 : 1000;
                id += lines.total * (sport.id === 1 ? 4 : 2);
-               addMarket({
-                  id,
-                  event_id: dbEvent.id,
-                  league_id: league.id,
-                  sport_id: sport.id,
-                  last_odds: safeJSONStringify([0,0]),
-                  last_update,
-                  mkt_string: `OU ${lines.total}`,
-               });
+               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-${id}`)) {
+                  addMarket({
+                     id,
+                     event_id: dbEvent.id,
+                     league_id: league.id,
+                     sport_id: sport.id,
+                     last_odds: safeJSONStringify([0,0]),
+                     last_update,
+                     mkt_string: `OU ${lines.total}`,
+                     period_id: sport.id === 1 ? 1 : 0,
+                     line_value: lines.total,
+                  });
+               }
             };
 
             if (lines.spread !== null) {
                let id = sport.id === 1 ? 400 : 200;
                id += lines.spread * (sport.id === 1 ? 4 : 2);
-               addMarket({
-                  id,
-                  event_id: dbEvent.id,
-                  league_id: league.id,
-                  sport_id: sport.id,
-                  last_odds: safeJSONStringify([0,0]),
-                  last_update,
-                  mkt_string: `AH ${lines.spread > 0 ? '+' : ''}${lines.spread}`,
-               });
+               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-${id}`)) {
+                  addMarket({
+                     id,
+                     event_id: dbEvent.id,
+                     league_id: league.id,
+                     sport_id: sport.id,
+                     last_odds: safeJSONStringify([0,0]),
+                     last_update,
+                     mkt_string: `AH ${lines.spread > 0 ? '+' : ''}${lines.spread}`,
+                     period_id: sport.id === 1 ? 1 : 0,
+                     line_value: lines.spread,
+                  });
+               }
             }
          }
       }
@@ -157,7 +183,7 @@ async function setFinishedEvents() {
    
    const leagues = fetchLeagues();
    const sports = fetchSports();
-   const events = fetchEvents();
+   const events = fetchEvents(); // TODO: Only get finished events
 
    for (const [id, league] of leagues) {
       const sport = sports.get(league.sport_id)!;
@@ -174,9 +200,60 @@ async function setFinishedEvents() {
    }
 };
 
+async function cacheOdds() {
+   const markets = fetchMarkets();
+   const clients = createRpcClients();
+   const marketMakers = await getMmListData(clients.rpc);
+   const fakeSigner = ADMIN_SIGNER;
+
+   for (const [marketId, market] of markets) {
+      console.log("Caching odds for market", market.id, market.event_id, market.league_id, market.sport_id);
+      const marketId: MarketId = {
+         mkt: market.id,
+         period: market.period_id,
+         player: 0n,
+         eventId: {
+            sport: market.sport_id,
+            league: market.league_id,
+            event: BigInt(market.event_id),
+         },
+         isPregame: true,
+      };
+      const odds: number[] = [];
+      let sidesCount = market.mkt_string === "1X2" ? 3 : 2;
+      for (let side = 0; side < sidesCount; side++) {
+         const quoteIx = await getMmGetQuoteIx({
+            marketId,
+            side,
+            amount: 1n,
+            minOddsScaled: ODDS_SCALE + 1n,
+            eventGameState: getEventGameState("PG", 0, 0, 0, 0),
+            eventStateSequence: 1,
+         }, marketMakers.mmProgramAddresses[0]!, fakeSigner.address);
+         try {
+            const returnData = await simulateTransaction(clients.rpc, [quoteIx], [fakeSigner]);
+            if (returnData) {
+               const parsedReturnData = decodeMmReturnData(Buffer.from(...returnData));
+               odds.push(Number(parsedReturnData.oddsScaled));
+            } else {
+               odds.push(0);
+            }
+         } catch (error: any) {
+            console.error(`Error simulating transaction for market ${market.id} ${market.event_id}`);
+            console.error(error?.message);
+            odds.push(0);
+         }
+      }
+      await sleep(500);
+      updateMarket(market.id, market.event_id, market.league_id, market.sport_id, 
+         safeJSONStringify(odds), new Date().getTime());
+   }
+}
+
 async function main() {
    await setUpcomingEvents();
    await setFinishedEvents();
+   await cacheOdds();
    console.log("Events set");
 
    setInterval(async () => {
@@ -185,8 +262,11 @@ async function main() {
    setInterval(async () => {
       await setFinishedEvents();
    }, 1000 * 60 * 30);
+   setInterval(async () => {
+      await cacheOdds();
+   }, 1000 * 60 * 5);
 };
 
 if (import.meta.main) {
-   main().catch(console.error);
+   await main().catch(console.error);
 }

@@ -6,7 +6,6 @@ import {
    type KeyPairSigner,
    type ReadonlyUint8Array,
 } from '@solana/kit';
-import { getConfigPda } from 'spamm-aggregator-sdk';
 
 const addressEncoder = getAddressEncoder();
 
@@ -19,11 +18,6 @@ function formatAddressAsRustNewFromArrayBody(address: Address): string {
    const bytes = convertAddressToArray(address);
    return `${Array.from(bytes, b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')},`;
 }
-
-// const pda = await getConfigPda();
-// console.log(pda);
-const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile('admin_keypair.json');
-// console.log(formatAddressAsRustNewFromArrayBody("7AChvrzBkq9zuSWFE89VT5Q4QGDpPG6sYKJMgLYnMDzS" as Address));
 
 const pkString = '';
 /** Base58-encoded 32-byte seed or 64-byte secret key (wallet export format). */

@@ -173,7 +173,7 @@ export function validateFillParlayQuoteIxData(ix: FillParlayQuoteIxData, label =
 
 export function validateOdds(odds: bigint, label = 'odds'): void {
    validateU32Bigint(odds, label);
-   if (odds <= ODDS_SCALE) {
+   if (odds <= ODDS_SCALE && odds !== 0n) {
       throw new RangeError(`${label} must be > ODDS_SCALE (${ODDS_SCALE})`);
    }
 }

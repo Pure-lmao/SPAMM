@@ -1,12 +1,15 @@
 import { getBetPda, getChangeConfigStatusIx, getConfigPda, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getMmListData, getMmListPda, getParlayBetPda, getRecentSlot, getWriteArbitraryDataIx } from "spamm-aggregator-sdk";
-import { loadKeypairSignerFromJsonFile } from "utils";
-import { createRpcClients, sendAndConfirmInstructions } from "./txSend.ts"
+import { loadKeypairSignerFromJsonFile } from "./utils.ts";
+import { createRpcClients, sendAndConfirmInstructions } from "./txSend.ts";
 import type { Address } from "@solana/kit";
-import { USER_SIGNER } from "user.ts";
-const clients = createRpcClients();
+import { USER_SIGNER } from "./user.ts";
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-
-const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile('./admin_keypair.json');
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
+   path.join(__dirname, 'admin_keypair.json'),
+);
 
 async function initProgram() {
    const clients = createRpcClients();

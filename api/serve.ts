@@ -1,4 +1,5 @@
-import { fetchEvents, fetchEventsByLeague, fetchEventsBySport, fetchEventsGrouped, fetchLeagues, fetchSports } from "./localDb";
+import { airdropUser } from "./airdrop";
+import { fetchEvents, fetchEventsByLeague, fetchEventsBySport, fetchEventsGrouped, fetchLeagues, fetchLeaguesBySport, fetchSports } from "./localDb";
 import { safeJSONStringify } from "./utils";
 
 const TTL_MS = 5000;
@@ -54,6 +55,7 @@ function withCors(req: Request, res: Response): Response {
  * - /api/sports
  * - /api/leagues?all=true
  * - /api/leagues?sport={sportId}
+ * - /api/airdrop/sol?user={userAddress}
  */
 export class ApiServer {
    private async handleGetEvents(params: URLSearchParams): Promise<Response> {
@@ -97,10 +99,18 @@ export class ApiServer {
          return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
       }
       if (sport != null) {
-         const result = fetchLeagues([Number(sport)]);
+         const result = fetchLeaguesBySport(Number(sport));
          return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
       }
-      const result = fetchLeagues([Number(sport)]);
+      return Response.json({ error: "Missing query params. Use all=true or sport=" }, { status: 400 });
+   }
+
+   private async handleGetSolAirdrop(params: URLSearchParams): Promise<Response> {
+      const user = params.get("user");
+      if (!user) {
+         return Response.json({ error: "Missing query params. Use user=" }, { status: 400 });
+      }
+      const result = await airdropUser(user);
       return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
    }
 
@@ -121,6 +131,9 @@ export class ApiServer {
       }
       if (url.pathname === "/api/leagues") {
          return this.handleGetLeagues(params).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/airdrop/sol") {
+         return this.handleGetSolAirdrop(params).then((r) => withCors(req, r));
       }
 
       return withCors(req, new Response("Not Found", { status: 404 }));

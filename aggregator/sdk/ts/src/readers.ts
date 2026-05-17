@@ -186,6 +186,18 @@ export async function getTokenAccountBalance(rpc: Rpc<SolanaRpcApi>, account: Ad
 }
 
 /**
+ * User wallet USDC balance (default {@link MINT_ID} ATA). Returns `0n` if the ATA is missing or RPC errors.
+ */
+export async function getWalletUsdcTokenBalance(rpc: Rpc<SolanaRpcApi>, owner: Address): Promise<bigint> {
+   const ata = await getAta(owner);
+   try {
+      return await getTokenAccountBalance(rpc, ata);
+   } catch {
+      return 0n;
+   }
+}
+
+/**
  * Liability vault ATA balance for an MM program (ATA owner = MM encumbrance PDA on the aggregator).
  * Same ATA derivation as `getWithdrawFromLiabilityAccountIx` / `settleFillerAccountRow` in `instructions.ts`.
  */
@@ -212,9 +224,6 @@ export async function getMmListData(rpc: Rpc<SolanaRpcApi>): Promise<MmListPdaDa
    }
    return decodeMmListPdaData(raw);
 }
-
-/** Alias for {@link getMmListData} (preferred spelling in docs). */
-export const getMMListData = getMmListData;
 
 export async function getAggregatorConfigData(rpc: Rpc<SolanaRpcApi>): Promise<ConfigPdaData> {
    const [addr] = await getConfigPda();
