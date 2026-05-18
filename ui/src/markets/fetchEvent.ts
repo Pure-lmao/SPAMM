@@ -1,4 +1,5 @@
 import type { UiGroupedEvent } from "./types";
+const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 /** Single event + markets (`/api/events?sport=&league=&event=`). */
 export async function fetchOneEvent(sportId: number, leagueId: number, eventId: number): Promise<UiGroupedEvent> {
@@ -7,7 +8,7 @@ export async function fetchOneEvent(sportId: number, leagueId: number, eventId: 
       league: String(leagueId),
       event: String(eventId),
    });
-   const res = await fetch(`/api/events?${q.toString()}`);
+   const res = await fetch(`${apiDomain}/api/events?${q.toString()}`);
    if (!res.ok) {
       throw new Error(`${res.status} ${res.statusText}`);
    }

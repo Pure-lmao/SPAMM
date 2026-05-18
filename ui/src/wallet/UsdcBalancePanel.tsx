@@ -12,6 +12,7 @@ import { getWalletUsdcTokenBalance } from "spamm-aggregator-sdk";
 import { formatUsdcBaseUnitsForUi, USDC_BASE_UNITS_PER_TOKEN } from "../betting/usdc";
 import { buildSignV0Transaction, httpToWsRpcUrl, resolveHttpRpcUrl } from "../betting/txPipeline";
 import { buildDevnetUsdcAirdropIx } from "./devnetUsdcAirdropIx";
+const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 const MIN_UI_USDC = 10n;
 const MIN_BALANCE_BASE = MIN_UI_USDC * USDC_BASE_UNITS_PER_TOKEN;
@@ -139,7 +140,7 @@ export function UsdcBalancePanel(): ReactElement | null {
       try {
          const user = String(address(account));
          const q = new URLSearchParams({ user });
-         const res = await fetch(`/api/airdrop/sol?${q.toString()}`);
+         const res = await fetch(`${apiDomain}/api/airdrop/sol?${q.toString()}`);
          const raw: unknown = await res.json().catch(() => null);
          if (!res.ok) {
             const msg =

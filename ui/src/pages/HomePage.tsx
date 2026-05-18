@@ -14,9 +14,10 @@ import {
 } from "../markets/selectors";
 import { oddsTableLabels } from "../markets/oddsTableLabels";
 import type { UiGroupedSport } from "../markets/types";
+const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 async function fetchGroupedTree(): Promise<UiGroupedSport[]> {
-   const res = await fetch("/api/events?all=true");
+   const res = await fetch(`${apiDomain}/api/events?all=true`);
    if (!res.ok) {
       throw new Error(`${res.status} ${res.statusText}`);
    }
