@@ -266,9 +266,9 @@ async function cacheOdds() {
 }
 
 async function main() {
-   // await setUpcomingEvents();
-   // await setFinishedEvents();
-   // await gradeBets();
+   await setUpcomingEvents();
+   await setFinishedEvents();
+   await gradeBets();
    await cacheOdds();
    console.log("Initial done.");
 

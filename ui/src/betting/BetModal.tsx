@@ -43,8 +43,15 @@ function parseMinOddsScaled(raw: string, fallback: bigint): bigint {
    return BigInt(Math.round(n * Number(ODDS_SCALE)));
 }
 
+/** Uniform random in `[0, 2^64 - 1]` (u64 range) for on-chain `betId`. */
 function nextBetId(): bigint {
-   return BigInt(Date.now());
+   const bytes = new Uint8Array(8);
+   crypto.getRandomValues(bytes);
+   let n = 0n;
+   for (let i = 0; i < 8; i++) {
+      n = (n << 8n) | BigInt(bytes[i]);
+   }
+   return n;
 }
 
 function primaryFill(b: BetAccountData): BetAccountData["filler0"] | undefined {
