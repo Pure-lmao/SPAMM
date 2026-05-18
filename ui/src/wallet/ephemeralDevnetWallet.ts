@@ -1,7 +1,7 @@
 import { getWallets } from "@wallet-standard/app";
 import type { Wallet, WalletAccount } from "@wallet-standard/base";
 import { getAddressFromPublicKey } from "@solana/addresses";
-import { getBase58Decoder } from "@solana/kit";
+import { getBase58Encoder } from "@solana/kit";
 import { createKeyPairFromPrivateKeyBytes, signBytes } from "@solana/keys";
 import {
    getBase64EncodedWireTransaction,
@@ -185,7 +185,7 @@ export function registerSpammEphemeralDevnetWallet(): () => void {
       features: {
          "standard:connect": {
             version: "1.0.0",
-            connect: async (input) => {
+            connect: async (input: { silent?: boolean }) => {
                const silent = input?.silent === true;
                if (!readEphemeralSeedFromStorage()) {
                   if (silent) {
@@ -210,7 +210,7 @@ export function registerSpammEphemeralDevnetWallet(): () => void {
          },
          "standard:events": {
             version: "1.0.0",
-            on: (event, listener) => {
+            on: (event: "change", listener: (e: { accounts: readonly WalletAccount[] }) => void) => {
                if (event !== "change") {
                   return () => {};
                }
@@ -221,7 +221,7 @@ export function registerSpammEphemeralDevnetWallet(): () => void {
          "solana:signTransaction": {
             version: "1.0.0",
             supportedTransactionVersions: TX_VERSIONS,
-            signTransaction: async (...inputs) => {
+            signTransaction: async (...inputs: { chain: string; transaction: Uint8Array }[]) => {
                const kp = await ensureKeyPair();
                return Promise.all(
                   inputs.map(async (input) => {
@@ -238,7 +238,7 @@ export function registerSpammEphemeralDevnetWallet(): () => void {
          "solana:signAndSendTransaction": {
             version: "1.0.0",
             supportedTransactionVersions: TX_VERSIONS,
-            signAndSendTransaction: async (...inputs) => {
+            signAndSendTransaction: async (...inputs: { chain: string; transaction: Uint8Array; options?: { skipPreflight?: boolean; maxRetries?: number } }[]) => {
                const kp = await ensureKeyPair();
                return Promise.all(
                   inputs.map(async (input) => {
@@ -247,7 +247,7 @@ export function registerSpammEphemeralDevnetWallet(): () => void {
                      const signed = await partiallySignTransaction([kp], tx);
                      const b64 = getBase64EncodedWireTransaction(signed);
                      const sigStr = await sendSignedBase64Tx(b64, input.chain, input.options);
-                     const sigBytes = getBase58Decoder().decode(sigStr);
+                     const sigBytes = getBase58Encoder().encode(sigStr);
                      return { signature: new Uint8Array(sigBytes) };
                   }),
                );
@@ -255,7 +255,7 @@ export function registerSpammEphemeralDevnetWallet(): () => void {
          },
          "solana:signMessage": {
             version: "1.0.0",
-            signMessage: async (...inputs) => {
+            signMessage: async (...inputs: { message: Uint8Array }[]) => {
                const kp = await ensureKeyPair();
                return Promise.all(
                   inputs.map(async (input) => {
@@ -272,6 +272,7 @@ export function registerSpammEphemeralDevnetWallet(): () => void {
       },
    };
 
+   //@ts-ignore
    const { unregister } = getWallets().register(wallet);
    return unregister;
 }
