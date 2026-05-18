@@ -7,7 +7,7 @@ import {
    type EventMarketSectionKind,
 } from "./eventMarketsDisplay";
 import { lineRawForSpreadOrTotal } from "./lineFromMarket";
-import { decimalOddsFromDb, parseOdds } from "./oddsFormat";
+import { decimalOddsFromDb, orderOneX2WireToDisplay, parseOdds } from "./oddsFormat";
 import type { UiGroupedEvent, UiGroupedSport, UiMarket } from "./types";
 
 export type { EventMarketSectionKind } from "./eventMarketsDisplay";
@@ -118,8 +118,7 @@ export function getMainOddsDetail(
       return null;
    }
    if (mk.mkt_string === "1X2") {
-      const [h, d, a] = parseOdds(mk.last_odds);
-      return { market: mk, values: [h, d, a] };
+      return { market: mk, values: orderOneX2WireToDisplay(parseOdds(mk.last_odds)) };
    }
    const [home, away] = parseOdds(mk.last_odds);
    return { market: mk, values: [home, away] };

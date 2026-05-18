@@ -1,13 +1,20 @@
 import { useEffect, useState, Fragment, type ReactElement } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { buildMarketLabel } from "../betting/marketLabel";
+import { pickBetSide } from "../betting/outcomeSide";
 import type { MarketRow } from "../betting/types";
 import { useBetModal } from "../betting/BetModalContext";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
 import { fetchOneEvent } from "../markets/fetchEvent";
 import { marketPrimaryLabel, periodCaption, shouldShowPeriodBadge } from "../markets/eventMarketsDisplay";
 import { oddsTableLabels } from "../markets/oddsTableLabels";
-import { decimalOddsFromDb, fmtOdd, formatMarketLineDisplay, parseOdds } from "../markets/oddsFormat";
+import {
+   decimalOddsFromDb,
+   fmtOdd,
+   formatMarketLineDisplay,
+   orderOneX2WireToDisplay,
+   parseOdds,
+} from "../markets/oddsFormat";
 import { lineRawForSpreadOrTotal, spreadLineDisplayForOutcome } from "../markets/lineFromMarket";
 import { groupMarketsForEventPage, inferBetColumn } from "../markets/selectors";
 import type { UiGroupedEvent, UiMarket } from "../markets/types";
@@ -93,7 +100,7 @@ export function EventMarketsPage(): ReactElement {
       const dec = decimalOddsFromDb(dbOdds);
       openBet({
          eventTitle: displayEventTitle(ev),
-         marketLabel: buildMarketLabel(column, toMarketRow(m), outcomeIndex, {
+         marketLabel: buildMarketLabel(column, toMarketRow(m), pickBetSide(column, m.mkt_string, outcomeIndex), {
             homeName: ev.home_name,
             awayName: ev.away_name,
          }),
@@ -127,7 +134,8 @@ export function EventMarketsPage(): ReactElement {
                      {(g.kind === "money" || g.kind === "tq") && (
                      <div className="event-money-blocks">
                         {g.rows.map((m, mi) => {
-                           const values = parseOdds(m.last_odds);
+                           const raw = parseOdds(m.last_odds);
+                           const values = m.mkt_string === "1X2" ? orderOneX2WireToDisplay(raw) : raw;
                            const column = inferBetColumn(m.mkt_string);
                            const n = m.mkt_string === "1X2" ? 3 : 2;
                            return (

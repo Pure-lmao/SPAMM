@@ -55,6 +55,15 @@ export function parseOdds(json: string): number[] {
    }
 }
 
+/** On-chain / API `last_odds` order `[home, away, draw]` → UI columns `[home, draw, away]`. */
+export function orderOneX2WireToDisplay(wire: number[]): number[] {
+   if (wire.length < 3) {
+      return wire;
+   }
+   const [h, a, d] = wire;
+   return [h, d, a];
+}
+
 export function fmtOdd(dbValue: number): string {
    if (dbValue === 0) {
       return "—";

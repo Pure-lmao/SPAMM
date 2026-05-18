@@ -27,48 +27,53 @@ function spreadNumericToRaw(h: number): string {
    return "0";
 }
 
+/**
+ * @param side On-chain `side` for fills (1X2: 0 home, 1 away, 2 draw). For other markets, same as UI outcome index.
+ */
 export function buildMarketLabel(
    column: "main" | "spread" | "total",
    market: MarketRow,
-   outcomeIndex: number,
+   side: number,
    teams?: MarketLabelTeams,
 ): string {
    const s = market.mkt_string;
    if (column === "main") {
       if (s === "1X2") {
          const lab =
-            outcomeIndex === 0
+            side === 0
                ? sideLabel(teams, "home", "Home")
-               : outcomeIndex === 1
-                 ? "Draw"
-                 : sideLabel(teams, "away", "Away");
+               : side === 1
+                 ? sideLabel(teams, "away", "Away")
+                 : side === 2
+                   ? "Draw"
+                   : `(${side})`;
          return `${lab} (1X2)`;
       }
       if (s === "ML") {
-         const lab = outcomeIndex === 0 ? sideLabel(teams, "home", "Home") : sideLabel(teams, "away", "Away");
+         const lab = side === 0 ? sideLabel(teams, "home", "Home") : sideLabel(teams, "away", "Away");
          return `${lab} (ML)`;
       }
       if (s === "TQ") {
-         const lab = outcomeIndex === 0 ? sideLabel(teams, "home", "Home") : sideLabel(teams, "away", "Away");
+         const lab = side === 0 ? sideLabel(teams, "home", "Home") : sideLabel(teams, "away", "Away");
          return `${lab} (To qualify)`;
       }
-      return `${s} (${outcomeIndex})`;
+      return `${s} (${side})`;
    }
    if (column === "spread") {
       const L = spreadHandicapNumber(market);
       const homeN = sideLabel(teams, "home", "Home");
       const awayN = sideLabel(teams, "away", "Away");
       if (!Number.isFinite(L)) {
-         return outcomeIndex === 0 ? `${homeN} —` : `${awayN} —`;
+         return side === 0 ? `${homeN} —` : `${awayN} —`;
       }
-      if (outcomeIndex === 0) {
+      if (side === 0) {
          return `${homeN} ${formatMarketLineDisplay(spreadNumericToRaw(L), "spread")}`;
       }
       return `${awayN} ${formatMarketLineDisplay(spreadNumericToRaw(-L), "spread")}`;
    }
    if (column === "total") {
       const t = totalLineNumber(market);
-      const lab = outcomeIndex === 0 ? "Over" : "Under";
+      const lab = side === 0 ? "Over" : "Under";
       const raw = Number.isFinite(t) ? String(t) : "0";
       return `${lab} ${formatMarketLineDisplay(raw, "total")}`;
    }

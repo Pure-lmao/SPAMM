@@ -1,6 +1,7 @@
 import { useEffect, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactElement } from "react";
 import { Link } from "react-router-dom";
 import { buildMarketLabel } from "../betting/marketLabel";
+import { pickBetSide } from "../betting/outcomeSide";
 import type { BetColumn, MarketRow } from "../betting/types";
 import { useBetModal } from "../betting/BetModalContext";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
@@ -275,10 +276,15 @@ export function HomePage(): ReactElement {
                                              ) => {
                                                 openBet({
                                                    eventTitle: displayEventTitle(ev),
-                                                   marketLabel: buildMarketLabel(column, row, outcomeIndex, {
-                                                      homeName: ev.home_name,
-                                                      awayName: ev.away_name,
-                                                   }),
+                                                   marketLabel: buildMarketLabel(
+                                                      column,
+                                                      row,
+                                                      pickBetSide(column, row.mkt_string, outcomeIndex),
+                                                      {
+                                                         homeName: ev.home_name,
+                                                         awayName: ev.away_name,
+                                                      },
+                                                   ),
                                                    displayedDecimalOdds: decimalOdds > 0 ? decimalOdds : null,
                                                    eventId: ev.id,
                                                    leagueId: league.id,
