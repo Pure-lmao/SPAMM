@@ -71,7 +71,7 @@ Digits 3-6 are the country code from ISO 3166-1 numeric with additions for non-I
 
 ## Market (u16 - max 65535)
 
-mkt start | mkt end | market | sides count | logic | sides meaning
+mkt start | mkt end | market | sides count | logic | sides meaning (in index order)
 |-------|-------|-------|-------|-------|-------|
 | 0 |-| ml | 2 | fixed | home, away
 | 1 |-| 1X2 | 3 | fixed | home, away, draw
