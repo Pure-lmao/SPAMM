@@ -1258,6 +1258,7 @@ h1 {
    justify-self: end;
    position: relative;
    min-width: 0;
+   max-width: 100%;
 }
 
 .app-header__wallet-menu-btn {
@@ -1284,15 +1285,18 @@ h1 {
 .app-header__wallet-panel {
    display: flex;
    align-items: center;
+   justify-content: flex-end;
    gap: 1rem;
-   flex-wrap: wrap;
+   flex-wrap: nowrap;
+   min-width: 0;
+   max-width: 100%;
 }
 
 .invite-friends-btn {
    font: inherit;
-   font-size: 0.78rem;
+   font-size: 0.8rem;
    font-weight: 600;
-   padding: 0.38rem 0.65rem;
+   padding: 0.45rem 0.75rem;
    border-radius: 8px;
    border: 1px solid var(--border);
    background: var(--panel);
@@ -1317,6 +1321,7 @@ h1 {
    align-items: flex-end;
    gap: 0.35rem;
    min-width: 0;
+   flex-shrink: 0;
 }
 
 .usdc-balance-panel__stack {
@@ -2017,7 +2022,8 @@ a.inline-nav-link:hover {
 
 .wallet-bar {
    position: relative;
-   flex-shrink: 0;
+   flex-shrink: 1;
+   min-width: 0;
    margin-left: auto;
    display: flex;
    justify-content: flex-end;
@@ -2054,6 +2060,7 @@ a.inline-nav-link:hover {
    background: var(--panel);
    color: var(--text);
    cursor: pointer;
+   flex-shrink: 0;
 }
 
 .wallet-bar__btn:hover:not(:disabled) {
@@ -2118,6 +2125,36 @@ a.inline-nav-link:hover {
    font-size: 0.8rem;
    color: var(--muted);
    text-align: right;
+}
+
+.wallet-bar__menu-item--ephemeral {
+   display: flex;
+   flex-direction: column;
+   align-items: flex-end;
+   gap: 0.15rem;
+   padding-top: 0.45rem;
+   padding-bottom: 0.45rem;
+}
+
+.wallet-bar__menu-item--ephemeral .wallet-bar__menu-item__title {
+   font-size: 0.85rem;
+}
+
+.wallet-bar__menu-item--ephemeral:hover:not(:disabled) .wallet-bar__menu-subtitle {
+   color: var(--text);
+   opacity: 1;
+}
+
+.wallet-bar__menu-subtitle {
+   display: block;
+   margin: 0;
+   padding: 0;
+   font-size: 0.68rem;
+   line-height: 1.25;
+   font-weight: 400;
+   color: var(--muted);
+   text-align: right;
+   opacity: 0.85;
 }
 
 .wallet-bar__err {

@@ -1,6 +1,7 @@
-import { useMemo, type ReactNode } from "react";
+import { useLayoutEffect, useMemo, type ReactNode } from "react";
 import { AppProvider } from "@solana/connector/react";
 import { getDefaultConfig, getDefaultMobileConfig } from "@solana/connector/headless";
+import { registerSpammEphemeralDevnetWallet } from "../wallet/ephemeralDevnetWallet";
 
 function appOrigin(): string {
    if (typeof window !== "undefined" && window.location?.origin) {
@@ -10,6 +11,8 @@ function appOrigin(): string {
 }
 
 export function SolanaProviders({ children }: { children: ReactNode }) {
+   useLayoutEffect(() => registerSpammEphemeralDevnetWallet(), []);
+
    const connectorConfig = useMemo(() => {
       const custom = import.meta.env.VITE_SOLANA_RPC_URL?.trim();
       const clusters = custom
