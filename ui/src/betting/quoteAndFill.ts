@@ -1,5 +1,4 @@
-import type { Address } from "@solana/kit";
-import type { Rpc, SolanaRpcApi, TransactionSigner } from "@solana/kit";
+import type { Address, Rpc, SolanaRpcApi, TransactionSigner } from "@solana/kit";
 import {
    decodeMmReturnData,
    getFillBetIx,

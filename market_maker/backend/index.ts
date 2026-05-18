@@ -11,6 +11,7 @@ import type { ESPNOdds } from "../../api/types";
 // update the market odds onchain
 
 async function main() {
+   console.log("Updating market odds onchain");
    const clients = createRpcClients();
    const dbEventsAndMarkets = fetchEventsGrouped(true)
    for (const sport of dbEventsAndMarkets) {
@@ -32,7 +33,7 @@ async function main() {
                   eventId
                );
                oddsData = await getESPNOdds(sport.api_id, league.api_id, event.api_id);
-               console.log(sport.api_id, league.api_id, event.api_id, oddsData);
+               // console.log(sport.api_id, league.api_id, event.api_id, oddsData);
             } catch (error) {
                if (error instanceof Error && error.message.includes('Event state account not found')) {
                   // create the event onchain
@@ -46,7 +47,7 @@ async function main() {
                      )
                      const txResult = await sendAndConfirmInstructions(
                         [initEventIx, setEventStateIx], [ADMIN_SIGNER]);
-                     console.log("Event created onchain", eventId, txResult);
+                     // console.log("Event created onchain", eventId, txResult);
                   } catch (error) {
                      console.error(error);
                      console.error(`Failed to create event ${event.id} onchain`);
@@ -88,7 +89,7 @@ async function main() {
                      const odds0 = scaleOdds(winOdds[0]);
                      const odds1 = scaleOdds(winOdds[1]);
                      const odds2 = winOdds[2] ? scaleOdds(winOdds[2]) : undefined;
-                     console.log(market.id, odds0, odds1, odds2);
+                     // console.log(market.id, odds0, odds1, odds2);
                      ixs.push(await getUpdateOracleIx(
                         ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                         sequence, 
@@ -115,7 +116,7 @@ async function main() {
                         // update the onchain odds
                         const odds0 = scaleOdds(spreadOdds.odds[0]);
                         const odds1 = scaleOdds(spreadOdds.odds[1]);
-                        console.log(market.id, odds0, odds1);
+                        // console.log(market.id, odds0, odds1);
                         ixs.push(await getUpdateOracleIx(
                            ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                            sequence, 
@@ -143,7 +144,7 @@ async function main() {
                         // update the onchain odds
                         const odds0 = scaleOdds(totalOdds.odds[0]);
                         const odds1 = scaleOdds(totalOdds.odds[1]);
-                        console.log(market.id, odds0, odds1);
+                        // console.log(market.id, odds0, odds1);
                         ixs.push(await getUpdateOracleIx(
                            ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                            sequence,
@@ -162,6 +163,7 @@ async function main() {
          }
       }
    }
+   console.log("All market odds updated onchain");
 }
 
 async function getESPNOdds(sport: string, league: string, event: string): Promise<{
@@ -212,7 +214,12 @@ async function getESPNOdds(sport: string, league: string, event: string): Promis
    }
 }
 
-main().catch(console.error);
+if (import.meta.main === true) {
+   await main();
+   setInterval(async () => {
+      await main();
+   }, 1000 * 60 * 5);
+}
 
 function scaleOdds(odds: number): bigint {
    return BigInt(Math.floor(odds * 10_000));

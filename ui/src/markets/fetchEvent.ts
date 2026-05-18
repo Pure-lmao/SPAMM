@@ -12,7 +12,8 @@ export async function fetchOneEvent(sportId: number, leagueId: number, eventId: 
       throw new Error(`${res.status} ${res.statusText}`);
    }
    const raw = (await res.json()) as Record<string, UiGroupedEvent>;
-   const ev = raw[String(eventId)];
+   const compositeKey = `${sportId}:${leagueId}:${eventId}`;
+   const ev = raw[compositeKey];
    if (!ev) {
       throw new Error("Event not found in API response");
    }

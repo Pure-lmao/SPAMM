@@ -10,7 +10,7 @@ import {
    type SolanaRpcApi,
 } from "@solana/kit";
 import { useCluster, useConnectWallet, useKitTransactionSigner, useWallet, useWalletConnectors } from "@solana/connector/react";
-import { ODDS_SCALE, type MarketId } from "spamm-aggregator-sdk";
+import { getBetData, ODDS_SCALE, type BetAccountData, type MarketId } from "spamm-aggregator-sdk";
 import { apiSportToSdk, buildMarketId } from "./chainIds";
 import { pickBetSide } from "./outcomeSide";
 import { buildAndSignFillBetTx, runMmQuoteFlow } from "./quoteAndFill";
@@ -47,6 +47,30 @@ function nextBetId(): bigint {
    return BigInt(Date.now());
 }
 
+function primaryFill(b: BetAccountData): BetAccountData["filler0"] | undefined {
+   return [b.filler0, b.filler1, b.filler2, b.filler3, b.filler4].find((f) => f.amount > 0n);
+}
+
+function oddsFromScaled(scaled: bigint): string {
+   const x = Number(scaled) / Number(ODDS_SCALE);
+   if (!Number.isFinite(x)) {
+      return "—";
+   }
+   return x >= 10 ? x.toFixed(2) : x.toFixed(3);
+}
+
+function solscanTxUrl(signature: string): string {
+   return `https://solscan.io/tx/${encodeURIComponent(signature)}?cluster=devnet`;
+}
+
+type PlacedBetSummary = Readonly<{
+   signature: string;
+   stakeLabel: string;
+   oddsLabel: string;
+   betId: string;
+   detailErr?: string;
+}>;
+
 export function BetModal({ open, onClose }: BetModalProps): ReactElement | null {
    const [amount, setAmount] = useState("");
    const [minOdds, setMinOdds] = useState("");
@@ -58,7 +82,7 @@ export function BetModal({ open, onClose }: BetModalProps): ReactElement | null 
    );
    const [sendPhase, setSendPhase] = useState<SendPhase>("idle");
    const [sendErr, setSendErr] = useState<string | null>(null);
-   const [lastSig, setLastSig] = useState<string | null>(null);
+   const [placedBetSummary, setPlacedBetSummary] = useState<PlacedBetSummary | null>(null);
    const sendLockRef = useRef(false);
 
    const { account, isConnected } = useWallet();
@@ -88,7 +112,7 @@ export function BetModal({ open, onClose }: BetModalProps): ReactElement | null 
          setConservativeMin(ODDS_SCALE + 100n);
          setQuoteRows([]);
          setSendErr(null);
-         setLastSig(null);
+         setPlacedBetSummary(null);
          setSendPhase("idle");
       } else {
          setQuoteStatus("idle");
@@ -218,11 +242,11 @@ export function BetModal({ open, onClose }: BetModalProps): ReactElement | null 
          }
 
          if (isReplay) {
-            setLastSig(null);
+            setPlacedBetSummary(null);
             setSendPhase("idle");
             await new Promise<void>((r) => requestAnimationFrame(() => r()));
          } else {
-            setLastSig(null);
+            setPlacedBetSummary(null);
          }
 
          setSendPhase("signing");
@@ -237,13 +261,14 @@ export function BetModal({ open, onClose }: BetModalProps): ReactElement | null 
             );
             const side = pickBetSide(open.column, open.mktString, open.outcomeIndex);
             const userAddress = address(account);
+            const betId = nextBetId();
 
             const signed = await buildAndSignFillBetTx({
                rpc,
                walletSigner: signer,
                userAddress,
                fill: {
-                  betId: nextBetId(),
+                  betId,
                   marketId,
                   side,
                   amount: amt,
@@ -258,12 +283,34 @@ export function BetModal({ open, onClose }: BetModalProps): ReactElement | null 
                rpcSubscriptions,
             } as never);
             await sendAndConfirm(signed as never, { commitment: "confirmed" });
-            setLastSig(getSignatureFromTransaction(signed));
+            const signature = getSignatureFromTransaction(signed);
+
+            let stakeLabel = formatUsdcBaseUnitsForUi(amt);
+            let oddsLabel = "—";
+            let detailErr: string | undefined;
+            try {
+               const bet = await getBetData(rpc, { user: userAddress, betId });
+               stakeLabel = formatUsdcBaseUnitsForUi(bet.amount);
+               const fill = primaryFill(bet);
+               if (fill !== undefined && fill.oddsScaled > 0n) {
+                  oddsLabel = oddsFromScaled(fill.oddsScaled);
+               }
+            } catch (e) {
+               detailErr = e instanceof Error ? e.message : String(e);
+            }
+
+            setPlacedBetSummary({
+               signature,
+               stakeLabel,
+               oddsLabel,
+               betId: betId.toString(),
+               detailErr,
+            });
             setSendPhase("done");
          } catch (e) {
             setSendErr(e instanceof Error ? e.message : String(e));
             setSendPhase("idle");
-            setLastSig(null);
+            setPlacedBetSummary(null);
          }
       } finally {
          sendLockRef.current = false;
@@ -393,10 +440,43 @@ export function BetModal({ open, onClose }: BetModalProps): ReactElement | null 
                </div>
 
                {sendErr != null && <p className="bet-modal-err">{sendErr}</p>}
-               {lastSig != null && (
-                  <p className="bet-modal-ok">
-                     Sent: <span className="bet-modal-mono">{lastSig}</span>
-                  </p>
+               {placedBetSummary != null && (
+                  <div className="bet-modal-placed" role="status">
+                     <div className="bet-modal-placed-title">Bet placed</div>
+                     <dl className="bet-modal-meta bet-modal-placed-meta">
+                        <div className="bet-modal-meta-row">
+                           <dt>Stake Filled</dt>
+                           <dd>
+                              <strong>{placedBetSummary.stakeLabel}</strong> USDC
+                           </dd>
+                        </div>
+                        <div className="bet-modal-meta-row">
+                           <dt>Total odds</dt>
+                           <dd className="odds-value">
+                              <strong>{placedBetSummary.oddsLabel}</strong>
+                           </dd>
+                        </div>
+                        <div className="bet-modal-meta-row">
+                           <dt>Bet ID</dt>
+                           <dd className="bet-modal-mono">{placedBetSummary.betId}</dd>
+                        </div>
+                     </dl>
+                     {placedBetSummary.detailErr != null && (
+                        <p className="bet-modal-muted bet-modal-placed-warn">
+                           Could not load on-chain details: {placedBetSummary.detailErr}
+                        </p>
+                     )}
+                     <p className="bet-modal-muted bet-modal-placed-tx">
+                        <a
+                           href={solscanTxUrl(placedBetSummary.signature)}
+                           target="_blank"
+                           rel="noopener noreferrer"
+                           className="inline-nav-link"
+                        >
+                           View transaction
+                        </a>
+                     </p>
+                  </div>
                )}
             </div>
 

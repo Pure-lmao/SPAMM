@@ -241,6 +241,7 @@ export type GetBetsDataFilters = Readonly<{
    betId?: bigint;
    eventId?: EventId;
    marketId?: MarketId;
+   result?: BetAccountData['result'];
 }>;
 
 /**
@@ -286,6 +287,9 @@ export async function getBetsData(
    }
    if (optional?.amount !== undefined) {
       segments.push({ offset: BET_ACCOUNT_WIRE_OFFSETS.amount, bytes: u64Le(optional.amount) });
+   }
+   if (optional?.result !== undefined) {
+      segments.push({ offset: BET_ACCOUNT_WIRE_OFFSETS.result, bytes: u8WireByte(optional.result) });
    }
 
    const merged = mergeAdjacentMemcmpSegments(segments);

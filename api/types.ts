@@ -81,7 +81,14 @@ export type ESPNEvent = {
       displayClock: string;
       period: number;
       clock: number;
-      type: any;
+      type: {
+         id: string;
+         name: string;
+         completed: boolean;
+         description: string;
+         detail: string;
+         shortDetail: string;
+      };
    }
 };
 

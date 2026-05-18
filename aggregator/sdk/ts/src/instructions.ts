@@ -35,16 +35,17 @@ import {
    getNettingPda,
    getParlayBetPda,
 } from './helpers.js';
-import type {
-   BetAccountData,
-   BetFiller,
-   EventGameState,
-   EventId,
-   FillBetIxData,
-   FillParlayIxData,
-   MarketId,
-   ParlayBetAccountData,
-   ParlayLegWire,
+import {
+   BetResult,
+   type BetAccountData,
+   type BetFiller,
+   type EventGameState,
+   type EventId,
+   type FillBetIxData,
+   type FillParlayIxData,
+   type MarketId,
+   type ParlayBetAccountData,
+   type ParlayLegWire,
 } from './types.js';
 import {
    validateBetSide,
@@ -122,8 +123,7 @@ async function settleFillerAccountRow(
    filler: BetFiller,
 ): Promise<readonly [Address, Address, Address, Address, Address]> {
    if (isBlankMarketMaker(filler.mmAddress)) {
-      const systemProgram = SYSTEM_PROGRAM_ID;
-      return [systemProgram, systemProgram, systemProgram, systemProgram, systemProgram] as const;
+      return [SYSTEM_PROGRAM_ID, SYSTEM_PROGRAM_ID, SYSTEM_PROGRAM_ID, SYSTEM_PROGRAM_ID, SYSTEM_PROGRAM_ID] as const;
    }
    const mmProgram = filler.mmAddress;
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
@@ -504,6 +504,9 @@ export async function getSettleBetIx(
    bet: BetAccountData,
 ): Promise<Instruction> {
    validatePositiveU64(bet.betId, 'bet.betId');
+   if (bet.result === BetResult.Pending) {
+      throw new Error('bet.result must be not Pending');
+   }
    const user = bet.owner;
    const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);

@@ -1,10 +1,11 @@
 import { fetch, sleep } from "bun";
 import type { ESPNEvent, ESPNOdds, Event } from "./types";
-import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchMarkets, fetchSports, getLeagues, updateEvent, updateMarket } from "./localDb";
+import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchMarkets, fetchSports, fetchUngradedStartedEvents, getLeagues, updateEventScore, updateMarket } from "./localDb";
 import { safeJSONStringify } from "./utils";
 import { decodeMmReturnData, getEventGameState, getMmGetQuoteIx, getMmListData, ODDS_SCALE, type MarketId } from "spamm-aggregator-sdk";
 import { createRpcClients, simulateTransaction } from "../aggregator/client/txSend";
 import { ADMIN_SIGNER } from "../aggregator/client/admin";
+import { gradeBets } from "solana";
 
 async function getScoreboard(sport: string, league: string, date: string): Promise<ESPNEvent[]> {
    const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/scoreboard?dates=${date}`
@@ -14,7 +15,7 @@ async function getScoreboard(sport: string, league: string, date: string): Promi
 };
 
 function getScoreFromEvent(event: ESPNEvent): {isCompleted: boolean, homeScore: number, awayScore: number} | null {
-   const isCompleted = event.status.type.id === 'STATUS_FINAL';
+   const isCompleted = event.status.type.name === 'STATUS_FINAL' || event.status.type.name === 'STATUS_FULL_TIME';
    try {
       const homeScore = Number(event.competitions[0]!.competitors.find(c => c.homeAway === 'home')!.score);
       const awayScore = Number(event.competitions[0]!.competitors.find(c => c.homeAway === 'away')!.score);
@@ -95,7 +96,7 @@ async function setUpcomingEvents() {
       const sport = sports.get(league.sport_id)!;
       const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${today}-${fiveDaysFromNow}`);
       for (const event of scoreboard) {
-         let eventExists = events.has(Number(event.id)) || false;
+         let eventExists = events.has(`${sport.id}:${league.id}:${event.id}`) || false;
 
          const dbEvent = getUpcomingEvent(event, sport.id, league.id);
          if (dbEvent) {
@@ -174,40 +175,53 @@ async function setUpcomingEvents() {
          }
       }
    }
+   console.log("Set upcoming events");
 };
 
 async function setFinishedEvents() {
+   console.log("Setting finished events");
    const now = new Date();
    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate()).toISOString().split('T')[0]!.replace(/-/g, '');
    const twoDaysAgo = new Date(now.getFullYear(), now.getMonth(), now.getDate() - 2).toISOString().split('T')[0]!.replace(/-/g, '');
    
    const leagues = fetchLeagues();
    const sports = fetchSports();
-   const events = fetchEvents(); // TODO: Only get finished events
+   const events = fetchUngradedStartedEvents();
+
+   if (events.size === 0) {
+      console.log("No ungraded started events");
+      return;
+   }
 
    for (const [id, league] of leagues) {
       const sport = sports.get(league.sport_id)!;
       const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${twoDaysAgo}-${today}`);
       for (const event of scoreboard) {
-         if (events.has(Number(event.id))) {
+         console.log("scoreboard event:", event.id);
+         if (!events.has(`${sport.id}:${league.id}:${event.id}`)) {
+            console.log("event does not exist");
             continue;
          }
          const score = getScoreFromEvent(event);
+         console.log(event)
+         console.log("score:", score);
          if (score && score.isCompleted) {
-            updateEvent(Number(event.id), league.id, sport.id, score.homeScore, score.awayScore);
+            updateEventScore(Number(event.id), league.id, sport.id, score.homeScore, score.awayScore);
          }
       }
    }
+   console.log("Set finished events");
 };
 
 async function cacheOdds() {
+   console.log("Caching odds");
    const markets = fetchMarkets();
    const clients = createRpcClients();
    const marketMakers = await getMmListData(clients.rpc);
    const fakeSigner = ADMIN_SIGNER;
 
    for (const [marketId, market] of markets) {
-      console.log("Caching odds for market", market.id, market.event_id, market.league_id, market.sport_id);
+      // console.log("Caching odds for market", market.id, market.event_id, market.league_id, market.sport_id);
       const marketId: MarketId = {
          mkt: market.id,
          period: market.period_id,
@@ -248,19 +262,22 @@ async function cacheOdds() {
       updateMarket(market.id, market.event_id, market.league_id, market.sport_id, 
          safeJSONStringify(odds), new Date().getTime());
    }
+   console.log("Cached odds");
 }
 
 async function main() {
-   await setUpcomingEvents();
-   await setFinishedEvents();
+   // await setUpcomingEvents();
+   // await setFinishedEvents();
+   // await gradeBets();
    await cacheOdds();
-   console.log("Events set");
+   console.log("Initial done.");
 
    setInterval(async () => {
       await setUpcomingEvents();
    }, 1000 * 60 * 60);
    setInterval(async () => {
       await setFinishedEvents();
+      await gradeBets();
    }, 1000 * 60 * 30);
    setInterval(async () => {
       await cacheOdds();

@@ -204,7 +204,18 @@ export function HomePage(): ReactElement {
                                              <th rowSpan={2} className="th-match" aria-label="Teams and start time" />
                                              <th>{sport.id === 1 ? oddsTableLabels.main1x2 : oddsTableLabels.mainMl}</th>
                                              <th>{oddsTableLabels.spread}</th>
-                                             <th>{oddsTableLabels.total}</th>
+                                             <th>
+                                                <div
+                                                   className={`th-market-sub-header th-market-sub-header--total th-market-sub-header--primary-title${sport.id === 1 ? " th-market-sub-header--soccer" : ""}`}
+                                                >
+                                                   <span className="th-market-sub-header__line-slot" aria-hidden>
+                                                      00.0
+                                                   </span>
+                                                   <div className="th-primary-total-title-slot">
+                                                      {oddsTableLabels.total}
+                                                   </div>
+                                                </div>
+                                             </th>
                                              <th rowSpan={2} className="th-more-markets th-more-markets--edge" aria-hidden />
                                           </tr>
                                           <tr className="thead-row-sub">

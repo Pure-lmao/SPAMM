@@ -1,6 +1,8 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
 import { Link, Outlet, useLocation } from "react-router-dom";
 import { AppTopNav } from "./AppTopNav";
+import { AppFooter } from "./AppFooter";
+import { InviteFriendsControls } from "../invite/InviteFriendsModal";
 import { UsdcBalancePanel } from "../wallet/UsdcBalancePanel";
 import { WalletBar } from "../wallet/WalletBar";
 
@@ -54,14 +56,13 @@ export function RootLayout(): ReactElement {
    }, [walletMenuOpen]);
 
    return (
-      <>
+      <div className="app-shell">
          <header className="app-header">
             <div className="app-header__brand">
-               <h1 className="app-title">
-                  <Link to="/" className="inline-nav-link">
-                     Automatic Sports Markets
-                  </Link>
-               </h1>
+               <Link to="/" className="app-header__brand-link inline-nav-link">
+                  <img src="/brand.png" alt="" className="app-header__brand-mark" />
+                  <h1 className="app-title">Automatic Sports Markets</h1>
+               </Link>
             </div>
             <AppTopNav />
             <div className="app-header__wallet-shell" ref={walletShellRef}>
@@ -82,12 +83,16 @@ export function RootLayout(): ReactElement {
                   role="region"
                   aria-label="Wallet"
                >
+                  <InviteFriendsControls />
                   <UsdcBalancePanel />
                   <WalletBar />
                </div>
             </div>
          </header>
-         <Outlet />
-      </>
+         <main className="app-main">
+            <Outlet />
+         </main>
+         <AppFooter />
+      </div>
    );
 }

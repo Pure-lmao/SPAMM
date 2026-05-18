@@ -1,4 +1,4 @@
-import { airdropUser } from "./airdrop";
+import { airdropUser } from "./solana";
 import { fetchEvents, fetchEventsByLeague, fetchEventsBySport, fetchEventsGrouped, fetchLeagues, fetchLeaguesBySport, fetchSports } from "./localDb";
 import { safeJSONStringify } from "./utils";
 

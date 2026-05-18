@@ -172,25 +172,25 @@ const MARKETS_AGG_JOIN = `
 
 type EventMarketsRow = Event & { markets_json: string };
 
-function rowsToEventsWithMarketsMap(rows: EventMarketsRow[]): Map<number, Event & { markets: Market[] }> {
-   const map = new Map<number, Event & { markets: Market[] }>();
+function rowsToEventsWithMarketsMap(rows: EventMarketsRow[]): Map<string, Event & { markets: Market[] }> {
+   const map = new Map<string, Event & { markets: Market[] }>();
    for (const r of rows) {
       const { markets_json, ...event } = r;
       const markets = JSON.parse(markets_json) as Market[];
-      map.set(event.id, { ...event, markets });
+      map.set(`${event.sport_id}:${event.league_id}:${event.id}`, { ...event, markets });
    }
    return map;
 }
 
-export function fetchEvents(ids: number[] = [], withMarkets: boolean = false): Map<number, Event> | Map<number, Event & { markets: Market[] }> {
+export function fetchEvents(ids: number[] = [], withMarkets: boolean = false): Map<string, Event> | Map<string, Event & { markets: Market[] }> {
    const database = getDb();
    const idFilter = ids.length > 0 ? `WHERE id IN (${ids.map(() => "?").join(",")})` : "";
    const idParams = ids.map((id) => id.toString());
    if (!withMarkets) {
       const rows = database.query<Event, string[]>(`SELECT * FROM events ${idFilter}`).all(...idParams);
-      const map = new Map<number, Event>();
+      const map = new Map<string, Event>();
       for (const r of rows) {
-         map.set(r.id, r);
+         map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
       }
       return map;
    } else {
@@ -200,6 +200,16 @@ export function fetchEvents(ids: number[] = [], withMarkets: boolean = false): M
       ).all(...idParams);
       return rowsToEventsWithMarketsMap(rows);
    }
+}
+
+export function fetchUngradedStartedEvents(): Map<string, Event> {
+   const database = getDb();
+   const rows = database.query<Event, string[]>(`SELECT * FROM events WHERE start_time < ? AND home_score IS NULL AND away_score IS NULL`).all(Date.now().toString());
+   const map = new Map<string, Event>();
+   for (const r of rows) {
+      map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
+   }
+   return map;
 }
 
 function uniqueSportLeaguePairs(rows: { sport_id: number; league_id: number }[]): [number, number][] {
@@ -321,15 +331,15 @@ export function fetchEventsGrouped(withMarkets: boolean = false): GroupedSport[]
 }
 
 
-export function fetchEventsBySport(sportIds: number[] = [], withMarkets: boolean = false): Map<number, Event> | Map<number, Event & { markets: Market[] }> {
+export function fetchEventsBySport(sportIds: number[] = [], withMarkets: boolean = false): Map<string, Event> | Map<string, Event & { markets: Market[] }> {
    const database = getDb();
    if (!withMarkets) {
       const rows = database.query<Event, string[]>(
          `SELECT * FROM events WHERE sport_id IN (${sportIds.map(() => `?`).join(",")})`
       ).all(...sportIds.map((id) => id.toString()));
-      const map = new Map<number, Event>();
+      const map = new Map<string, Event>();
       for (const r of rows) {
-         map.set(r.id, r);
+         map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
       }
       return map;
    } else {
@@ -340,15 +350,15 @@ export function fetchEventsBySport(sportIds: number[] = [], withMarkets: boolean
    }
 }
 
-export function fetchEventsByLeague(sportId: number, leagueIds: number[] = [], withMarkets: boolean = false): Map<number, Event> | Map<number, Event & { markets: Market[] }> {
+export function fetchEventsByLeague(sportId: number, leagueIds: number[] = [], withMarkets: boolean = false): Map<string, Event> | Map<string, Event & { markets: Market[] }> {
    const database = getDb();
    if (!withMarkets) {
       const rows = database.query<Event, string[]>(
          `SELECT * FROM events WHERE sport_id = ? AND league_id IN (${leagueIds.map(() => `?`).join(",")})`
       ).all(sportId.toString(), ...leagueIds.map((id) => id.toString()));
-      const map = new Map<number, Event>();
+      const map = new Map<string, Event>();
       for (const r of rows) {
-         map.set(r.id, r);
+         map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
       }
       return map;
    } else {
@@ -409,10 +419,10 @@ export function addEvent(eventId: number, meta: Event): void {
    ).run(eventId, meta.league_id, meta.sport_id, meta.home_name, meta.away_name, meta.event_name, meta.start_time, meta.api_id, meta.home_score, meta.away_score);
 }
 
-export function updateEvent(eventId: number, leagueId: number, sportId: number, home_score: number, away_score: number): void {
+export function updateEventScore(eventId: number, leagueId: number, sportId: number, home_score: number, away_score: number): void {
    const database = getDb();
    database.query(
-      "UPDATE events SET home_score = ?, away_score = ? WHERE id = ?, league_id = ?, sport_id = ?"
+      "UPDATE events SET home_score = ?, away_score = ? WHERE id = ? AND league_id = ? AND sport_id = ?"
    ).run(home_score, away_score, eventId, leagueId, sportId);
 }
 

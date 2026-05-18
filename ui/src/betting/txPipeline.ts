@@ -103,11 +103,48 @@ export async function buildSignV0Transaction(
       const addressesByLookupTable = await fetchAddressesByLookupTable(rpc, LOOKUP_TABLE_ID);
       txMessage = compressTransactionMessageUsingAddressLookupTables(txMessage, addressesByLookupTable);
    }
-
+   
    const txMessageWithSigners = addSignersToTransactionMessage([...params.signers], txMessage);
    const signedTransaction = await signTransactionMessageWithSigners(txMessageWithSigners);
    assertIsTransactionWithBlockhashLifetime(signedTransaction);
    return signedTransaction;
+}
+
+/**
+ * Build one compiled (unsigned) v0 transaction per instruction chunk, sharing the same blockhash
+ * and optional ALT compression. Caller signs with {@link TransactionModifyingSigner#modifyAndSignTransactions}.
+ */
+export async function compileUnsignedV0TransactionChunks(
+   rpc: Rpc<SolanaRpcApi>,
+   params: Readonly<{
+      feePayer: TransactionSigner;
+      instructionChunks: readonly (readonly Instruction[])[];
+      useALT?: boolean;
+   }>,
+): Promise<readonly ReturnType<typeof compileTransaction>[]> {
+   const { value: latestBlockhash } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
+   let lookup: AddressesByLookupTableAddress | undefined;
+   if (params.useALT === true) {
+      lookup = await fetchAddressesByLookupTable(rpc, LOOKUP_TABLE_ID);
+   }
+   const out: ReturnType<typeof compileTransaction>[] = [];
+   for (const instructions of params.instructionChunks) {
+      if (instructions.length === 0) {
+         continue;
+      }
+      let txMessage = pipe(
+         createTransactionMessage({ version: 0 }),
+         (m) => setTransactionMessageFeePayerSigner(params.feePayer, m),
+         (m) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m),
+         (m) => appendTransactionMessageInstructions([...instructions], m),
+      );
+      if (params.useALT === true && lookup !== undefined) {
+         txMessage = compressTransactionMessageUsingAddressLookupTables(txMessage, lookup);
+      }
+      const txMessageWithSigners = addSignersToTransactionMessage([params.feePayer], txMessage);
+      out.push(compileTransaction(txMessageWithSigners));
+   }
+   return out;
 }
 
 export async function simulateInstructionReturnData(

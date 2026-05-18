@@ -104,6 +104,50 @@ body {
    padding: 1.25rem 1rem 3rem;
 }
 
+.app-shell {
+   display: flex;
+   flex-direction: column;
+   min-height: calc(100vh - 4.5rem);
+}
+
+.app-main {
+   flex: 1 1 auto;
+   min-width: 0;
+}
+
+@media (max-width: 720px) {
+   .app-shell {
+      min-height: calc(100vh - 3.75rem);
+   }
+}
+
+.app-footer {
+   margin-top: 2.25rem;
+   padding-top: 1.25rem;
+   border-top: 1px solid var(--line-subtle);
+}
+
+.app-footer__nav {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: center;
+   gap: 0.65rem 1.25rem;
+   justify-content: center;
+}
+
+.app-footer__link {
+   font-size: 0.85rem;
+   font-weight: 500;
+   color: var(--muted);
+   text-decoration: none;
+}
+
+.app-footer__link:hover {
+   color: var(--accent);
+   text-decoration: underline;
+   text-underline-offset: 0.18em;
+}
+
 h1 {
    font-size: 1.35rem;
    font-weight: 600;
@@ -568,6 +612,17 @@ h1 {
    margin-right: 0;
 }
 
+/* Primary-row “Total”: same line + O/U track as sub-header so the title sits over Over/Under */
+.events-table .thead-row-primary .th-market-sub-header--primary-title {
+   align-items: end;
+}
+
+.events-table .th-market-sub-header--primary-title .th-primary-total-title-slot {
+   width: calc(2 * var(--odd-box-width) + 0.35rem);
+   text-align: center;
+   min-width: 0;
+}
+
 .events-table td {
    padding: 0.55rem 0.75rem;
    vertical-align: middle;
@@ -635,6 +690,8 @@ h1 {
 
    .events-table thead .thead-row-sub th {
       padding-inline: 0.35rem;
+      padding-bottom: 0.2rem;
+      padding-top: 0.2rem;
    }
 
    .events-table tbody td.odds-cell:nth-child(2) {
@@ -923,6 +980,39 @@ h1 {
    box-shadow: var(--shadow-modal);
 }
 
+.bet-modal-dialog--compact {
+   width: min(22rem, 100%);
+   max-height: none;
+}
+
+.invite-friends-modal__lead {
+   margin: 0 0 1rem;
+   line-height: 1.45;
+}
+
+.invite-friends-modal__field {
+   margin-bottom: 0.75rem;
+}
+
+.invite-friends-modal__code-input {
+   letter-spacing: 0.14em;
+   font-weight: 600;
+   text-transform: uppercase;
+   font-variant-numeric: tabular-nums;
+}
+
+.invite-friends-modal__url-preview {
+   margin: 0;
+   font-size: 0.78rem;
+   line-height: 1.4;
+   word-break: break-all;
+}
+
+.invite-friends-modal__hint {
+   margin: 0;
+   font-size: 0.82rem;
+}
+
 .bet-modal-header {
    display: flex;
    align-items: center;
@@ -1133,6 +1223,21 @@ h1 {
    font-family: Tinos, "Times New Roman", Times, serif;
 }
 
+.app-header__brand-link {
+   display: inline-flex;
+   align-items: center;
+   gap: 0.55rem;
+   min-width: 0;
+}
+
+.app-header__brand-mark {
+   flex-shrink: 0;
+   width: 2.25rem;
+   height: 2.25rem;
+   border-radius: 50%;
+   object-fit: cover;
+}
+
 .app-header__brand .app-title {
    display: inline-block;
    margin: 0;
@@ -1181,6 +1286,25 @@ h1 {
    align-items: center;
    gap: 1rem;
    flex-wrap: wrap;
+}
+
+.invite-friends-btn {
+   font: inherit;
+   font-size: 0.78rem;
+   font-weight: 600;
+   padding: 0.38rem 0.65rem;
+   border-radius: 8px;
+   border: 1px solid var(--border);
+   background: var(--panel);
+   color: var(--text);
+   cursor: pointer;
+   white-space: nowrap;
+   flex-shrink: 0;
+}
+
+.invite-friends-btn:hover {
+   border-color: var(--accent-dim);
+   color: var(--accent);
 }
 
 .app-header .wallet-bar {
@@ -1389,7 +1513,7 @@ h1 {
       letter-spacing: 0.03em;
    }
 
-   .app-header__brand .app-title .inline-nav-link {
+   .app-header__brand .app-header__brand-link {
       overflow-wrap: anywhere;
    }
 
@@ -1445,6 +1569,11 @@ h1 {
    .app-header__wallet-panel .wallet-bar {
       width: 100%;
       min-width: 0;
+   }
+
+   .app-header__wallet-panel .invite-friends-btn {
+      width: 100%;
+      text-align: center;
    }
 
    .app-header__wallet-panel .wallet-bar__connected {
@@ -1518,11 +1647,46 @@ h1 {
    margin-bottom: 1rem;
 }
 
+.my-bets-page__tabs-row {
+   display: flex;
+   align-items: flex-end;
+   justify-content: space-between;
+   gap: 0.75rem 1.25rem;
+   flex-wrap: wrap;
+   margin-bottom: 1.25rem;
+   border-bottom: 1px solid var(--border);
+}
+
 .my-bets-page__tabs {
    display: flex;
    gap: 0;
-   margin-bottom: 1.25rem;
-   border-bottom: 1px solid var(--border);
+   margin-bottom: 0;
+   border-bottom: none;
+}
+
+.my-bets-page__claim {
+   font: inherit;
+   font-size: 0.85rem;
+   font-weight: 600;
+   padding: 0.45rem 1rem;
+   margin-bottom: 0.35rem;
+   border-radius: 8px;
+   border: 1px solid var(--accent-dim);
+   background: linear-gradient(180deg, color-mix(in srgb, var(--accent-bright) 22%, var(--surface-raised)), var(--surface-deep));
+   color: var(--accent);
+   cursor: pointer;
+   white-space: nowrap;
+   flex-shrink: 0;
+}
+
+.my-bets-page__claim:hover:not(:disabled) {
+   border-color: var(--accent);
+   color: var(--accent-bright);
+}
+
+.my-bets-page__claim:disabled {
+   opacity: 0.55;
+   cursor: not-allowed;
 }
 
 .my-bets-page__tab {
@@ -1614,25 +1778,102 @@ h1 {
    border: 1px solid var(--border);
    border-radius: 12px;
    background: var(--panel);
-   padding: 1rem 1.1rem;
+   padding: 0;
+   overflow: hidden;
    box-shadow: var(--shadow-inset-line);
 }
 
-.my-bets-card__top {
+.my-bets-card__banner {
+   --banner-accent: var(--muted);
    display: flex;
-   align-items: flex-start;
+   align-items: center;
    justify-content: space-between;
-   gap: 0.75rem;
+   gap: 0.65rem 1rem;
    flex-wrap: wrap;
+   padding: 0.62rem 1.1rem 0.68rem;
+   background: linear-gradient(
+      96deg,
+      color-mix(in srgb, var(--banner-accent) 78%, var(--bg)) 0%,
+      color-mix(in srgb, var(--banner-accent) 32%, var(--panel)) 38%,
+      color-mix(in srgb, var(--banner-accent) 8%, var(--panel)) 58%,
+      var(--panel) 100%
+   );
+   border-bottom: 1px solid color-mix(in srgb, var(--text) 7%, transparent);
 }
 
-.my-bets-card__top-right {
+.my-bets-card__banner--won {
+   --banner-accent: #42d978;
+}
+
+.my-bets-card__banner--half-won {
+   --banner-accent: color-mix(in srgb, #42d978 68%, var(--muted) 32%);
+}
+
+.my-bets-card__banner--lost {
+   --banner-accent: #ff5a5a;
+}
+
+.my-bets-card__banner--half-lost {
+   --banner-accent: color-mix(in srgb, #ff5a5a 62%, var(--muted) 38%);
+}
+
+.my-bets-card__banner--push {
+   --banner-accent: #7ec4ea;
+}
+
+.my-bets-card__banner--cancelled {
+   --banner-accent: #b794f6;
+}
+
+.my-bets-card__banner--rolled-back {
+   --banner-accent: var(--warning);
+}
+
+.my-bets-card__banner--unknown {
+   --banner-accent: var(--muted);
+}
+
+.my-bets-card__banner-result {
+   font-size: 0.82rem;
+   font-weight: 700;
+   text-transform: uppercase;
+   letter-spacing: 0.05em;
+   color: var(--heading);
+   text-shadow:
+      0 0 12px color-mix(in srgb, var(--panel) 88%, transparent),
+      0 1px 2px color-mix(in srgb, var(--bg) 70%, transparent);
+}
+
+.my-bets-card__banner-meta {
    display: flex;
    flex-direction: column;
    align-items: flex-end;
-   gap: 0.2rem;
+   gap: 0.15rem;
    text-align: right;
    flex-shrink: 0;
+   min-width: 0;
+}
+
+.my-bets-card__banner .my-bets-card__bet-id {
+   color: color-mix(in srgb, var(--text) 92%, var(--muted));
+}
+
+.my-bets-card__banner .my-bets-card__account-link {
+   color: color-mix(in srgb, var(--text) 78%, var(--muted));
+   border-bottom-color: color-mix(in srgb, var(--border) 65%, transparent);
+}
+
+.my-bets-card__banner .my-bets-card__account-link:hover {
+   color: var(--accent-bright);
+   border-bottom-color: var(--accent-dim);
+}
+
+.my-bets-card__banner .my-bets-card__account-link:visited {
+   color: color-mix(in srgb, var(--text) 72%, var(--muted));
+}
+
+.my-bets-card__body {
+   padding: 0.9rem 1.1rem 1rem;
 }
 
 .my-bets-card__bet-id {
@@ -1641,33 +1882,6 @@ h1 {
    font-variant-numeric: tabular-nums;
    color: var(--text);
    line-height: 1.2;
-}
-
-.my-bets-card__result {
-   font-size: 0.82rem;
-   font-weight: 700;
-   text-transform: uppercase;
-   letter-spacing: 0.04em;
-}
-
-.my-bets-card__result--pending {
-   color: var(--muted);
-}
-
-.my-bets-card__result--won,
-.my-bets-card__result--half-won {
-   color: var(--success);
-}
-
-.my-bets-card__result--lost,
-.my-bets-card__result--half-lost {
-   color: var(--danger);
-}
-
-.my-bets-card__result--push,
-.my-bets-card__result--cancelled,
-.my-bets-card__result--rolled-back {
-   color: var(--warning);
 }
 
 .my-bets-card__stake {
@@ -1967,6 +2181,36 @@ a.inline-nav-link:hover {
    margin: 0 0 0.75rem;
    font-size: 0.85rem;
    color: var(--accent);
+}
+
+.bet-modal-placed {
+   margin: 0 0 0.75rem;
+   padding: 0.65rem 0.75rem;
+   border-radius: 8px;
+   border: 1px solid var(--border);
+   background: var(--panel);
+   font-size: 0.85rem;
+}
+
+.bet-modal-placed-title {
+   margin: 0 0 0.5rem;
+   font-size: 0.9rem;
+   font-weight: 600;
+   color: var(--accent);
+}
+
+.bet-modal-placed-meta {
+   margin: 0;
+}
+
+.bet-modal-placed-warn {
+   margin: 0.5rem 0 0;
+   font-size: 0.8rem;
+}
+
+.bet-modal-placed-tx {
+   margin: 0.5rem 0 0;
+   font-size: 0.8rem;
 }
 
 /* —— Event markets page —— */
