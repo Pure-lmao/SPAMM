@@ -53,10 +53,13 @@ export async function airdropUser(user: string): Promise<{ success: boolean; err
 
 // gradeBets().catch(console.error);
 export async function gradeBets() {
+   console.log("Grading bets");
    const bets = await getBetsData(clients.rpc, {
       result: BetResult.Pending
    });
+   console.log("Bets fetched", bets.length);
    const allEvents = fetchUngradedStartedEvents();
+   console.log("Events fetched", allEvents.size);
 
    const resultAddresses = [];
    for (const bet of bets) {
@@ -81,6 +84,7 @@ export async function gradeBets() {
          console.log(`Grade bets tx: ${sig}`);
       }
    }
+   console.log("Bets graded");
 }
 
 function getBetResult(bet: BetAccountData, event: Event): BetResult | null {
@@ -159,22 +163,22 @@ function getBetResult(bet: BetAccountData, event: Event): BetResult | null {
             return BetResult.Push;
          }
          if (side === 0) { //over
-            if (total > line) {
-               return BetResult.Won;
-            } else if (total + 0.25 === line) { //half lost on x.25
+           if (total + 0.25 === line) { //half lost on x.25
                return BetResult.HalfLost;
             } else if (total - 0.25 === line) { //half won on x.75
                return BetResult.HalfWon;
+            } else if (total > line) {
+               return BetResult.Won;
             } else {
                return BetResult.Lost;
             }
          } else if (side === 1) { //under
-            if (total < line) {
-               return BetResult.Won;
-            } else if (total + 0.25 === line) { //half won on x.25
+            if (total + 0.25 === line) { //half won on x.25
                return BetResult.HalfWon;
             } else if (total - 0.25 === line) { //half lost on x.75
                return BetResult.HalfLost;
+            } else if (total < line) {
+               return BetResult.Won;
             } else {
                return BetResult.Lost;
             }
@@ -191,22 +195,22 @@ function getBetResult(bet: BetAccountData, event: Event): BetResult | null {
             return BetResult.Push;
          }
          if (side === 0) { //home
-            if (homeDom > -line) { // home covers
-               return BetResult.Won;
-            } else if (homeDom + 0.25 === -line) { //half lost on x.25
+            if (homeDom + 0.25 === -line) { //half lost on x.25
                return BetResult.HalfLost;
             } else if (homeDom - 0.25 === -line) { //half won on x.75
                return BetResult.HalfWon;
+            } else if (homeDom > -line) { // home covers
+               return BetResult.Won;
             } else {
                return BetResult.Lost;
             }
          } else if (side === 1) { //away
-            if (homeDom < -line) { // away covers
-               return BetResult.Won;
-            } else if (homeDom + 0.25 === -line) { //half won on x.25
+           if (homeDom + 0.25 === -line) { //half won on x.25
                return BetResult.HalfWon;
             } else if (homeDom - 0.25 === -line) { //half lost on x.75
                return BetResult.HalfLost;
+            } else if (homeDom < -line) { // away covers
+               return BetResult.Won;
             } else {
                return BetResult.Lost;
             }
@@ -216,6 +220,9 @@ function getBetResult(bet: BetAccountData, event: Event): BetResult | null {
       }
    } else {
       if (mkt === 0) { // ML
+         if (home === away) {
+            return null;
+         }
          if (side === 0) { //home
             if (home > away) {
                return BetResult.Won;
@@ -237,17 +244,17 @@ function getBetResult(bet: BetAccountData, event: Event): BetResult | null {
          let line = mkt - 200;
          line = line / 2;
          line = round(line, 1);
-         if (homeDom === line) { //push on x.0
+         if (homeDom === -line) { //push on x.0
             return BetResult.Push;
          }
          if (side === 0) { //home
-            if (home > line) {
+            if (homeDom > -line) {
                return BetResult.Won;
             } else {
                return BetResult.Lost;
             }
          } else if (side === 1) { //away
-            if (away < line) {
+            if (homeDom < -line) {
                return BetResult.Won;
             } else {
                return BetResult.Lost;
