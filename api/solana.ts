@@ -3,7 +3,7 @@ import { AccountRole, type Instruction } from "@solana/instructions";
 import { address, getU32Encoder, getU64Encoder, sol, solToLamports, type Address } from "@solana/kit";
 import { buildSignV0Transaction, createRpcClients, sendAndConfirmInstructions, sendAndConfirmSignedTransaction, simulateTransaction } from "../aggregator/client/txSend";
 import { loadKeypairSignerFromJsonFile } from "../aggregator/client/utils";
-import { fetchUngradedStartedEvents } from "localDb";
+import { fetchGradedStartedEvents, fetchUngradedStartedEvents } from "localDb";
 import { BetResult, getBetsData, getGradeBetsIx, type BetAccountData } from "spamm-aggregator-sdk";
 import type { Event } from "types";
 import { round } from "utils";
@@ -58,7 +58,7 @@ export async function gradeBets() {
       result: BetResult.Pending
    });
    console.log("Bets fetched", bets.length);
-   const allEvents = fetchUngradedStartedEvents();
+   const allEvents = fetchGradedStartedEvents();
    console.log("Events fetched", allEvents.size);
 
    const resultAddresses = [];

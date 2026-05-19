@@ -212,6 +212,16 @@ export function fetchUngradedStartedEvents(): Map<string, Event> {
    return map;
 }
 
+export function fetchGradedStartedEvents(): Map<string, Event> {
+   const database = getDb();
+   const rows = database.query<Event, string[]>(`SELECT * FROM events WHERE start_time < ? AND home_score IS NOT NULL AND away_score IS NOT NULL`).all(Date.now().toString());
+   const map = new Map<string, Event>();
+   for (const r of rows) {
+      map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
+   }
+   return map;
+}
+
 function uniqueSportLeaguePairs(rows: { sport_id: number; league_id: number }[]): [number, number][] {
    const seen = new Set<string>();
    const out: [number, number][] = [];
