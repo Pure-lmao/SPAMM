@@ -12,6 +12,7 @@ import { useCluster, useKitTransactionSigner, useWallet } from "@solana/connecto
 import { BetResult, getBetsData, getSettleBetIx, ODDS_SCALE, type BetAccountData } from "spamm-aggregator-sdk";
 import { compileUnsignedV0TransactionChunks, httpToWsRpcUrl, resolveHttpRpcUrl } from "../betting/txPipeline";
 import { formatUsdcBaseUnitsForUi } from "../betting/usdc";
+import { fetchClosedBetHistory } from "../markets/fetchBetHistory";
 import { fetchOneEvent } from "../markets/fetchEvent";
 import { betMarketDisplayLines, eventLookupKey } from "../markets/myBetsMarketDisplay";
 import type { UiGroupedEvent } from "../markets/types";
@@ -76,8 +77,17 @@ function oddsFromScaled(scaled: bigint): string {
    return x >= 10 ? x.toFixed(2) : x.toFixed(3);
 }
 
-function primaryFill(b: BetAccountData): BetAccountData["filler0"] | undefined {
-   return [b.filler0, b.filler1, b.filler2, b.filler3, b.filler4].find((f) => f.amount > 0n);
+/** Effective filled odds from on-chain `payout` / `amount` (unchanged after grading). */
+function filledOddsScaled(b: BetAccountData): bigint | null {
+   if (b.amount <= 0n || b.payout <= 0n) {
+      return null;
+   }
+   return (b.payout * ODDS_SCALE) / b.amount;
+}
+
+function filledOddsUi(b: BetAccountData): string {
+   const scaled = filledOddsScaled(b);
+   return scaled !== null ? oddsFromScaled(scaled) : "—";
 }
 
 /**
@@ -134,9 +144,8 @@ function BetCard({
    b: BetAccountData;
    eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
 }): ReactElement {
-   const fill = primaryFill(b);
-   const oddsScaled = fill !== undefined && fill.oddsScaled > 0n ? fill.oddsScaled : null;
-   const oddsUi = oddsScaled !== null ? oddsFromScaled(oddsScaled) : "—";
+   const oddsScaled = filledOddsScaled(b);
+   const oddsUi = filledOddsUi(b);
    const settled = b.result !== BetResult.Pending;
    const payoutLabel = settled ? "Return" : "Potential payout";
    const payoutBase = settled ? settledReturnBaseUnits(b, oddsScaled) : b.payout;
@@ -212,6 +221,9 @@ export function MyBetsPage(): ReactElement {
    const [state, setState] = useState<LoadState>("idle");
    const [err, setErr] = useState<string | null>(null);
    const [rows, setRows] = useState<readonly { address: string; data: BetAccountData }[]>([]);
+   const [closedState, setClosedState] = useState<LoadState>("idle");
+   const [closedErr, setClosedErr] = useState<string | null>(null);
+   const [closedRows, setClosedRows] = useState<readonly { address: string; data: BetAccountData }[]>([]);
    const [betTab, setBetTab] = useState<MyBetsTab>("open");
    const [eventsByKey, setEventsByKey] = useState<ReadonlyMap<string, UiGroupedEvent | null>>(() => new Map());
    const [claimBusy, setClaimBusy] = useState(false);
@@ -228,16 +240,20 @@ export function MyBetsPage(): ReactElement {
       [settledRows.length],
    );
 
+   const activeRows = betTab === "open" ? rows : closedRows;
+   const activeState = betTab === "open" ? state : closedState;
+   const activeErr = betTab === "open" ? err : closedErr;
+
    const eventKeys = useMemo(() => {
       const keys = new Map<string, { sport: number; league: number; event: number }>();
-      for (const { data } of rows) {
+      for (const { data } of activeRows) {
          const mid = data.marketId;
          const eid = mid.eventId;
          const k = eventLookupKey(mid);
          keys.set(k, { sport: eid.sport, league: eid.league, event: Number(eid.event) });
       }
       return keys;
-   }, [rows]);
+   }, [activeRows]);
 
    useEffect(() => {
       if (eventKeys.size === 0) {
@@ -265,7 +281,7 @@ export function MyBetsPage(): ReactElement {
       };
    }, [eventKeys]);
 
-   const load = useCallback(async () => {
+   const loadOpen = useCallback(async () => {
       if (!isConnected || !account) {
          setRows([]);
          setState("idle");
@@ -286,9 +302,30 @@ export function MyBetsPage(): ReactElement {
       }
    }, [account, isConnected, rpc]);
 
+   const loadClosed = useCallback(async () => {
+      if (!isConnected || !account) {
+         setClosedRows([]);
+         setClosedState("idle");
+         setClosedErr(null);
+         return;
+      }
+      setClosedState("loading");
+      setClosedErr(null);
+      try {
+         const list = await fetchClosedBetHistory(account);
+         const sorted = [...list].sort((a, b) => (a.data.betId < b.data.betId ? 1 : a.data.betId > b.data.betId ? -1 : 0));
+         setClosedRows(sorted);
+         setClosedState("ok");
+      } catch (e) {
+         setClosedErr(e instanceof Error ? e.message : String(e));
+         setClosedState("err");
+      }
+   }, [account, isConnected]);
+
    useEffect(() => {
-      void load();
-   }, [load]);
+      void loadOpen();
+      void loadClosed();
+   }, [loadOpen, loadClosed]);
 
    const runClaim = useCallback(async () => {
       if (!isConnected || !account || !walletSigner || !signerReady) {
@@ -340,14 +377,15 @@ export function MyBetsPage(): ReactElement {
             );
             setRows((prev) => prev.filter((row) => !settledAddresses.has(row.address)));
          }
-         await load();
+         await loadOpen();
+         void loadClosed();
       } catch (e) {
          setClaimErr(e instanceof Error ? e.message : String(e));
       } finally {
          setClaimBusy(false);
          claimLockRef.current = false;
       }
-   }, [account, isConnected, load, rpc, rpcSubscriptions, signerReady, walletSigner]);
+   }, [account, isConnected, loadClosed, loadOpen, rpc, rpcSubscriptions, signerReady, walletSigner]);
 
    if (!isConnected || !account) {
       return (
@@ -362,12 +400,17 @@ export function MyBetsPage(): ReactElement {
       <main className="my-bets-page">
          <div className="my-bets-page__head">
             <h2 className="my-bets-page__title">My Bets</h2>
-            <button type="button" className="my-bets-page__refresh" disabled={state === "loading"} onClick={() => void load()}>
-               {state === "loading" ? "Refreshing…" : "Refresh"}
+            <button
+               type="button"
+               className="my-bets-page__refresh"
+               disabled={activeState === "loading"}
+               onClick={() => void (betTab === "open" ? loadOpen() : loadClosed())}
+            >
+               {activeState === "loading" ? "Refreshing…" : "Refresh"}
             </button>
          </div>
 
-         {state === "err" && err != null && <p className="my-bets-page__err">{err}</p>}
+         {activeState === "err" && activeErr != null && <p className="my-bets-page__err">{activeErr}</p>}
          {claimErr != null && betTab === "open" && <p className="my-bets-page__err">{claimErr}</p>}
 
          <div className="my-bets-page__tabs-row">
@@ -388,7 +431,7 @@ export function MyBetsPage(): ReactElement {
                   className={`my-bets-page__tab${betTab === "closed" ? " my-bets-page__tab--active" : ""}`}
                   onClick={() => setBetTab("closed")}
                >
-                  Closed Bets
+                  Closed Bets ({closedRows.length})
                </button>
             </div>
             {betTab === "open" && settledRows.length > 0 && (
@@ -413,26 +456,22 @@ export function MyBetsPage(): ReactElement {
          </div>
 
          <div className="my-bets-page__tab-panel" role="tabpanel">
-            {betTab === "open" && (
-               <>
-                  {state === "loading" && rows.length === 0 && <p className="my-bets-page__loading">Loading bets…</p>}
-
-                  {state === "ok" && rows.length === 0 && (
-                     <p className="my-bets-page__empty">No bets found for this wallet.</p>
-                  )}
-
-                  {rows.length > 0 && (
-                     <ul className="my-bets-list">
-                        {rows.map(({ address: betPda, data: b }) => (
-                           <BetCard key={betPda} betPda={betPda} b={b} eventsByKey={eventsByKey} />
-                        ))}
-                     </ul>
-                  )}
-               </>
+            {activeState === "loading" && activeRows.length === 0 && (
+               <p className="my-bets-page__loading">Loading bets…</p>
             )}
 
-            {betTab === "closed" && (
-               <p className="my-bets-page__tab-placeholder">Closed bets will be listed here. This view is not wired up yet.</p>
+            {activeState === "ok" && activeRows.length === 0 && (
+               <p className="my-bets-page__empty">
+                  {betTab === "open" ? "No bets found for this wallet." : "No closed bets found for this wallet."}
+               </p>
+            )}
+
+            {activeRows.length > 0 && (
+               <ul className="my-bets-list">
+                  {activeRows.map(({ address: betPda, data: b }) => (
+                     <BetCard key={betPda} betPda={betPda} b={b} eventsByKey={eventsByKey} />
+                  ))}
+               </ul>
             )}
          </div>
       </main>

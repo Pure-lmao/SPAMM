@@ -1,6 +1,7 @@
 import { airdropUser } from "./solana";
 import { fetchEvents, fetchEventsByLeague, fetchEventsBySport, fetchEventsGrouped, fetchLeagues, fetchLeaguesBySport, fetchSports } from "./localDb";
 import { safeJSONStringify } from "./utils";
+import { getClosedBetRecordsByUser } from "quickIndexer";
 
 const TTL_MS = 5000;
 
@@ -56,6 +57,7 @@ function withCors(req: Request, res: Response): Response {
  * - /api/leagues?all=true
  * - /api/leagues?sport={sportId}
  * - /api/airdrop/sol?user={userAddress}
+ * - /api/betHistory?user={userAddress}
  */
 export class ApiServer {
    private async handleGetEvents(params: URLSearchParams): Promise<Response> {
@@ -114,6 +116,15 @@ export class ApiServer {
       return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
    }
 
+   private async handleGetBetHistory(params: URLSearchParams): Promise<Response> {
+      const user = params.get("user");
+      if (!user) {
+         return Response.json({ error: "Missing query params. Use user=" }, { status: 400 });
+      }
+      const result = getClosedBetRecordsByUser(user);
+      return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
+   }
+
    fetch(req: Request): Response | Promise<Response> {
       const url = new URL(req.url);
 
@@ -134,6 +145,9 @@ export class ApiServer {
       }
       if (url.pathname === "/api/airdrop/sol") {
          return this.handleGetSolAirdrop(params).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/betHistory") {
+         return this.handleGetBetHistory(params).then((r) => withCors(req, r));
       }
 
       return withCors(req, new Response("Not Found", { status: 404 }));

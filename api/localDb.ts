@@ -11,7 +11,7 @@ export const DB_BUSY_TIMEOUT_MS = 10_000;
 
 let db: Database;
 
-function getDb(): Database {
+export function getDb(): Database {
    if (!db) {
       db = new Database(DB_PATH, { create: true });
       db.run("PRAGMA journal_mode = WAL");

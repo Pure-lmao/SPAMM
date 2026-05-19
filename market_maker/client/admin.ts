@@ -31,9 +31,9 @@ async function registerMM() {
 // getMmEncumbranceData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 // getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
-const sport = 3 as Sport;
-const league = 11840;
-const event = 401815362n;
+const sport = 1 as Sport;
+const league = 12827;
+const event = 401872576n;
 const eventId = {
    sport,
    league,
