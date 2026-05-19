@@ -3,6 +3,7 @@ import { type ReactElement } from "react";
 const FOOTER_LINKS: readonly { label: string; href: string }[] = [
    { label: "X (Twitter)", href: "https://x.com/AutmtcSprtsMkts" },
    { label: "Discord", href: "https://discord.gg/AG7J2kzkpV" },
+   { label: "GitHub", href: "https://github.com/Pure-lmao/SPAMM" },
 ];
 
 export function AppFooter(): ReactElement {

@@ -13,7 +13,9 @@ The aggregator program is responsible for **grading** the bets. Funds are transf
 
 ## Deployment
 
-The **SPAMM Aggregator** program is deployed to Solana **devnet** at the address **`5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H`**. The betting token is **`Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr`** which you can get [here](https://spl-token-faucet.com/). If the devnet SOL aidrop is 429, you can get some [here](https://faucet.solana.com/).
+The **SPAMM Aggregator** program is deployed to Solana **devnet** at the address **`5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H`**. The betting token is **`Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr`** which you can get [here](https://spl-token-faucet.com/). If the devnet SOL airdrop is 429, you can get some [here](https://faucet.solana.com/).
+
+You can try it out now on devnet at [https://automaticsportsmarkets.com](https://automaticsportsmarkets.com)
 
 **Breaking changes** are to be expected. The **aggregator admin** can delete Aggregator PDAs (like Bet Accounts) at any time.
 
