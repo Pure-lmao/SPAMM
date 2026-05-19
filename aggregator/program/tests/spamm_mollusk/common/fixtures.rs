@@ -163,6 +163,35 @@ pub fn event_id_soccer_e() -> EventId {
    }
 }
 
+/// Non-soccer event for moneyline (`period` 0, `mkt` 0) header netting tests.
+pub fn event_id_basketball() -> EventId {
+   EventId {
+      event: 42,
+      league: 200,
+      sport: Sport::Basketball,
+   }
+}
+
+/// Pregame two-outcome moneyline (`period` 0, `mkt` 0) — nets via netting PDA header on non-soccer sports.
+pub fn market_ml_pregame(eid: EventId) -> MarketId {
+   MarketId {
+      event_id: eid,
+      player: 0,
+      mkt: 0,
+      period: 0,
+      is_pregame: true,
+   }
+}
+
+/// Scaled odds for decimal 1.9 (`ODDS_SCALE` = 10_000).
+pub const ODDS_1_9_SCALED: u32 = 19_000;
+
+/// $10 USDC stake (6 decimals).
+pub const STAKE_10_USDC: u64 = 10_000_000;
+
+/// MM profit liability on $10 @ 1.9 (one side).
+pub const LIABILITY_9_USDC: u64 = 9_000_000;
+
 pub fn market_spread_pregame(eid: EventId) -> MarketId {
    MarketId {
       event_id: eid,

@@ -427,11 +427,11 @@ impl Env {
       let _ = self.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
    }
 
-   pub fn create_netting_for_soccer_event(&mut self) {
+   pub fn create_netting_for_event(&mut self, eid: &EventId) {
       let sys_pk = keyed_account_for_system_program().0;
-      let np = netting_pda_for_event(&event_id_soccer());
+      let np = netting_pda_for_event(eid);
       self.upsert(np, system_owned_empty());
-      let data = event_id_soccer().as_wire_bytes().to_vec();
+      let data = eid.as_wire_bytes().to_vec();
       let ix = self.agg_ix(
          50,
          data,
@@ -445,6 +445,10 @@ impl Env {
       );
       let r = self.run_ix(ix);
       assert!(r.program_result.is_ok(), "create_netting {:?}", r);
+   }
+
+   pub fn create_netting_for_soccer_event(&mut self) {
+      self.create_netting_for_event(&event_id_soccer());
    }
 
    /// Rewrite `EventStateData.sequence` for devnet/MM-bootstrapped event state (live vs pregame tests).

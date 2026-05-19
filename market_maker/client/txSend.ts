@@ -64,6 +64,44 @@ export function createRpcClients(options?: Readonly<{ httpUrl?: string; wsUrl?: 
    };
 }
 
+export function isRpcRateLimited(error: unknown): boolean {
+   if (error !== null && typeof error === 'object') {
+      const e = error as { statusCode?: number; message?: string };
+      if (e.statusCode === 429) {
+         return true;
+      }
+      const msg = e.message ?? '';
+      if (typeof msg === 'string' && (msg.includes('429') || /rate.?limit/i.test(msg))) {
+         return true;
+      }
+   }
+   return false;
+}
+
+/** Retry RPC calls when the provider returns HTTP 429. */
+export async function withRpcRetry<T>(
+   fn: () => Promise<T>,
+   options?: Readonly<{ maxAttempts?: number; baseDelayMs?: number }>,
+): Promise<T> {
+   const maxAttempts = options?.maxAttempts ?? 6;
+   const baseDelayMs = options?.baseDelayMs ?? 1000;
+   let lastError: unknown;
+   for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      try {
+         return await fn();
+      } catch (error) {
+         lastError = error;
+         if (!isRpcRateLimited(error) || attempt === maxAttempts - 1) {
+            throw error;
+         }
+         const delayMs = baseDelayMs * 2 ** attempt;
+         console.warn(`RPC rate limited, retrying in ${delayMs}ms (${attempt + 1}/${maxAttempts})`);
+         await new Promise((resolve) => setTimeout(resolve, delayMs));
+      }
+   }
+   throw lastError;
+}
+
 
 export type BuildSignV0Params = Readonly<{
    feePayer: KeyPairSigner;
@@ -77,7 +115,9 @@ export async function buildSignV0Transaction(
    rpc: RpcClients['rpc'],
    params: BuildSignV0Params,
 ): Promise<ReturnType<typeof signTransactionMessageWithSigners>> {
-   const { value: latestBlockhash } = await rpc.getLatestBlockhash({ commitment: 'confirmed' }).send();
+   const { value: latestBlockhash } = await withRpcRetry(() =>
+      rpc.getLatestBlockhash({ commitment: 'confirmed' }).send(),
+   );
 
    const txMessage = pipe(
       createTransactionMessage({ version: 0 }),
@@ -108,7 +148,7 @@ export async function sendAndConfirmSignedTransaction(
       rpc: clients.rpc,
       rpcSubscriptions: clients.rpcSubscriptions,
    } as never);
-   await sendAndConfirmTransaction(signedTransaction as never, { commitment });
+   await withRpcRetry(() => sendAndConfirmTransaction(signedTransaction as never, { commitment }));
    return getSignatureFromTransaction(signedTransaction);
 }
 

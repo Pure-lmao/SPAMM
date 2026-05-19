@@ -4,17 +4,19 @@ use solana_instruction::AccountMeta;
 
 use spamm_aggregator::helpers::calc_potential_profit;
 use spamm_aggregator::instructions::{FillBetIxData, FillParlayIxData};
-use spamm_aggregator::state::EventGameState;
+use spamm_aggregator::state::{EventGameState, MarketId};
 use spamm_aggregator::state::account_bet::BetResult;
 
 use crate::common::{
    admin, agg_program_id, assert_account_closed_or_system_empty, assert_bet_after_fill, assert_ok_record_cu,
    assert_parlay_after_fill, bet_pda_for, bet_token_ata, config_pda, decode_bet, decode_parlay_bet,
-   encumbrance_pda, event_id_soccer, event_id_soccer_b, fill_bet_instruction, fill_bet_netting_placeholder,
-   fill_parlay_instruction, market_soccer_ft_pregame, market_spread_pregame, netting_pda_for_event,
-   oracle_body_three_outcome, oracle_body_two_outcome, parlay_bet_pda_for, parlay_leg, parlay_table,
-   read_encumbrance, read_netting_soccer_header_and_lines, read_token_balance, settle_bet_instruction,
-   settle_parlay_instruction, system_owned_empty, uniform_parlay_combined_odds, user, user_collateral_ata, Env,
+   encumbrance_pda, event_id_basketball, event_id_soccer, event_id_soccer_b, fill_bet_instruction,
+   fill_bet_netting_placeholder, fill_parlay_instruction, liability_token_ata, market_ml_pregame,
+   market_soccer_ft_pregame, market_spread_pregame, netting_pda_for_event, oracle_body_three_outcome,
+   oracle_body_two_outcome, parlay_bet_pda_for, parlay_leg, parlay_table, read_encumbrance,
+   read_netting_soccer_header_and_lines, read_token_balance, settle_bet_instruction, settle_parlay_instruction,
+   system_owned_empty, uniform_parlay_combined_odds, user, user_collateral_ata, Env, LIABILITY_9_USDC,
+   ODDS_1_9_SCALED, STAKE_10_USDC,
 };
 
 fn grade_ix(results: &[u8], bets: &[solana_pubkey::Pubkey]) -> solana_instruction::Instruction {
@@ -143,6 +145,118 @@ fn scenario_netting_create_add_fill_m4() {
    let b = decode_bet(&env, &bet);
    assert!(b.filler_0.is_potentially_netted);
    assert_eq!(read_encumbrance(&env, &encumbrance_pda()), enc_pre + b.filler_0.encumbrance_delta);
+}
+
+/// Two-outcome ML (`period` 0, `mkt` 0) at 1.9 / 1.9: opposing $10 stakes net to one $9 liability deposit.
+#[test]
+fn scenario_ml_p0_m0_opposing_stakes_net_liability_deposit() {
+   let mut env = Env::new();
+   let eid = event_id_basketball();
+   let mid = market_ml_pregame(eid);
+   let body = oracle_body_two_outcome(ODDS_1_9_SCALED, ODDS_1_9_SCALED);
+   let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
+   env.create_netting_for_event(&eid);
+   let np = netting_pda_for_event(&eid);
+
+   let liab0 = read_token_balance(&env, &liability_token_ata());
+   assert_eq!(liab0, 0, "liability ATA starts empty after register_mm");
+
+   let bet0 = bet_pda_for(&user(), 920);
+   let bat0 = bet_token_ata(&bet0);
+   env.upsert(bet0, system_owned_empty());
+   env.upsert(bat0, system_owned_empty());
+   let fill0 = FillBetIxData {
+      bet_id: 920,
+      market_id: mid,
+      side: 0,
+      amount: STAKE_10_USDC,
+      min_odds_scaled: ODDS_1_9_SCALED,
+      event_state_sequence: 1,
+      event_game_state: EventGameState::zeroed(),
+   };
+   let r0 = env.run_ix(fill_bet_instruction(&fill0, bet0, bat0, &mid, np));
+   assert_ok_record_cu("fill_bet/e2e_ml_p0_m0_net_side0", &r0);
+   assert_bet_after_fill(&env, &bet0, STAKE_10_USDC, 0);
+   let b0 = decode_bet(&env, &bet0);
+   assert!(b0.filler_0.is_potentially_netted);
+   assert_eq!(b0.filler_0.encumbrance_delta, LIABILITY_9_USDC as i64);
+   assert_eq!(read_token_balance(&env, &liability_token_ata()), LIABILITY_9_USDC);
+   assert_eq!(read_encumbrance(&env, &encumbrance_pda()), LIABILITY_9_USDC as i64);
+
+   let bet1 = bet_pda_for(&user(), 921);
+   let bat1 = bet_token_ata(&bet1);
+   env.upsert(bet1, system_owned_empty());
+   env.upsert(bat1, system_owned_empty());
+   let fill1 = FillBetIxData {
+      bet_id: 921,
+      market_id: mid,
+      side: 1,
+      amount: STAKE_10_USDC,
+      min_odds_scaled: ODDS_1_9_SCALED,
+      event_state_sequence: 1,
+      event_game_state: EventGameState::zeroed(),
+   };
+   let r1 = env.run_ix(fill_bet_instruction(&fill1, bet1, bat1, &mid, np));
+   assert_ok_record_cu("fill_bet/e2e_ml_p0_m0_net_side1", &r1);
+   assert_bet_after_fill(&env, &bet1, STAKE_10_USDC, 1);
+   let b1 = decode_bet(&env, &bet1);
+   assert!(b1.filler_0.is_potentially_netted);
+   assert_eq!(b1.filler_0.encumbrance_delta, -(LIABILITY_9_USDC as i64));
+   assert_eq!(
+      read_token_balance(&env, &liability_token_ata()),
+      LIABILITY_9_USDC,
+      "second fill must not pull another $9 from MM collateral"
+   );
+   assert_eq!(read_encumbrance(&env, &encumbrance_pda()), LIABILITY_9_USDC as i64);
+
+   let profit = calc_potential_profit(STAKE_10_USDC, ODDS_1_9_SCALED).unwrap() as i64;
+   let (ft, lines) = read_netting_soccer_header_and_lines(&env, &np);
+   assert!(lines.is_empty(), "ML p0/m0 uses header slots, not line table");
+   assert_eq!(ft[0], profit - STAKE_10_USDC as i64);
+   assert_eq!(ft[1], profit - STAKE_10_USDC as i64);
+   assert_eq!(ft[2], 0);
+}
+
+/// Soccer `mkt` 0 is not a netting market — even with a netting PDA, each fill posts full margin ($9).
+#[test]
+fn scenario_soccer_mkt0_no_netting_double_liability_deposit() {
+   let mut env = Env::new();
+   let eid = event_id_soccer();
+   let mid = MarketId {
+      event_id: eid,
+      player: 0,
+      mkt: 0,
+      period: 0,
+      is_pregame: true,
+   };
+   let body = oracle_body_two_outcome(ODDS_1_9_SCALED, ODDS_1_9_SCALED);
+   let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
+   env.create_netting_for_event(&eid);
+   let np = netting_pda_for_event(&eid);
+
+   for (bet_id, side) in [(930u64, 0u8), (931, 1u8)] {
+      let bet = bet_pda_for(&user(), bet_id);
+      let bat = bet_token_ata(&bet);
+      env.upsert(bet, system_owned_empty());
+      env.upsert(bat, system_owned_empty());
+      let data = FillBetIxData {
+         bet_id,
+         market_id: mid,
+         side,
+         amount: STAKE_10_USDC,
+         min_odds_scaled: ODDS_1_9_SCALED,
+         event_state_sequence: 1,
+         event_game_state: EventGameState::zeroed(),
+      };
+      assert!(env.run_ix(fill_bet_instruction(&data, bet, bat, &mid, np)).program_result.is_ok());
+      let b = decode_bet(&env, &bet);
+      assert!(!b.filler_0.is_potentially_netted);
+   }
+   assert_eq!(
+      read_token_balance(&env, &liability_token_ata()),
+      LIABILITY_9_USDC * 2,
+      "soccer mkt 0 does not participate in calculate_netting"
+   );
 }
 
 #[test]

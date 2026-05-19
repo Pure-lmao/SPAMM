@@ -88,6 +88,17 @@ const leagues: League[] = [
       country_name: "United States",
       abbr: "NBA",
       api_id: "nba",
+   },
+   {
+      id: Number(`${1}${1}${840}`),
+      name: "National Hockey League",
+      sport_id: 5,
+      country_rank: 1,
+      variation: 1,
+      country_code: "840",
+      country_name: "United States",
+      abbr: "NHL",
+      api_id: "nhl",
    }
 ];
 

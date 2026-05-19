@@ -1,9 +1,11 @@
 import { fetchEventsGrouped } from "../../api/localDb";
 import { getEventGameState, getEventStateData, ODDS_SCALE, type EventId, type MarketId } from "spamm-aggregator-sdk";
 import { getInitEventIx, getInitMarketIx, getMmMarketData, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID } from "spamm-market-maker-sdk";
-import { createRpcClients, sendAndConfirmInstructions } from "../client/txSend";
+import { createRpcClients, sendAndConfirmInstructions, withRpcRetry } from "../client/txSend";
+import { sleep } from "bun";
 import { ADMIN_SIGNER } from "../client/admin";
 import type { ESPNOdds } from "../../api/types";
+import type { Instruction } from "@solana/instructions";
 
 // read the db (instead of fetching from the api)
 // check if event exists onchain, if not, create it
@@ -11,6 +13,14 @@ import type { ESPNOdds } from "../../api/types";
 // update the market odds onchain
 
 async function main() {
+   try {
+      await runMarketMakerCycle();
+   } catch (error) {
+      console.error("Market maker cycle failed:", error);
+   }
+}
+
+async function runMarketMakerCycle() {
    console.log("Updating market odds onchain");
    const clients = createRpcClients();
    const dbEventsAndMarkets = fetchEventsGrouped(true)
@@ -28,9 +38,8 @@ async function main() {
             let oddsData;
             try {
                // check for event state account
-               const _eventStateData = await getEventStateData(
-                  clients.rpc, MARKET_MAKER_PROGRAM_ID, 
-                  eventId
+               const _eventStateData = await withRpcRetry(() =>
+                  getEventStateData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId),
                );
                oddsData = await getESPNOdds(sport.api_id, league.api_id, event.api_id);
                // console.log(sport.api_id, league.api_id, event.api_id, oddsData);
@@ -45,8 +54,9 @@ async function main() {
                         ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, eventId, 1, 
                         getEventGameState("PG", 0, 0, 0, 0)
                      )
-                     const txResult = await sendAndConfirmInstructions(
-                        [initEventIx, setEventStateIx], [ADMIN_SIGNER]);
+                     const txResult = await withRpcRetry(() =>
+                        sendAndConfirmInstructions([initEventIx, setEventStateIx], [ADMIN_SIGNER]),
+                     );
                      // console.log("Event created onchain", eventId, txResult);
                   } catch (error) {
                      console.error(error);
@@ -56,7 +66,7 @@ async function main() {
                   console.error(error);
                }
             }
-            const ixs = [];
+            const ixs: Instruction[] = [];
             for (const market of event.markets ?? []) {
                // check for market data account
                const marketId: MarketId = {
@@ -67,9 +77,8 @@ async function main() {
                   isPregame: true,
                };
                try {
-                  const _marketData = await getMmMarketData(
-                     clients.rpc, MARKET_MAKER_PROGRAM_ID, 
-                     marketId
+                  const _marketData = await withRpcRetry(() =>
+                     getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId),
                   );
                } catch (error) {
                   if (error instanceof Error && error.message.includes('MM market data account not found')) {
@@ -156,10 +165,16 @@ async function main() {
             }
             // send the ixs
             if (ixs.length > 0) {
-               const txResult = await sendAndConfirmInstructions(
-                  ixs, [ADMIN_SIGNER]);
-               console.log("Market updated onchain", eventId, txResult);
+               try {
+                  const txResult = await withRpcRetry(() =>
+                     sendAndConfirmInstructions(ixs, [ADMIN_SIGNER]),
+                  );
+                  console.log("Market updated onchain", eventId, txResult);
+               } catch (error) {
+                  console.error(`Failed to update markets for event ${event.id}:`, error);
+               }
             }
+            await sleep(200);
          }
       }
    }
@@ -216,8 +231,8 @@ async function getESPNOdds(sport: string, league: string, event: string): Promis
 
 if (import.meta.main === true) {
    await main();
-   setInterval(async () => {
-      await main();
+   setInterval(() => {
+      void main();
    }, 1000 * 60 * 5);
 }
 
