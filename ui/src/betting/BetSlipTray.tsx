@@ -34,6 +34,8 @@ type PlacedBetSummary = Readonly<{
    signature: string;
    stakeLabel: string;
    oddsLabel: string;
+   /** On-chain payout from filled bet account (potential return at settlement). */
+   filledPayoutLabel: string | null;
    betId: string;
    isParlay: boolean;
    detailErr?: string;
@@ -201,6 +203,9 @@ export function BetSlipTray(): ReactElement | null {
    );
 
    const potentialReturnLabel = useMemo(() => {
+      if (placedBetSummary?.filledPayoutLabel != null) {
+         return placedBetSummary.filledPayoutLabel;
+      }
       const amt = parseUsdcAmountUiToBaseUnits(amount);
       if (amt === null || amt <= 0n || minOddsScaled <= ODDS_SCALE) {
          return "—";
@@ -210,7 +215,7 @@ export function BetSlipTray(): ReactElement | null {
          return "—";
       }
       return `${formatUsdcBaseUnitsForUi(payout)} USDC`;
-   }, [amount, minOddsScaled]);
+   }, [amount, minOddsScaled, placedBetSummary?.filledPayoutLabel]);
 
    const onConnectClick = useCallback(() => {
       resetError();
@@ -325,11 +330,15 @@ export function BetSlipTray(): ReactElement | null {
 
             let stakeLabel = formatUsdcBaseUnitsForUi(amt);
             let oddsLabel = "—";
+            let filledPayoutLabel: string | null = null;
             let detailErr: string | undefined;
             try {
                if (isParlay) {
                   const bet = await getParlayData(rpc, { user: userAddress, betId });
                   stakeLabel = formatUsdcBaseUnitsForUi(bet.amount);
+                  if (bet.payout > 0n) {
+                     filledPayoutLabel = `${formatUsdcBaseUnitsForUi(bet.payout)} USDC`;
+                  }
                   if (bet.amount > 0n && bet.payout > 0n) {
                      const scaled = (bet.payout * ODDS_SCALE) / bet.amount;
                      oddsLabel = oddsDecimalLabel(scaled);
@@ -337,9 +346,21 @@ export function BetSlipTray(): ReactElement | null {
                } else {
                   const bet = await getBetData(rpc, { user: userAddress, betId });
                   stakeLabel = formatUsdcBaseUnitsForUi(bet.amount);
+                  if (bet.payout > 0n) {
+                     filledPayoutLabel = `${formatUsdcBaseUnitsForUi(bet.payout)} USDC`;
+                  }
                   const fill = primaryFill(bet);
                   if (fill !== undefined && fill.oddsScaled > 0n) {
                      oddsLabel = oddsDecimalLabel(fill.oddsScaled);
+                     if (filledPayoutLabel === null && bet.amount > 0n) {
+                        const est = calcPotentialPayoutBase(bet.amount, fill.oddsScaled);
+                        if (est !== null) {
+                           filledPayoutLabel = `${formatUsdcBaseUnitsForUi(est)} USDC`;
+                        }
+                     }
+                  } else if (bet.amount > 0n && bet.payout > 0n) {
+                     const scaled = (bet.payout * ODDS_SCALE) / bet.amount;
+                     oddsLabel = oddsDecimalLabel(scaled);
                   }
                }
             } catch (e) {
@@ -350,6 +371,7 @@ export function BetSlipTray(): ReactElement | null {
                signature,
                stakeLabel,
                oddsLabel,
+               filledPayoutLabel,
                betId: betId.toString(),
                isParlay,
                detailErr,
@@ -431,7 +453,6 @@ export function BetSlipTray(): ReactElement | null {
                <button
                   type="button"
                   className="bet-slip-tray__clear"
-                  disabled={slipLocked}
                   onClick={(e) => {
                      e.stopPropagation();
                      clearSlip();

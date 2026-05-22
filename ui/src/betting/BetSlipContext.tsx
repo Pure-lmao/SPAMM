@@ -16,7 +16,7 @@ import type { BetSlipSelection, BetSlipSelectionInput } from "./types";
 type BetSlipCtx = {
    selections: readonly BetSlipSelection[];
    expanded: boolean;
-   /** True after Place bet until Reuse selection(s); blocks edits to the slip. */
+   /** True after Place bet until Reuse selection(s); blocks parlay leg edits and new picks. */
    slipLocked: boolean;
    setSlipLocked: (locked: boolean) => void;
    toggleSelection: (input: BetSlipSelectionInput) => void;
@@ -35,20 +35,23 @@ export function BetSlipProvider({ children }: { children: ReactNode }): ReactEle
    const [slipLocked, setSlipLocked] = useState(false);
 
    const clearSlip = useCallback(() => {
-      if (slipLocked) {
-         return;
-      }
+      setSlipLocked(false);
       setSelections([]);
       setExpanded(true);
-   }, [slipLocked]);
+   }, []);
 
    const toggleSelection = useCallback((input: BetSlipSelectionInput) => {
-      if (slipLocked) {
-         return;
-      }
       const id = selectionId(input);
       setSelections((prev) => {
          const exactIdx = prev.findIndex((s) => s.id === id);
+         if (slipLocked) {
+            if (exactIdx < 0) {
+               return prev;
+            }
+            if (prev.length >= 2) {
+               return prev;
+            }
+         }
          if (exactIdx >= 0) {
             const next = prev.filter((_, i) => i !== exactIdx);
             if (next.length <= 1) {
@@ -72,10 +75,10 @@ export function BetSlipProvider({ children }: { children: ReactNode }): ReactEle
    }, [slipLocked]);
 
    const removeSelection = useCallback((id: string) => {
-      if (slipLocked) {
-         return;
-      }
       setSelections((prev) => {
+         if (slipLocked && prev.length >= 2) {
+            return prev;
+         }
          const next = prev.filter((s) => s.id !== id);
          if (next.length <= 1) {
             setExpanded(true);
