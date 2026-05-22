@@ -8,8 +8,8 @@ export type MarketRow = {
    line_value: number | null;
 };
 
-/** Props for the bet sheet when an odds cell is opened. */
-export type BetModalOpenContext = {
+/** Input when toggling a selection from an odds cell. */
+export type BetSlipSelectionInput = {
    eventTitle: string;
    marketLabel: string;
    displayedDecimalOdds: number | null;
@@ -22,3 +22,11 @@ export type BetModalOpenContext = {
    outcomeIndex: number;
    mktString: string;
 };
+
+/** One leg stored in the bet slip (includes stable `id`). */
+export type BetSlipSelection = BetSlipSelectionInput & {
+   id: string;
+};
+
+/** @deprecated Use {@link BetSlipSelectionInput}. */
+export type BetModalOpenContext = BetSlipSelectionInput;

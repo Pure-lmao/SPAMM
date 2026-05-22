@@ -1,7 +1,7 @@
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
-import { BetModalProvider } from "./betting/BetModalContext";
+import { BetSlipProvider } from "./betting/BetSlipContext";
 import { SolanaProviders } from "./providers/SolanaProviders";
 import { AppRoutes } from "./routes";
 import "./index.css";
@@ -12,9 +12,9 @@ if (el) {
       <StrictMode>
          <BrowserRouter>
             <SolanaProviders>
-               <BetModalProvider>
+               <BetSlipProvider>
                   <AppRoutes />
-               </BetModalProvider>
+               </BetSlipProvider>
             </SolanaProviders>
          </BrowserRouter>
       </StrictMode>,

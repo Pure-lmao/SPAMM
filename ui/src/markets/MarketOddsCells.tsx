@@ -6,10 +6,12 @@ export function OddButtons({
    values,
    className,
    onPickIndex,
+   isIndexSelected,
 }: {
    values: number[];
    className?: string;
    onPickIndex?: (index: number) => void;
+   isIndexSelected?: (index: number) => boolean;
 }): ReactElement {
    const cols = Math.max(values.length, 1);
    const gridStyle = { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` } as const;
@@ -27,7 +29,7 @@ export function OddButtons({
                   <button
                      key={i}
                      type="button"
-                     className="odd-btn"
+                     className={["odd-btn", isIndexSelected?.(i) ? "odd-btn--selected" : ""].filter(Boolean).join(" ")}
                      onClick={() => onPickIndex?.(i)}
                   >
                      <span className="odds-value">{fmtOdd(v)}</span>
@@ -78,6 +80,7 @@ export function LineWithOddsCell({
    lineKind,
    market,
    onPick,
+   isIndexSelected,
 }: {
    line: string;
    values: number[];
@@ -86,6 +89,7 @@ export function LineWithOddsCell({
    /** Required for spread: used to show home/away handicap in each paired button. */
    market?: MarketLineSource;
    onPick: (outcomeIndex: number, decimalOdds: number) => void;
+   isIndexSelected?: (outcomeIndex: number) => boolean;
 }): ReactElement {
    const displayLine = formatMarketLineDisplay(line, lineKind);
    const lineClass =
@@ -105,7 +109,7 @@ export function LineWithOddsCell({
                   <button
                      key={i}
                      type="button"
-                     className="odd-btn"
+                     className={["odd-btn", isIndexSelected?.(i) ? "odd-btn--selected" : ""].filter(Boolean).join(" ")}
                      disabled={noPick}
                      onClick={() => onPick(i, decimalOddsFromDb(pair[i]))}
                   >
@@ -133,6 +137,7 @@ export function LineWithOddsCell({
          <OddButtons
             values={totalValues}
             className="odds-buttons--inline"
+            isIndexSelected={isIndexSelected}
             onPickIndex={(i) => {
                const v = totalValues[i]!;
                onPick(i, decimalOddsFromDb(v));
@@ -146,10 +151,12 @@ export function MainOddsCell({
    detail,
    sportId,
    onPick,
+   isIndexSelected,
 }: {
    detail: { values: number[] } | null;
    sportId: number;
    onPick: (outcomeIndex: number, decimalOdds: number) => void;
+   isIndexSelected?: (outcomeIndex: number) => boolean;
 }): ReactElement {
    if (!detail) {
       return <EmptyMainOddsPlaceholder sportId={sportId} />;
@@ -158,6 +165,7 @@ export function MainOddsCell({
       <div className="odds-stack">
          <OddButtons
             values={detail.values}
+            isIndexSelected={isIndexSelected}
             onPickIndex={(i) => {
                const v = detail.values[i]!;
                onPick(i, decimalOddsFromDb(v));

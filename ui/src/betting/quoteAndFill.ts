@@ -2,9 +2,13 @@ import type { Address, Rpc, SolanaRpcApi, TransactionSigner } from "@solana/kit"
 import {
    decodeMmReturnData,
    getFillBetIx,
+   getFillParlayIx,
    getMmGetQuoteIx,
+   getMmGetQuoteParlayIx,
    ODDS_SCALE,
+   type FillParlayIxData,
    type MarketId,
+   type ParlayLegWire,
 } from "spamm-aggregator-sdk";
 import { DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG } from "./chainIds";
 import { getMmListCached } from "./mmCache";
@@ -104,6 +108,70 @@ export async function buildAndSignFillBetTx(params: {
       params.userAddress,
       params.mmPrograms,
    );
+   return buildSignV0Transaction(params.rpc, {
+      feePayer: params.walletSigner,
+      instructions: [ix],
+      signers: [params.walletSigner],
+      useALT: false,
+   });
+}
+
+export async function runMmParlayQuoteFlow(params: {
+   rpc: Rpc<SolanaRpcApi>;
+   userAddress: Address;
+   legs: readonly ParlayLegWire[];
+   amount: bigint;
+}): Promise<QuoteFlowResult & { bestMm: MmQuoteRow | null }> {
+   const errors: string[] = [];
+   const mmList = await getMmListCached(params.rpc);
+
+   const rows = await Promise.all(
+      mmList.mmProgramAddresses.map(async (mmProgramAddress: Address) => {
+         try {
+            const quoteIx = await getMmGetQuoteParlayIx(
+               {
+                  amount: params.amount,
+                  minOddsScaled: QUOTE_PROBE_MIN_ODDS,
+                  legs: params.legs,
+               },
+               mmProgramAddress,
+               params.userAddress,
+            );
+            const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress, false);
+            if (!returnData) {
+               return undefined;
+            }
+            const parsed = decodeMmReturnData(returnData);
+            if (parsed.maxAmount > 0n && parsed.oddsScaled > 0n) {
+               return { mmProgramAddress, ...parsed };
+            }
+         } catch (e) {
+            errors.push(`${mmProgramAddress}: ${e instanceof Error ? e.message : String(e)}`);
+         }
+         return undefined;
+      }),
+   );
+
+   const valid = rows.filter((x): x is MmQuoteRow => x !== undefined);
+   const fills = valid.filter((x) => x.maxAmount >= params.amount);
+   const sorted = [...fills].sort((a, b) => Number(b.oddsScaled - a.oddsScaled));
+   const best = sorted[0] ?? null;
+   const conservativeMinOddsScaled =
+      best === null
+         ? QUOTE_PROBE_MIN_ODDS
+         : sorted.reduce((m, x) => (x.oddsScaled < m ? x.oddsScaled : m), best.oddsScaled);
+
+   return { topMms: sorted.slice(0, 5), conservativeMinOddsScaled, errors, bestMm: best };
+}
+
+export async function buildAndSignFillParlayTx(params: {
+   rpc: Rpc<SolanaRpcApi>;
+   walletSigner: TransactionSigner;
+   userAddress: Address;
+   fill: FillParlayIxData;
+   mmProgram: Address;
+}): Promise<ReturnType<typeof buildSignV0Transaction>> {
+   const ix = await getFillParlayIx(params.fill, params.userAddress, params.userAddress, params.mmProgram);
    return buildSignV0Transaction(params.rpc, {
       feePayer: params.walletSigner,
       instructions: [ix],

@@ -9,10 +9,16 @@ import {
    type SolanaRpcApi,
 } from "@solana/kit";
 import { useCluster, useKitTransactionSigner, useWallet } from "@solana/connector/react";
-import { BetResult, getBetsData, getSettleBetIx, ODDS_SCALE, type BetAccountData } from "spamm-aggregator-sdk";
+import { BetResult, getSettleBetIx, getSettleParlayIx, ODDS_SCALE, type BetAccountData } from "spamm-aggregator-sdk";
 import { compileUnsignedV0TransactionChunks, httpToWsRpcUrl, resolveHttpRpcUrl } from "../betting/txPipeline";
 import { formatUsdcBaseUnitsForUi } from "../betting/usdc";
-import { fetchClosedBetHistory } from "../markets/fetchBetHistory";
+import {
+   fetchClosedBetHistory,
+   fetchOpenWalletBets,
+   walletBetRowResult,
+   type WalletBetRow,
+   type WalletParlayLeg,
+} from "../markets/fetchBetHistory";
 import { fetchOneEvent } from "../markets/fetchEvent";
 import { betMarketDisplayLines, eventLookupKey } from "../markets/myBetsMarketDisplay";
 import type { UiGroupedEvent } from "../markets/types";
@@ -78,15 +84,15 @@ function oddsFromScaled(scaled: bigint): string {
 }
 
 /** Effective filled odds from on-chain `payout` / `amount` (unchanged after grading). */
-function filledOddsScaled(b: BetAccountData): bigint | null {
-   if (b.amount <= 0n || b.payout <= 0n) {
+function filledOddsScaledFromStake(amount: bigint, payout: bigint): bigint | null {
+   if (amount <= 0n || payout <= 0n) {
       return null;
    }
-   return (b.payout * ODDS_SCALE) / b.amount;
+   return (payout * ODDS_SCALE) / amount;
 }
 
-function filledOddsUi(b: BetAccountData): string {
-   const scaled = filledOddsScaled(b);
+function filledOddsUiFromStake(amount: bigint, payout: bigint): string {
+   const scaled = filledOddsScaledFromStake(amount, payout);
    return scaled !== null ? oddsFromScaled(scaled) : "—";
 }
 
@@ -94,22 +100,26 @@ function filledOddsUi(b: BetAccountData): string {
  * Settled bet return in USDC base units from stake, filled decimal odds, and grade.
  * Open (pending) bets use on-chain `payout` as max potential instead.
  */
-function settledReturnBaseUnits(b: BetAccountData, oddsScaled: bigint | null): bigint {
-   const amount = b.amount;
+function settledReturnBaseUnits(
+   amount: bigint,
+   payout: bigint,
+   result: BetResult,
+   oddsScaled: bigint | null,
+): bigint {
    const hasOdds = oddsScaled !== null && oddsScaled > 0n;
 
-   switch (b.result) {
+   switch (result) {
       case BetResult.Won:
          if (hasOdds) {
             return (amount * oddsScaled) / ODDS_SCALE;
          }
-         return b.payout;
+         return payout;
       case BetResult.HalfWon: {
          if (hasOdds) {
             const half = amount / 2n;
             return half + (half * oddsScaled) / ODDS_SCALE;
          }
-         return b.payout;
+         return payout;
       }
       case BetResult.Lost:
          return 0n;
@@ -120,7 +130,7 @@ function settledReturnBaseUnits(b: BetAccountData, oddsScaled: bigint | null): b
       case BetResult.RolledBack:
          return amount;
       default:
-         return b.payout;
+         return payout;
    }
 }
 
@@ -135,6 +145,73 @@ function solscanAddressUrl(address: string): string {
    return `https://solscan.io/account/${encodeURIComponent(address)}?cluster=devnet`;
 }
 
+function BetBanner({
+   betPda,
+   betId,
+   result,
+}: {
+   betPda: string;
+   betId: bigint;
+   result: BetResult;
+}): ReactElement {
+   return (
+      <div className={`my-bets-card__banner my-bets-card__banner--${resultModifierClass(result)}`}>
+         <span className="my-bets-card__banner-result">{betResultLabel(result)}</span>
+         <div className="my-bets-card__banner-meta">
+            <span className="my-bets-card__bet-id" title={`Bet ID ${betId.toString()}`}>
+               {betId.toString()}
+            </span>
+            <a
+               href={solscanAddressUrl(betPda)}
+               target="_blank"
+               rel="noopener noreferrer"
+               className="my-bets-card__account-link"
+               title={betPda}
+            >
+               {truncateAddressMiddle(betPda)}
+            </a>
+         </div>
+      </div>
+   );
+}
+
+function BetStakeGrid({
+   amount,
+   payout,
+   result,
+}: {
+   amount: bigint;
+   payout: bigint;
+   result: BetResult;
+}): ReactElement {
+   const oddsScaled = filledOddsScaledFromStake(amount, payout);
+   const oddsUi = filledOddsUiFromStake(amount, payout);
+   const settled = result !== BetResult.Pending;
+   const payoutLabel = settled ? "Return" : "Potential payout";
+   const payoutBase = settled ? settledReturnBaseUnits(amount, payout, result, oddsScaled) : payout;
+
+   return (
+      <dl className="my-bets-card__grid">
+         <div>
+            <dt>Stake</dt>
+            <dd>
+               <strong>{formatUsdcBaseUnitsForUi(amount)}</strong> USDC
+            </dd>
+         </div>
+         <div>
+            <dt>Filled odds</dt>
+            <dd>{oddsUi === "—" ? "—" : `${oddsUi}`}</dd>
+         </div>
+         <div>
+            <dt>{payoutLabel}</dt>
+            <dd>
+               <strong>{formatUsdcBaseUnitsForUi(payoutBase)}</strong> USDC
+            </dd>
+         </div>
+      </dl>
+   );
+}
+
 function BetCard({
    betPda,
    b,
@@ -144,60 +221,90 @@ function BetCard({
    b: BetAccountData;
    eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
 }): ReactElement {
-   const oddsScaled = filledOddsScaled(b);
-   const oddsUi = filledOddsUi(b);
-   const settled = b.result !== BetResult.Pending;
-   const payoutLabel = settled ? "Return" : "Potential payout";
-   const payoutBase = settled ? settledReturnBaseUnits(b, oddsScaled) : b.payout;
    const ek = eventLookupKey(b.marketId);
    const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side);
 
    return (
       <li className="my-bets-card">
-         <div className={`my-bets-card__banner my-bets-card__banner--${resultModifierClass(b.result)}`}>
-            <span className="my-bets-card__banner-result">{betResultLabel(b.result)}</span>
-            <div className="my-bets-card__banner-meta">
-               <span className="my-bets-card__bet-id" title={`Bet ID ${b.betId.toString()}`}>
-                  {b.betId.toString()}
-               </span>
-               <a
-                  href={solscanAddressUrl(betPda)}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="my-bets-card__account-link"
-                  title={betPda}
-               >
-                  {truncateAddressMiddle(betPda)}
-               </a>
-            </div>
-         </div>
+         <BetBanner betPda={betPda} betId={b.betId} result={b.result} />
          <div className="my-bets-card__body">
             <p className="my-bets-card__event-line">
                <span className="my-bets-card__event-title">{lines.eventTitle}</span>
                {lines.liveSuffix !== "" && <span className="my-bets-card__live-mark">{lines.liveSuffix}</span>}
             </p>
             <p className="my-bets-card__market-detail">{lines.detailLine}</p>
-            <dl className="my-bets-card__grid">
-               <div>
-                  <dt>Stake</dt>
-                  <dd>
-                     <strong>{formatUsdcBaseUnitsForUi(b.amount)}</strong> USDC
-                  </dd>
-               </div>
-               <div>
-                  <dt>Filled odds</dt>
-                  <dd>{oddsUi === "—" ? "—" : `${oddsUi}`}</dd>
-               </div>
-               <div>
-                  <dt>{payoutLabel}</dt>
-                  <dd>
-                     <strong>{formatUsdcBaseUnitsForUi(payoutBase)}</strong> USDC
-                  </dd>
-               </div>
-            </dl>
+            <BetStakeGrid amount={b.amount} payout={b.payout} result={b.result} />
          </div>
       </li>
    );
+}
+
+function ParlayLegRow({
+   leg,
+   legIndex,
+   eventsByKey,
+}: {
+   leg: WalletParlayLeg;
+   legIndex: number;
+   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+}): ReactElement {
+   const ek = eventLookupKey(leg.marketId);
+   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, leg.marketId, leg.side);
+   return (
+      <li className="my-bets-card__parlay-leg">
+         <span className="my-bets-card__parlay-leg-num" aria-hidden>
+            {legIndex + 1}
+         </span>
+         <div className="my-bets-card__parlay-leg-text">
+            <p className="my-bets-card__event-line">
+               <span className="my-bets-card__event-title">{lines.eventTitle}</span>
+               {lines.liveSuffix !== "" && <span className="my-bets-card__live-mark">{lines.liveSuffix}</span>}
+            </p>
+            <p className="my-bets-card__market-detail">{lines.detailLine}</p>
+         </div>
+      </li>
+   );
+}
+
+function ParlayBetCard({
+   betPda,
+   row,
+   eventsByKey,
+}: {
+   betPda: string;
+   row: Extract<WalletBetRow, { kind: "parlay" }>;
+   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+}): ReactElement {
+   const legCount = row.legs.length;
+   return (
+      <li className="my-bets-card my-bets-card--parlay">
+         <BetBanner betPda={betPda} betId={row.betId} result={row.result} />
+         <div className="my-bets-card__body">
+            <p className="my-bets-card__parlay-heading">
+               Parlay · {legCount} {legCount === 1 ? "leg" : "legs"}
+            </p>
+            <ol className="my-bets-card__parlay-legs">
+               {row.legs.map((leg, i) => (
+                  <ParlayLegRow key={`${betPda}-${i}`} leg={leg} legIndex={i} eventsByKey={eventsByKey} />
+               ))}
+            </ol>
+            <BetStakeGrid amount={row.amount} payout={row.payout} result={row.result} />
+         </div>
+      </li>
+   );
+}
+
+function WalletBetCard({
+   row,
+   eventsByKey,
+}: {
+   row: WalletBetRow;
+   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+}): ReactElement {
+   if (row.kind === "parlay") {
+      return <ParlayBetCard betPda={row.address} row={row} eventsByKey={eventsByKey} />;
+   }
+   return <BetCard betPda={row.address} b={row.data} eventsByKey={eventsByKey} />;
 }
 
 export function MyBetsPage(): ReactElement {
@@ -220,10 +327,10 @@ export function MyBetsPage(): ReactElement {
 
    const [state, setState] = useState<LoadState>("idle");
    const [err, setErr] = useState<string | null>(null);
-   const [rows, setRows] = useState<readonly { address: string; data: BetAccountData }[]>([]);
+   const [rows, setRows] = useState<readonly WalletBetRow[]>([]);
    const [closedState, setClosedState] = useState<LoadState>("idle");
    const [closedErr, setClosedErr] = useState<string | null>(null);
-   const [closedRows, setClosedRows] = useState<readonly { address: string; data: BetAccountData }[]>([]);
+   const [closedRows, setClosedRows] = useState<readonly WalletBetRow[]>([]);
    const [betTab, setBetTab] = useState<MyBetsTab>("open");
    const [eventsByKey, setEventsByKey] = useState<ReadonlyMap<string, UiGroupedEvent | null>>(() => new Map());
    const [claimBusy, setClaimBusy] = useState(false);
@@ -231,7 +338,7 @@ export function MyBetsPage(): ReactElement {
    const claimLockRef = useRef(false);
 
    const settledRows = useMemo(
-      () => rows.filter(({ data }) => data.result !== BetResult.Pending),
+      () => rows.filter((row) => walletBetRowResult(row) !== BetResult.Pending),
       [rows],
    );
 
@@ -240,20 +347,29 @@ export function MyBetsPage(): ReactElement {
       [settledRows.length],
    );
 
-   const activeRows = betTab === "open" ? rows : closedRows;
    const activeState = betTab === "open" ? state : closedState;
    const activeErr = betTab === "open" ? err : closedErr;
+   const openCount = rows.length;
+   const closedCount = closedRows.length;
+   const activeEmpty = betTab === "open" ? openCount === 0 : closedCount === 0;
+   const activeLoading = activeState === "loading" && activeEmpty;
 
    const eventKeys = useMemo(() => {
       const keys = new Map<string, { sport: number; league: number; event: number }>();
-      for (const { data } of activeRows) {
-         const mid = data.marketId;
-         const eid = mid.eventId;
-         const k = eventLookupKey(mid);
-         keys.set(k, { sport: eid.sport, league: eid.league, event: Number(eid.event) });
+      const tabRows = betTab === "open" ? rows : closedRows;
+      for (const row of tabRows) {
+         const markets =
+            row.kind === "single"
+               ? [{ marketId: row.data.marketId }]
+               : row.legs.map((leg) => ({ marketId: leg.marketId }));
+         for (const { marketId: mid } of markets) {
+            const eid = mid.eventId;
+            const k = eventLookupKey(mid);
+            keys.set(k, { sport: eid.sport, league: eid.league, event: Number(eid.event) });
+         }
       }
       return keys;
-   }, [activeRows]);
+   }, [betTab, closedRows, rows]);
 
    useEffect(() => {
       if (eventKeys.size === 0) {
@@ -291,10 +407,8 @@ export function MyBetsPage(): ReactElement {
       setState("loading");
       setErr(null);
       try {
-         const user = address(account);
-         const list = await getBetsData(rpc, { user });
-         const sorted = [...list].sort((a, b) => (a.data.betId < b.data.betId ? 1 : a.data.betId > b.data.betId ? -1 : 0));
-         setRows(sorted.map((r) => ({ address: String(r.address), data: r.data })));
+         const list = await fetchOpenWalletBets(rpc, account);
+         setRows(list);
          setState("ok");
       } catch (e) {
          setErr(e instanceof Error ? e.message : String(e));
@@ -313,8 +427,7 @@ export function MyBetsPage(): ReactElement {
       setClosedErr(null);
       try {
          const list = await fetchClosedBetHistory(account);
-         const sorted = [...list].sort((a, b) => (a.data.betId < b.data.betId ? 1 : a.data.betId > b.data.betId ? -1 : 0));
-         setClosedRows(sorted);
+         setClosedRows(list);
          setClosedState("ok");
       } catch (e) {
          setClosedErr(e instanceof Error ? e.message : String(e));
@@ -339,12 +452,13 @@ export function MyBetsPage(): ReactElement {
       setClaimErr(null);
       try {
          const userAddr = address(account);
-         const fetchGraded = async () => {
-            const list = await getBetsData(rpc, { user: userAddr });
-            return list.filter((r) => r.data.result !== BetResult.Pending);
-         };
-         let bets = await fetchGraded();
-         if (bets.length === 0) {
+         const graded = settledRows.filter((row) => {
+            if (row.kind === "parlay" && row.account === undefined) {
+               return false;
+            }
+            return true;
+         });
+         if (graded.length === 0) {
             return;
          }
          const sendAndConfirm = sendAndConfirmTransactionFactory({
@@ -352,7 +466,13 @@ export function MyBetsPage(): ReactElement {
             rpcSubscriptions,
          } as never);
          const instructionList = await Promise.all(
-            bets.map(({ address, data }) => getSettleBetIx(userAddr, address, data)),
+            graded.map((row) => {
+               const betPda = address(row.address);
+               if (row.kind === "single") {
+                  return getSettleBetIx(userAddr, betPda, row.data);
+               }
+               return getSettleParlayIx(userAddr, betPda, row.account!);
+            }),
          );
          const instructionChunks: (typeof instructionList)[] = [];
          for (let i = 0; i < instructionList.length; i += MAX_SETTLE_IX_PER_TX) {
@@ -373,7 +493,7 @@ export function MyBetsPage(): ReactElement {
             await sendAndConfirm(signed as never, { commitment: "confirmed" });
             const from = chunkIdx * MAX_SETTLE_IX_PER_TX;
             const settledAddresses = new Set(
-               bets.slice(from, from + MAX_SETTLE_IX_PER_TX).map((r) => String(r.address)),
+               graded.slice(from, from + MAX_SETTLE_IX_PER_TX).map((r) => r.address),
             );
             setRows((prev) => prev.filter((row) => !settledAddresses.has(row.address)));
          }
@@ -385,7 +505,7 @@ export function MyBetsPage(): ReactElement {
          setClaimBusy(false);
          claimLockRef.current = false;
       }
-   }, [account, isConnected, loadClosed, loadOpen, rpc, rpcSubscriptions, signerReady, walletSigner]);
+   }, [account, isConnected, loadClosed, loadOpen, rpc, rpcSubscriptions, settledRows, signerReady, walletSigner]);
 
    if (!isConnected || !account) {
       return (
@@ -456,20 +576,26 @@ export function MyBetsPage(): ReactElement {
          </div>
 
          <div className="my-bets-page__tab-panel" role="tabpanel">
-            {activeState === "loading" && activeRows.length === 0 && (
-               <p className="my-bets-page__loading">Loading bets…</p>
-            )}
+            {activeLoading && <p className="my-bets-page__loading">Loading bets…</p>}
 
-            {activeState === "ok" && activeRows.length === 0 && (
+            {activeState === "ok" && activeEmpty && (
                <p className="my-bets-page__empty">
                   {betTab === "open" ? "No bets found for this wallet." : "No closed bets found for this wallet."}
                </p>
             )}
 
-            {activeRows.length > 0 && (
+            {betTab === "open" && openCount > 0 && (
                <ul className="my-bets-list">
-                  {activeRows.map(({ address: betPda, data: b }) => (
-                     <BetCard key={betPda} betPda={betPda} b={b} eventsByKey={eventsByKey} />
+                  {rows.map((row) => (
+                     <WalletBetCard key={row.address} row={row} eventsByKey={eventsByKey} />
+                  ))}
+               </ul>
+            )}
+
+            {betTab === "closed" && closedCount > 0 && (
+               <ul className="my-bets-list">
+                  {closedRows.map((row) => (
+                     <WalletBetCard key={row.address} row={row} eventsByKey={eventsByKey} />
                   ))}
                </ul>
             )}

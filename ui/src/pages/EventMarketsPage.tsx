@@ -3,7 +3,7 @@ import { Link, useLocation, useParams } from "react-router-dom";
 import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import type { MarketRow } from "../betting/types";
-import { useBetModal } from "../betting/BetModalContext";
+import { useBetSlip } from "../betting/BetSlipContext";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
 import { fetchOneEvent } from "../markets/fetchEvent";
 import { marketPrimaryLabel, periodCaption, shouldShowPeriodBadge } from "../markets/eventMarketsDisplay";
@@ -40,7 +40,7 @@ export function EventMarketsPage(): ReactElement {
    const { sportId, leagueId, eventId } = useParams();
    const { state } = useLocation();
    const leagueName = (state as NavState | null)?.leagueName?.trim() ?? "";
-   const { openBet } = useBetModal();
+   const { toggleSelection, isSelected } = useBetSlip();
    const [ev, setEv] = useState<EventPayload | null>(null);
    const [err, setErr] = useState<string | null>(null);
 
@@ -96,9 +96,9 @@ export function EventMarketsPage(): ReactElement {
    const homeHead = ev.home_name.trim() !== "" ? ev.home_name.trim() : oddsTableLabels.home;
    const awayHead = ev.away_name.trim() !== "" ? ev.away_name.trim() : oddsTableLabels.away;
 
-   const openSheet = (m: UiMarket, column: ReturnType<typeof inferBetColumn>, outcomeIndex: number, dbOdds: number) => {
+   const toggleSheet = (m: UiMarket, column: ReturnType<typeof inferBetColumn>, outcomeIndex: number, dbOdds: number) => {
       const dec = decimalOddsFromDb(dbOdds);
-      openBet({
+      toggleSelection({
          eventTitle: displayEventTitle(ev),
          marketLabel: buildMarketLabel(column, toMarketRow(m), pickBetSide(column, m.mkt_string, outcomeIndex), {
             homeName: ev.home_name,
@@ -114,6 +114,22 @@ export function EventMarketsPage(): ReactElement {
          outcomeIndex,
          mktString: m.mkt_string,
       });
+   };
+
+   const oddBtnClass = (
+      m: UiMarket,
+      column: ReturnType<typeof inferBetColumn>,
+      outcomeIndex: number,
+      extra?: string,
+   ) => {
+      const picked = isSelected({
+         eventId: ev.id,
+         marketWireId: m.id,
+         periodId: m.period_id,
+         column,
+         outcomeIndex,
+      });
+      return ["odd-btn", picked ? "odd-btn--selected" : "", extra].filter(Boolean).join(" ");
    };
 
    return (
@@ -171,8 +187,8 @@ export function EventMarketsPage(): ReactElement {
                                                 ) : (
                                                    <button
                                                       type="button"
-                                                      className="odd-btn"
-                                                      onClick={() => openSheet(m, column, i, v)}
+                                                      className={oddBtnClass(m, column, i)}
+                                                      onClick={() => toggleSheet(m, column, i, v)}
                                                    >
                                                       <span className="odds-value">{fmtOdd(v)}</span>
                                                    </button>
@@ -233,9 +249,9 @@ export function EventMarketsPage(): ReactElement {
                                        <td className="event-markets-td-odds">
                                           <button
                                              type="button"
-                                             className="odd-btn"
+                                             className={oddBtnClass(m, column, 0)}
                                              disabled={homeDead}
-                                             onClick={() => openSheet(m, column, 0, home)}
+                                             onClick={() => toggleSheet(m, column, 0, home)}
                                           >
                                              <span className={homeLine === "—" ? "odd-btn__line odd-btn__line--na" : "odd-btn__line"}>
                                                 {homeLine}
@@ -248,9 +264,9 @@ export function EventMarketsPage(): ReactElement {
                                        <td className="event-markets-td-odds">
                                           <button
                                              type="button"
-                                             className="odd-btn"
+                                             className={oddBtnClass(m, column, 1)}
                                              disabled={awayDead}
-                                             onClick={() => openSheet(m, column, 1, away)}
+                                             onClick={() => toggleSheet(m, column, 1, away)}
                                           >
                                              <span className={awayLine === "—" ? "odd-btn__line odd-btn__line--na" : "odd-btn__line"}>
                                                 {awayLine}
@@ -318,8 +334,8 @@ export function EventMarketsPage(): ReactElement {
                                        ) : (
                                           <button
                                              type="button"
-                                             className="odd-btn"
-                                             onClick={() => openSheet(m, column, 0, o0)}
+                                             className={oddBtnClass(m, column, 0)}
+                                             onClick={() => toggleSheet(m, column, 0, o0)}
                                           >
                                              <span className="odds-value">{fmtOdd(o0)}</span>
                                           </button>
@@ -333,8 +349,8 @@ export function EventMarketsPage(): ReactElement {
                                        ) : (
                                           <button
                                              type="button"
-                                             className="odd-btn"
-                                             onClick={() => openSheet(m, column, 1, o1)}
+                                             className={oddBtnClass(m, column, 1)}
+                                             onClick={() => toggleSheet(m, column, 1, o1)}
                                           >
                                              <span className="odds-value">{fmtOdd(o1)}</span>
                                           </button>
@@ -390,8 +406,8 @@ export function EventMarketsPage(): ReactElement {
                                                    ) : (
                                                       <button
                                                          type="button"
-                                                         className="odd-btn"
-                                                         onClick={() => openSheet(m, column, i, v)}
+                                                         className={oddBtnClass(m, column, i)}
+                                                         onClick={() => toggleSheet(m, column, i, v)}
                                                       >
                                                          <span className="odds-value">{fmtOdd(v)}</span>
                                                       </button>

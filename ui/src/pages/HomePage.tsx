@@ -3,7 +3,7 @@ import { Link } from "react-router-dom";
 import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import type { BetColumn, MarketRow } from "../betting/types";
-import { useBetModal } from "../betting/BetModalContext";
+import { useBetSlip } from "../betting/BetSlipContext";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
 import { LineWithOddsCell, MainOddsCell, EmptyTotalOddsPlaceholder } from "../markets/MarketOddsCells";
 import {
@@ -68,7 +68,7 @@ function computeMatchColPx(tree: UiGroupedSport[], font: string): number {
 }
 
 export function HomePage(): ReactElement {
-   const { openBet } = useBetModal();
+   const { toggleSelection, isSelected } = useBetSlip();
    const [tree, setTree] = useState<UiGroupedSport[] | null>(null);
    const [err, setErr] = useState<string | null>(null);
    const [collapsedSports, setCollapsedSports] = useState<Set<number>>(() => new Set());
@@ -268,13 +268,13 @@ export function HomePage(): ReactElement {
                                              const mainDetail = getMainOddsDetail(mkts, sport.id);
                                              const moreN = extraMarketsCount(mkts);
 
-                                             const openSheet = (
+                                             const toggleSheet = (
                                                 column: BetColumn,
                                                 row: MarketRow,
                                                 outcomeIndex: number,
                                                 decimalOdds: number,
                                              ) => {
-                                                openBet({
+                                                toggleSelection({
                                                    eventTitle: displayEventTitle(ev),
                                                    marketLabel: buildMarketLabel(
                                                       column,
@@ -297,6 +297,15 @@ export function HomePage(): ReactElement {
                                                 });
                                              };
 
+                                             const legSelected = (column: BetColumn, row: MarketRow, outcomeIndex: number) =>
+                                                isSelected({
+                                                   eventId: ev.id,
+                                                   marketWireId: row.id,
+                                                   periodId: row.period_id,
+                                                   column,
+                                                   outcomeIndex,
+                                                });
+
                                              return (
                                                 <tr key={ev.id} data-sport={sport.id}>
                                                    <td className="match-main">
@@ -318,11 +327,15 @@ export function HomePage(): ReactElement {
                                                       <MainOddsCell
                                                          detail={mainDetail}
                                                          sportId={sport.id}
+                                                         isIndexSelected={(outcomeIndex) =>
+                                                            mainDetail != null &&
+                                                            legSelected("main", toMarketRow(mainDetail.market), outcomeIndex)
+                                                         }
                                                          onPick={(outcomeIndex, decimalOdds) => {
                                                             if (mainDetail == null) {
                                                                return;
                                                             }
-                                                            openSheet(
+                                                            toggleSheet(
                                                                "main",
                                                                toMarketRow(mainDetail.market),
                                                                outcomeIndex,
@@ -339,8 +352,11 @@ export function HomePage(): ReactElement {
                                                             sportId={sport.id}
                                                             lineKind="spread"
                                                             market={sp.market}
+                                                            isIndexSelected={(outcomeIndex) =>
+                                                               legSelected("spread", toMarketRow(sp.market), outcomeIndex)
+                                                            }
                                                             onPick={(outcomeIndex, decimalOdds) =>
-                                                               openSheet(
+                                                               toggleSheet(
                                                                   "spread",
                                                                   toMarketRow(sp.market),
                                                                   outcomeIndex,
@@ -368,8 +384,11 @@ export function HomePage(): ReactElement {
                                                             values={tot.values}
                                                             sportId={sport.id}
                                                             lineKind="total"
+                                                            isIndexSelected={(outcomeIndex) =>
+                                                               legSelected("total", toMarketRow(tot.market), outcomeIndex)
+                                                            }
                                                             onPick={(outcomeIndex, decimalOdds) =>
-                                                               openSheet(
+                                                               toggleSheet(
                                                                   "total",
                                                                   toMarketRow(tot.market),
                                                                   outcomeIndex,

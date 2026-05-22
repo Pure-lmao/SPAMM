@@ -33,6 +33,8 @@ import {
 import {
    BET_ACCOUNT_DISCRIMINATOR,
    BET_ACCOUNT_LEN,
+   PARLAY_BET_ACCOUNT_DISCRIMINATOR,
+   PARLAY_BET_ACCOUNT_LEN,
    type BetAccountData,
    type ConfigPdaData,
    type EventId,
@@ -69,6 +71,21 @@ export const BET_ACCOUNT_WIRE_OFFSETS = {
    eventGameState: 116,
    result: 124,
    filler0: 125,
+} as const;
+
+/** Byte offsets for on-chain `ParlayBetAccountData` (`account_parlay_bet.rs`). */
+export const PARLAY_BET_ACCOUNT_WIRE_OFFSETS = {
+   discriminator: 0,
+   bump: 1,
+   owner: 2,
+   feepayer: 34,
+   betId: 66,
+   amount: 74,
+   payout: 82,
+   fillerAddress: 90,
+   result: 122,
+   numLegs: 123,
+   legs: 124,
 } as const;
 
 export type ProgramAccountRaw = Readonly<{
@@ -306,6 +323,66 @@ export async function getBetsData(
    return rows.map((row) => ({
       address: row.address,
       data: decodeBetAccountDataStrict(row.data),
+   }));
+}
+
+export type GetParlaysDataFilters = Readonly<{
+   user?: Address;
+   feepayer?: Address;
+   amount?: bigint;
+   betId?: bigint;
+   result?: ParlayBetAccountData['result'];
+}>;
+
+/**
+ * Parlay bet PDA accounts under {@link AGGREGATOR_PROGRAM_ID}, filtered by discriminator and fixed size.
+ */
+export async function getParlaysData(
+   rpc: Rpc<SolanaRpcApi>,
+   optional?: GetParlaysDataFilters,
+): Promise<ReadonlyArray<Readonly<{ address: Address; data: ParlayBetAccountData }>>> {
+   const filters: (GetProgramAccountsMemcmpFilter | { readonly dataSize: bigint })[] = [
+      { dataSize: BigInt(PARLAY_BET_ACCOUNT_LEN) },
+      memcmp(BigInt(PARLAY_BET_ACCOUNT_WIRE_OFFSETS.discriminator), u8WireByte(PARLAY_BET_ACCOUNT_DISCRIMINATOR)),
+   ];
+
+   const segments: MemcmpSeg[] = [];
+   if (optional?.user !== undefined) {
+      segments.push({
+         offset: PARLAY_BET_ACCOUNT_WIRE_OFFSETS.owner,
+         bytes: new Uint8Array(addressEncoder.encode(optional.user)),
+      });
+   }
+   if (optional?.feepayer !== undefined) {
+      segments.push({
+         offset: PARLAY_BET_ACCOUNT_WIRE_OFFSETS.feepayer,
+         bytes: new Uint8Array(addressEncoder.encode(optional.feepayer)),
+      });
+   }
+   if (optional?.betId !== undefined) {
+      segments.push({ offset: PARLAY_BET_ACCOUNT_WIRE_OFFSETS.betId, bytes: u64Le(optional.betId) });
+   }
+   if (optional?.amount !== undefined) {
+      segments.push({ offset: PARLAY_BET_ACCOUNT_WIRE_OFFSETS.amount, bytes: u64Le(optional.amount) });
+   }
+   if (optional?.result !== undefined) {
+      segments.push({ offset: PARLAY_BET_ACCOUNT_WIRE_OFFSETS.result, bytes: u8WireByte(optional.result) });
+   }
+
+   const merged = mergeAdjacentMemcmpSegments(segments);
+   for (const m of merged) {
+      if (filters.length >= MAX_GET_PROGRAM_ACCOUNTS_FILTERS) {
+         throw new RangeError(
+            `getParlaysData: at most ${MAX_GET_PROGRAM_ACCOUNTS_FILTERS} filters after merging (use readProgramAccountsRaw for custom filter sets)`,
+         );
+      }
+      filters.push(memcmp(BigInt(m.offset), m.bytes));
+   }
+
+   const rows = await readProgramAccountsRaw(rpc, AGGREGATOR_PROGRAM_ID, filters);
+   return rows.map((row) => ({
+      address: row.address,
+      data: decodeParlayBetAccountDataStrict(row.data),
    }));
 }
 

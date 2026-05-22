@@ -1,12 +1,12 @@
 import { getDb } from "localDb";
-import { getCompiledTransactionMessageDecoder, getTransactionDecoder, SolanaError, type Address, type Base64EncodedDataResponse, type Commitment, type ReadonlyUint8Array, type Signature, type Slot, type Transaction, type TransactionError, type UnixTimestamp } from "@solana/kit";
-import { AGGREGATOR_PROGRAM_ID, BetResult, decodeAggregatorInstructionData, getBetData, ODDS_SCALE, SYSTEM_PROGRAM_ID, type BetAccountData, type BetFiller, type FillBetIxData, type MarketId } from "spamm-aggregator-sdk";
+import { getCompiledTransactionMessageDecoder, getTransactionDecoder, type Address, type Base64EncodedDataResponse, type Commitment, type ReadonlyUint8Array, type Signature, type Slot, type TransactionError, type UnixTimestamp } from "@solana/kit";
+import { AGGREGATOR_PROGRAM_ID, BetResult, decodeAggregatorInstructionData, getBetData, getParlayData, ODDS_SCALE, SYSTEM_PROGRAM_ID, type BetAccountData, type BetFiller, type MarketId, type ParlayBetAccountData, type ParlayLegWire } from "spamm-aggregator-sdk";
 import { createRpcClients } from "../aggregator/client/txSend";
-import { sleep } from "bun";
+import { withRpcRetry } from "../market_maker/client/txSend";
 const client = createRpcClients()
 
 // initIndexerTable()
-// console.log(getBetRecords());
+// console.log(getLatestUpdate());
 
 if(import.meta.main === true) {
    runIndexer();
@@ -21,10 +21,7 @@ enum BetRecordStatus {
    Claimed = "claimed",
 }
 
-export type BetRecord = {
-   id: string;
-   bet_id: number;
-   user_address: string;
+export type Selection = {
    sport_id: number;
    league_id: number;
    event_id: number;
@@ -33,6 +30,15 @@ export type BetRecord = {
    player_id: number;
    is_pregame: number;
    side: number;
+}
+
+export type BetRecord = {
+   id: string;
+   /** Stored as string in SQLite/API to avoid JSON number precision loss for large u64 bet ids. */
+   bet_id: string;
+   type: "single" | "parlay";
+   user_address: string;
+   selections: Selection[];
    amount_requested: number;
    amount_filled: number;
    min_odds_requested: number;
@@ -48,21 +54,53 @@ export type BetRecord = {
    status: BetRecordStatus;
 }
 
+type DbBetRow = Omit<BetRecord, "selections" | "bet_id"> & {
+   bet_id: string;
+   selections: string;
+};
+
+function selectionFromMarketId(marketId: MarketId, side: number): Selection {
+   return {
+      sport_id: marketId.eventId.sport,
+      league_id: marketId.eventId.league,
+      event_id: Number(marketId.eventId.event),
+      mkt_id: marketId.mkt,
+      period_id: marketId.period,
+      player_id: Number(marketId.player),
+      is_pregame: marketId.isPregame ? 1 : 0,
+      side,
+   };
+}
+
+function selectionFromParlayLeg(leg: ParlayLegWire): Selection {
+   return selectionFromMarketId(leg.marketId, leg.side);
+}
+
+function parseSelectionsJson(raw: string): Selection[] {
+   const parsed = JSON.parse(raw) as Selection[];
+   if (!Array.isArray(parsed)) {
+      throw new Error("selections must be a JSON array");
+   }
+   return parsed;
+}
+
+function rowToBetRecord(row: DbBetRow): BetRecord {
+   return {
+      ...row,
+      bet_id: row.bet_id,
+      selections: parseSelectionsJson(row.selections),
+   };
+}
+
 function initIndexerTable(): void {
    const database = getDb();
    database.run(`DROP TABLE IF EXISTS bet_accounts`);
    database.run(`CREATE TABLE bet_accounts (
       id TEXT PRIMARY KEY,
       bet_id TEXT NOT NULL,
+      type TEXT NOT NULL,
       user_address TEXT NOT NULL,
-      sport_id INTEGER NOT NULL,
-      league_id INTEGER NOT NULL,
-      event_id INTEGER NOT NULL,
-      mkt_id INTEGER NOT NULL,
-      period_id INTEGER NOT NULL,
-      player_id INTEGER NOT NULL,
-      is_pregame BOOLEAN NOT NULL,
-      side INTEGER NOT NULL,
+      selections TEXT NOT NULL,
       amount_requested INTEGER NOT NULL,
       amount_filled INTEGER NOT NULL,
       min_odds_requested INTEGER NOT NULL,
@@ -85,29 +123,33 @@ type BetAccountAddMeta = {
    lastUpdateSlot: number;
 };
 
-function addBetAccount(betAddress: string, userAddress: Address, ixData: FillBetIxData, betAccount: BetAccountData, meta: BetAccountAddMeta): void {
+function addBetAccount(
+   betAddress: string,
+   userAddress: Address,
+   type: BetRecord["type"],
+   betId: bigint,
+   selections: Selection[],
+   amountRequested: bigint,
+   amountFilled: bigint,
+   minOddsRequested: bigint,
+   payout: bigint,
+   meta: BetAccountAddMeta,
+): void {
    const database = getDb();
    database.run(`INSERT INTO bet_accounts 
-      (id, bet_id, user_address, sport_id, league_id, event_id, mkt_id, period_id, player_id, is_pregame, side, 
-      amount_requested, amount_filled, min_odds_requested, payout,
+      (id, bet_id, type, user_address, selections, amount_requested, amount_filled, min_odds_requested, payout,
       result, created_at, created_sig, last_update_slot, status) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
       [
          betAddress, 
-         betAccount.betId.toString(), 
+         betId.toString(), 
+         type,
          userAddress,
-         betAccount.marketId.eventId.sport, 
-         betAccount.marketId.eventId.league, 
-         betAccount.marketId.eventId.event,
-         betAccount.marketId.mkt,
-         betAccount.marketId.period,
-         betAccount.marketId.player,
-         betAccount.marketId.isPregame,
-         betAccount.side, 
-         ixData.amount, 
-         betAccount.amount, 
-         ixData.minOddsScaled,
-         betAccount.payout,
+         JSON.stringify(selections),
+         Number(amountRequested), 
+         Number(amountFilled), 
+         Number(minOddsRequested),
+         Number(payout),
          BetResult.Pending, 
          meta.createdAt,
          meta.createdSig,
@@ -117,23 +159,28 @@ function addBetAccount(betAddress: string, userAddress: Address, ixData: FillBet
    );
 };
 
-function updateBetAccountResult(betAddress: string, result: BetResult, gradedAt: number, gradedSig: string, slot: number): void {
+function updateAccountResult(betAddress: string, result: BetResult, gradedAt: number, gradedSig: string, slot: number): void {
    const database = getDb();
    database.run(`UPDATE bet_accounts SET result = ?, graded_at = ?, graded_sig = ?, status = ?, last_update_slot = ? WHERE id = ?`, [result, gradedAt, gradedSig, BetRecordStatus.Graded, slot, betAddress]);
 };
 
-function updateBetAccountClaimed(betAddress: string, claimedAt: number, claimedSig: string, slot: number): void {
+function updateAccountClaimed(betAddress: string, claimedAt: number, claimedSig: string, slot: number): void {
    const database = getDb();
    database.run(`UPDATE bet_accounts SET claimed_at = ?, claimed_sig = ?, status = ?, last_update_slot = ? WHERE id = ?`, [claimedAt, claimedSig, BetRecordStatus.Claimed, slot, betAddress]);
 };
 
-function getLatestUpdate(): [string | null, string | null, string | null] {
+
+function getLatestUpdate(): {created: string | null,  graded: string | null, claimed: string | null} {
    const database = getDb();
-   const bet = database.query<{ created_sig: string, graded_sig: string, claimed_sig: string }, string[]>(`SELECT created_sig, graded_sig, claimed_sig FROM bet_accounts ORDER BY last_update_slot DESC LIMIT 1`).get();
+   const bet = database.query<{ created_sig: string, created_at: number, graded_sig: string, graded_at: number, claimed_sig: string, claimed_at: number }, string[]>(`SELECT created_sig, created_at, graded_sig, graded_at, claimed_sig, claimed_at FROM bet_accounts ORDER BY last_update_slot DESC LIMIT 1`).get();
    if (!bet) {
-      return [null, null, null];
+      return {created: null, graded: null, claimed: null};
    }
-   return [bet.created_sig, bet.graded_sig, bet.claimed_sig];
+   return {
+      created: bet.created_sig, 
+      graded: bet.graded_sig, 
+      claimed: bet.claimed_sig,
+   };  
 };
 
 type SigMeta = {
@@ -150,8 +197,7 @@ type TransactionMeta = SigMeta & {
 };
 
 // getSigsSinceLatestSig(null, null, null)
-async function getSigsSinceLatestSig(createdSig: string | null, gradedSig: string | null, claimedSig: string | null): Promise<SigMeta[]> {
-   const latestSig = claimedSig ?? gradedSig ?? createdSig;
+async function getSigsSinceLatestSig(latestSig: string | null): Promise<SigMeta[]> {
    const sigs = [];
    let isEnd = false;
    while (!isEnd) {
@@ -173,35 +219,26 @@ async function getSigsSinceLatestSig(createdSig: string | null, gradedSig: strin
    return orderedSigs;
 }
 
-async function getTransactionFromSig(sig: SigMeta, attempts: number = 0): Promise<TransactionMeta> {
-   if (attempts > 3) {
-      return {
-         ...sig,
-         transaction: null,
-      };
-   }
+async function getTransactionFromSig(sig: SigMeta): Promise<TransactionMeta> {
    try {
-      const transaction = await client.rpc.getTransaction(sig.signature, {
-         commitment: "confirmed",
-         encoding: "base64",
-         maxSupportedTransactionVersion: 0
-      }).send();
+      const transaction = await withRpcRetry(() =>
+         client.rpc.getTransaction(sig.signature, {
+            commitment: "confirmed",
+            encoding: "base64",
+            maxSupportedTransactionVersion: 0,
+         }).send(),
+      );
       if (transaction && !transaction.meta?.err) {
          return {
             ...sig,
             transaction: transaction.transaction,
          };
-      } else {
-         return {
-            ...sig,
-            transaction: null,
-         };
       }
-   } catch (error: any) {
-      if (error.statusCode === 429) {
-         await sleep(1000);
-         return await getTransactionFromSig(sig, attempts + 1);
-      }
+      return {
+         ...sig,
+         transaction: null,
+      };
+   } catch {
       return {
          ...sig,
          transaction: null,
@@ -237,14 +274,16 @@ function parseTxData(transaction: Base64EncodedDataResponse): ({accounts: Addres
 
 function getBetRecords(): BetRecord[] {
    const database = getDb();
-   const betAccounts = database.query<BetRecord, string[]>(`SELECT * FROM bet_accounts`).all();
-   return betAccounts.filter((betAccount) => betAccount.status !== BetRecordStatus.Pending);
+   const betAccounts = database.query<DbBetRow, string[]>(`SELECT * FROM bet_accounts`).all();
+   return betAccounts
+      .filter((row) => row.status !== BetRecordStatus.Pending)
+      .map(rowToBetRecord);
 }
 
 export function getClosedBetRecordsByUser(userAddress: string): BetRecord[] {
    const database = getDb();
-   const betAccounts = database.query<BetRecord, string[]>(`SELECT * FROM bet_accounts WHERE user_address = ? AND status = ? ORDER By created_at DESC`).all(userAddress, BetRecordStatus.Claimed);
-   return betAccounts;
+   const betAccounts = database.query<DbBetRow, string[]>(`SELECT * FROM bet_accounts WHERE user_address = ? AND status = ? ORDER BY created_at DESC`).all(userAddress, BetRecordStatus.Claimed);
+   return betAccounts.map(rowToBetRecord);
 }
 
 const nullFiller: BetFiller = {
@@ -258,14 +297,17 @@ const nullFiller: BetFiller = {
 // runIndexer()
 async function runIndexer() {
    console.log("Running indexer...");
-   const latestSig = getLatestUpdate();
-   console.log("Latest sig:", latestSig);
-   const sigs = await getSigsSinceLatestSig(latestSig[0], latestSig[1], latestSig[2]);
+   const latestSigs = getLatestUpdate();
+   console.log("Latest sig:", latestSigs);
+   const sigs = await getSigsSinceLatestSig(latestSigs.created ?? latestSigs.graded ?? latestSigs.claimed ?? null);
    console.log("Sigs:", sigs.length);
-   console.log(...sigs.map((sig) => sig.signature));
+   let count = 0;
    for (const sig of sigs) {
+      count++;
+      console.log("Processing sig:", count, sig.signature);
       const transactionMeta = await getTransactionFromSig(sig);
       if (!transactionMeta.transaction) {
+         console.log("No transaction found for sig:", sig.signature);
          continue;
       }
       const parsedTxData = parseTxData(transactionMeta.transaction)
@@ -278,12 +320,16 @@ async function runIndexer() {
             console.error("Data:", ix.data);
             continue;
          }
+         const meta: BetAccountAddMeta = {
+            createdAt: Number(transactionMeta.blockTime!),
+            createdSig: transactionMeta.signature,
+            lastUpdateSlot: Number(transactionMeta.slot),
+         };
          if (decodedTransaction.kind === "fillBet") {
             let betAccount: BetAccountData;
             try {
                betAccount = await getBetData(client.rpc, ix.accounts[3]!);
             } catch (error: any) {
-               // console.error("Error getting bet data:", error);
                betAccount = {
                   betId: decodedTransaction.data.betId,
                   discriminator: 0,
@@ -307,25 +353,58 @@ async function runIndexer() {
             addBetAccount(
                ix.accounts[3]!, 
                ix.accounts[1]!,
-               decodedTransaction.data,
-               betAccount,
-               {
-                  createdAt: Number(transactionMeta.blockTime!),
-                  createdSig: transactionMeta.signature,
-                  lastUpdateSlot: Number(transactionMeta.slot),
-               }
-            )
+               "single",
+               betAccount.betId,
+               [selectionFromMarketId(betAccount.marketId, betAccount.side)],
+               decodedTransaction.data.amount,
+               betAccount.amount,
+               decodedTransaction.data.minOddsScaled,
+               betAccount.payout,
+               meta,
+            );
+         } else if (decodedTransaction.kind === "fillParlay") {
+            let parlayAccount: ParlayBetAccountData;
+            try {
+               parlayAccount = await getParlayData(client.rpc, ix.accounts[3]!);
+            } catch (error: any) {
+               parlayAccount = {
+                  betId: decodedTransaction.data.betId,
+                  discriminator: 0,
+                  bump: 0,
+                  owner: ix.accounts[1]!,
+                  feepayer: ix.accounts[1]!,
+                  amount: decodedTransaction.data.amount,
+                  payout: decodedTransaction.data.amount * decodedTransaction.data.minOddsScaled / ODDS_SCALE,
+                  result: BetResult.Pending,
+                  fillerAddress: SYSTEM_PROGRAM_ID,
+                  numLegs: decodedTransaction.data.numLegs,
+                  legs: decodedTransaction.data.legs,
+               };
+            }
+            const activeLegs = parlayAccount.legs.slice(0, parlayAccount.numLegs);
+            addBetAccount(
+               ix.accounts[3]!,
+               ix.accounts[1]!,
+               "parlay",
+               parlayAccount.betId,
+               activeLegs.map(selectionFromParlayLeg),
+               decodedTransaction.data.amount,
+               parlayAccount.amount,
+               decodedTransaction.data.minOddsScaled,
+               parlayAccount.payout,
+               meta,
+            );
          } else if (decodedTransaction.kind === "gradeBets") {
             const gradedCount = ix.accounts.length - 2;
             for (let i = 0; i < gradedCount; i++) {
                const betAddress = ix.accounts[2 + i]!;
                const result = decodedTransaction.betResults[i]!;
-               updateBetAccountResult(betAddress, result, 
+               updateAccountResult(betAddress, result, 
                   Number(transactionMeta.blockTime!), transactionMeta.signature, Number(transactionMeta.slot));
             }
-         } else if (decodedTransaction.kind === "settleBet") {
+         } else if (decodedTransaction.kind === "settleBet" || decodedTransaction.kind === "settleParlay") {
             const betAddress = ix.accounts[1]!;
-            updateBetAccountClaimed(betAddress, 
+            updateAccountClaimed(betAddress, 
                Number(transactionMeta.blockTime!), transactionMeta.signature, Number(transactionMeta.slot));
          }
       }
