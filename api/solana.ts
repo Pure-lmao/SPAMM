@@ -4,7 +4,7 @@ import { address, getU32Encoder, getU64Encoder, sol, solToLamports, type Address
 import { buildSignV0Transaction, createRpcClients, sendAndConfirmInstructions, sendAndConfirmSignedTransaction, simulateTransaction } from "../aggregator/client/txSend";
 import { loadKeypairSignerFromJsonFile } from "../aggregator/client/utils";
 import { fetchGradedStartedEvents, fetchUngradedStartedEvents } from "localDb";
-import { BetResult, getBetsData, getGradeBetsIx, type BetAccountData } from "spamm-aggregator-sdk";
+import { BetResult, getBetsData, getGradeBetsIx, getParlaysData, type BetAccountData } from "spamm-aggregator-sdk";
 import type { Event } from "types";
 import { round } from "utils";
 import { ADMIN_SIGNER } from "../aggregator/client/admin";
@@ -65,7 +65,7 @@ export async function gradeBets() {
    for (const bet of bets) {
       const event = allEvents.get(`${bet.data.marketId.eventId.sport}:${bet.data.marketId.eventId.league}:${bet.data.marketId.eventId.event}`);
       if (event) {
-         const result = getBetResult(bet.data, event);
+         const result = getBetResult(bet.data.marketId.eventId.sport, bet.data.marketId.period, bet.data.marketId.mkt, bet.data.marketId.player, bet.data.side, event.home_score!, event.away_score!);
          if (result) {
             resultAddresses.push([result, bet.address]);
          }
@@ -79,7 +79,7 @@ export async function gradeBets() {
          const u8Results = results.map(result => result[0] as number);
          const addresses = results.map(result => result[1] as Address);
          const ix = await getGradeBetsIx(ADMIN_SIGNER.address, new Uint8Array(u8Results), addresses);
-         await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
+         // await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
          const sig = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
          console.log(`Grade bets tx: ${sig}`);
       }
@@ -87,15 +87,59 @@ export async function gradeBets() {
    console.log("Bets graded");
 }
 
-function getBetResult(bet: BetAccountData, event: Event): BetResult | null {
-   const period = bet.marketId.period;
-   const sport = bet.marketId.eventId.sport;
-   const mkt = bet.marketId.mkt;
-   const player = bet.marketId.player;
-   const side = bet.side;
-   const home = event.home_score;
-   const away = event.away_score;
+// gradeParlays().catch(console.error);
+export async function gradeParlays() {
+   console.log("Grading parlays");
+   const parlayBets = await getParlaysData(clients.rpc, {
+      result: BetResult.Pending
+   });
+   console.log("Parlay bets fetched", parlayBets.length);
+   const allEvents = fetchGradedStartedEvents();
+   console.log("Events fetched", allEvents.size);
 
+   const resultAddresses = [];
+   for (const bet of parlayBets) {
+      const legResults = [];
+      for (const leg of bet.data.legs) {
+         const event = allEvents.get(`${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event}`);
+         if (event) {
+            const legResult = getBetResult(leg.marketId.eventId.sport, leg.marketId.period, leg.marketId.mkt, leg.marketId.player, leg.side, event.home_score!, event.away_score!);
+            if (legResult) {
+               legResults.push(legResult);
+            } else { 
+               legResults.push(null);
+            }
+         } else {
+            legResults.push(null);
+         }
+      }
+      if (legResults.every(result => result !== null)) {
+         if (legResults.every(result => result === BetResult.Won)) {
+            resultAddresses.push([BetResult.Won, bet.address]);
+         } else if (legResults.some(result => result === BetResult.Lost)) {
+            resultAddresses.push([BetResult.Lost, bet.address]);
+         } else if (legResults.some(result => (result === BetResult.Push || result === BetResult.Cancelled || result === BetResult.RolledBack))) {
+            resultAddresses.push([BetResult.Cancelled, bet.address]);
+         }
+      }
+   }
+
+   const MAX_RESULTS_PER_TX = 25;
+   if (resultAddresses.length > 0) {
+      for (let i = 0; i < resultAddresses.length; i += MAX_RESULTS_PER_TX) {
+         const results = resultAddresses.slice(i, i + MAX_RESULTS_PER_TX);
+         const u8Results = results.map(result => result[0] as number);
+         const addresses = results.map(result => result[1] as Address);
+         const ix = await getGradeBetsIx(ADMIN_SIGNER.address, new Uint8Array(u8Results), addresses);
+         // await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
+         const sig = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+         console.log(`Grade bets tx: ${sig}`);
+      }
+   }
+   console.log("Parlays graded");
+}
+
+function getBetResult(sport: number, period: number, mkt: number, player: bigint, side: number, home: number, away: number): BetResult | null {
    //invalid bet
    if (
       (player !== 0n) || //no player props

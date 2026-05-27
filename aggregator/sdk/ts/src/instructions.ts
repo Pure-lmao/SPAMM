@@ -14,6 +14,8 @@ import {
    AGGREGATOR_PROGRAM_ID,
    LOOKUP_TABLE_ID,
    MAX_NUMBER_OF_MMS,
+   MAX_NUMBER_OF_MMS_PROXY,
+   MAX_PARLAY_LEGS,
    MINT_ID,
    ODDS_SCALE,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
@@ -72,10 +74,13 @@ export const FILL_PARLAY_IX_DISCRIMINATOR = 4;
 export const GRADE_BETS_IX_DISCRIMINATOR = 5;
 export const SETTLE_BET_IX_DISCRIMINATOR = 6;
 export const SETTLE_PARLAY_IX_DISCRIMINATOR = 7;
+export const GET_QUOTE_PROXY_IX_DISCRIMINATOR = 8;
+export const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR = 9;
 export const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 50;
 export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 51;
 export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 52;
 export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 53;
+export const DEREGISTER_MM_IX_DISCRIMINATOR = 54;
 export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 100;
 export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
@@ -224,6 +229,59 @@ export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Pro
 }
 
 /**
+ * **`deregister_mm`** — admin tears down an MM registration (inverse of {@link getRegisterMmIx}).
+ *
+ * **Rust:** `aggregator::instructions::deregister_mm::process` (`DEREGISTER_MM_IX_DISCRIMINATOR` = 54). No payload after router discriminator.
+ *
+ * @param aggregatorAdmin - **TS:** `Address` — aggregator config authority (writable signer). **Rust:** `aggregator_admin`.
+ * @param mmAdmin - **TS:** `Address` — MM admin (writable); receives closed-account rent. **Rust:** `mm_admin`, verified against MM config PDA.
+ * @param mmProgram - **TS:** `Address` — MM program id to remove from the list and ALT.
+ * @returns **`Promise<Instruction>`** — 17 account metas; liability tokens move to MM collateral ATA, then encumbrance PDA and liability ATA close.
+ */
+export async function getDeregisterMmIx(
+   aggregatorAdmin: Address,
+   mmAdmin: Address,
+   mmProgram: Address,
+): Promise<Instruction> {
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const mmLiabilityAta = await getAta(
+      mmEncumbrancePda,
+      MINT_ID,
+      SPL_TOKEN_PROGRAM_ID,
+      SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   );
+   const [configPda] = await getConfigPda();
+   const [mmListPda] = await getMmListPda();
+   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [mmQuoteBuffer] = await getMmQuoteBufferPda(mmProgram);
+   const [mmParlayQuoteBuffer] = await getMmParlayQuoteBufferPda(mmProgram);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(aggregatorAdmin),
+         rw(mmAdmin),
+         ro(mmProgram),
+         ro(mmConfigPda),
+         rw(mmEncumbrancePda),
+         rw(mmLiabilityAta),
+         ro(configPda),
+         rw(mmListPda),
+         ro(MINT_ID),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSTEM_PROGRAM_ID),
+         rw(LOOKUP_TABLE_ID),
+         ro(ADDRESS_LOOKUP_TABLE_PROGRAM_ID),
+         rw(mmTokenAta),
+         ro(mmQuoteBuffer),
+         ro(mmParlayQuoteBuffer),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'deregisterMm' }),
+   };
+}
+
+/**
  * **`fill_bet`** — CPI MM `get_quote` / `fill_quote`, open bet PDA + bet ATA, move collateral per best quotes (up to {@link MAX_NUMBER_OF_MMS} MMs).
  *
  * **Rust:** `aggregator::instructions::fill_bet::fill_bet` (`FILL_BET_IX_DISCRIMINATOR` = 3). Parsed body: `bet_id: u64`, `MarketId`, `side: u8`, `amount: u64`, `min_odds_scaled: u32`, `event_state_sequence: u16`, `event_game_state: EventGameState`.
@@ -293,6 +351,91 @@ export async function getFillBetIx(
       data: encodeAggregatorInstructionData({
          kind: 'fillBet',
          data: fill,
+      }),
+   };
+}
+
+/**
+ * **`get_quote_proxy`** — CPI each MM `get_quote`, return `ProxyQuoteData[]` via transaction return data (no bet accounts).
+ *
+ * **Rust:** `get_quote_proxy::get_quote_proxy` (`GET_QUOTE_PROXY_IX_DISCRIMINATOR` = 8). Instruction body matches `fill_bet` (`FillBetIxData`; `bet_id` unused). Per MM: 5 accounts (program, config, event state, market data, quote buffer).
+ *
+ * @param quote - Same fields as {@link getFillBetIx} / {@link FillBetIxData}.
+ * @param user - User pubkey passed to MM `get_quote` CPI (readonly; not required to sign).
+ * @param mmPrograms - One MM program id per quote source (1..={@link MAX_NUMBER_OF_MMS_PROXY}).
+ */
+export async function getGetQuoteProxyIx(
+   quote: FillBetIxData,
+   user: Address,
+   mmPrograms: readonly Address[],
+): Promise<Instruction> {
+   validateFillBetIxData(quote, 'quote');
+   if (mmPrograms.length === 0 || mmPrograms.length > MAX_NUMBER_OF_MMS_PROXY) {
+      throw new RangeError(`mmPrograms.length must be in [1, ${MAX_NUMBER_OF_MMS_PROXY}]`);
+   }
+   const perMarketMakerAccounts: { address: Address; role: AccountRole }[] = [];
+   for (const mmProgram of mmPrograms) {
+      const [mmConfigPda] = await getMmConfigPda(mmProgram);
+      const [eventStatePda] = await getEventStatePda(mmProgram, quote.marketId.eventId);
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, quote.marketId);
+      const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
+      perMarketMakerAccounts.push(
+         ro(mmProgram),
+         ro(mmConfigPda),
+         ro(eventStatePda),
+         ro(marketDataPda),
+         rw(mmQuoteBufferPda),
+      );
+   }
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [ro(user), ...perMarketMakerAccounts],
+      data: encodeAggregatorInstructionData({
+         kind: 'getQuoteProxy',
+         data: quote,
+      }),
+   };
+}
+
+/**
+ * **`get_parlay_quote_proxy`** — CPI each MM `get_quote_parlay`, return `ProxyQuoteData[]` via transaction return data.
+ *
+ * **Rust:** `get_parlay_quote_proxy::get_parlay_quote_proxy` (`GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR` = 9). Body matches `fill_parlay` (`FillParlayIxData`; `bet_id` unused). Per MM: `3 + 2 × num_legs` accounts.
+ *
+ * @param quote - Same fields as {@link getFillParlayIx} / {@link FillParlayIxData}.
+ * @param user - User pubkey for MM CPI (readonly).
+ * @param mmPrograms - MM program ids to query (1..={@link MAX_NUMBER_OF_MMS_PROXY}).
+ */
+export async function getGetParlayQuoteProxyIx(
+   quote: FillParlayIxData,
+   user: Address,
+   mmPrograms: readonly Address[],
+): Promise<Instruction> {
+   validateFillParlayIxData(quote, 'quote');
+   if (mmPrograms.length === 0 || mmPrograms.length > MAX_NUMBER_OF_MMS_PROXY) {
+      throw new RangeError(`mmPrograms.length must be in [1, ${MAX_NUMBER_OF_MMS_PROXY}]`);
+   }
+   if (quote.numLegs < 2 || quote.numLegs > MAX_PARLAY_LEGS) {
+      throw new RangeError(`quote.numLegs must be in [2, ${MAX_PARLAY_LEGS}]`);
+   }
+   const perMarketMakerAccounts: { address: Address; role: AccountRole }[] = [];
+   for (const mmProgram of mmPrograms) {
+      const [mmConfigPda] = await getMmConfigPda(mmProgram);
+      const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
+      perMarketMakerAccounts.push(ro(mmProgram), ro(mmConfigPda), rw(mmParlayQuoteBufferPda));
+      for (let legIdx = 0; legIdx < quote.numLegs; legIdx++) {
+         const leg = quote.legs[legIdx]!;
+         const [marketDataPda] = await getMmMarketDataPda(mmProgram, leg.marketId);
+         const [eventStatePda] = await getEventStatePda(mmProgram, leg.marketId.eventId);
+         perMarketMakerAccounts.push(ro(marketDataPda), ro(eventStatePda));
+      }
+   }
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [ro(user), ...perMarketMakerAccounts],
+      data: encodeAggregatorInstructionData({
+         kind: 'getParlayQuoteProxy',
+         data: quote,
       }),
    };
 }
@@ -775,6 +918,7 @@ export type AggregatorInstructionInput =
    | { kind: 'initProgram'; admin: Address; recentSlot: bigint }
    | { kind: 'changeConfigStatus'; status: 0 | 1; admin: Address }
    | { kind: 'registerMm'; mmAdmin: Address; mmProgram: Address }
+   | { kind: 'deregisterMm'; aggregatorAdmin: Address; mmAdmin: Address; mmProgram: Address }
    | {
         kind: 'fillBet';
         fill: FillBetIxData;
@@ -837,6 +981,8 @@ export async function getInstructionIx(input: AggregatorInstructionInput, _rpc: 
          return getChangeConfigStatusIx(input.admin, input.status);
       case 'registerMm':
          return getRegisterMmIx(input.mmAdmin, input.mmProgram);
+      case 'deregisterMm':
+         return getDeregisterMmIx(input.aggregatorAdmin, input.mmAdmin, input.mmProgram);
       case 'fillBet':
          return getFillBetIx(input.fill, input.feepayer, input.user, input.mmPrograms);
       case 'fillParlay':

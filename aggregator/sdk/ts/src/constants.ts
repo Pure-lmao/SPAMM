@@ -34,6 +34,8 @@ export const ODDS_SCALE = 10000n;
 
 /** `constants::MAX_NUMBER_OF_MMS` */
 export const MAX_NUMBER_OF_MMS = 5;
+/** `constants::MAX_NUMBER_OF_MMS_PROXY` — quote-proxy instructions only. */
+export const MAX_NUMBER_OF_MMS_PROXY = 20;
 
 /** `constants::MAX_PARLAY_LEGS` */
 export const MAX_PARLAY_LEGS = 5;

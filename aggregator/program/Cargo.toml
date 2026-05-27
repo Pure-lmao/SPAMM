@@ -33,6 +33,7 @@ zeropod = { version = "0.3.2", features = ["solana-address"] }
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
    'cfg(target_os, values("solana"))',
+   'cfg(target_arch, values("bpf", "sbf"))',
 ] }
 [[test]]
 name = "spamm_mollusk"

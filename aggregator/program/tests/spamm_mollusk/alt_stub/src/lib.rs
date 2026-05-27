@@ -1,6 +1,6 @@
 //! Minimal stub for `AddressLookupTab1e1111111111111111111111111` used in Mollusk.
-//! Implements `CreateLookupTable` (discriminator `0`) and `ExtendLookupTable` (`2`) with the
-//! same bincode account layout as the real program, enough for aggregator `init_program` CPIs.
+//! Implements `CreateLookupTable` (`0`), `ExtendLookupTable` (`2`), and `RemoveLookupTable` (`3`)
+//! with the same bincode account layout as the real program (extend/remove for register/deregister MM).
 
 use solana_address_lookup_table_interface::state::{
    AddressLookupTable, LookupTableMeta, LOOKUP_TABLE_MAX_ADDRESSES, LOOKUP_TABLE_META_SIZE,
@@ -21,6 +21,7 @@ use std::borrow::Cow;
 
 const IX_CREATE: u32 = 0;
 const IX_EXTEND: u32 = 2;
+const IX_REMOVE: u32 = 3;
 
 entrypoint!(process_instruction);
 
@@ -46,6 +47,7 @@ pub fn process_instruction(
    match disc {
       IX_CREATE => process_create(program_id, accounts, instruction_data),
       IX_EXTEND => process_extend(program_id, accounts, instruction_data),
+      IX_REMOVE => process_remove(program_id, accounts, instruction_data),
       _ => Err(ProgramError::InvalidInstructionData),
    }
 }
@@ -198,6 +200,102 @@ fn process_extend(
    let min_lamports = rent.minimum_balance(serialized.len()).max(1);
    let lut_lamports = lookup_table.lamports();
    if lut_lamports < min_lamports {
+      let delta = min_lamports.saturating_sub(lut_lamports);
+      invoke(
+         &system_instruction::transfer(payer.key, lookup_table.key, delta),
+         &[payer.clone(), lookup_table.clone(), system_program.clone()],
+      )?;
+   }
+
+   lookup_table.realloc(serialized.len(), false)?;
+   {
+      let mut data = lookup_table.try_borrow_mut_data()?;
+      data.copy_from_slice(&serialized);
+   }
+
+   Ok(())
+}
+
+fn process_remove(
+   program_id: &Pubkey,
+   accounts: &[AccountInfo],
+   instruction_data: &[u8],
+) -> ProgramResult {
+   let lookup_table = &accounts[0];
+   let authority = &accounts[1];
+   let payer = &accounts[2];
+   let system_program = &accounts[3];
+
+   if lookup_table.owner != program_id {
+      return Err(ProgramError::IncorrectProgramId);
+   }
+   if instruction_data.len() < 12 {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   let n = u64::from_le_bytes(instruction_data[4..12].try_into().unwrap()) as usize;
+   if n == 0 {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   let need = 12usize
+      .checked_add(n.checked_mul(32).ok_or(ProgramError::ArithmeticOverflow)?)
+      .ok_or(ProgramError::ArithmeticOverflow)?;
+   if instruction_data.len() < need {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+
+   let mut remove_keys = Vec::with_capacity(n);
+   let mut off = 12usize;
+   for _ in 0..n {
+      let pk = Pubkey::new_from_array(
+         instruction_data[off..off + 32]
+            .try_into()
+            .map_err(|_| ProgramError::InvalidInstructionData)?,
+      );
+      remove_keys.push(pk);
+      off += 32;
+   }
+
+   let data_copy = lookup_table.try_borrow_data()?.to_vec();
+   let table =
+      AddressLookupTable::deserialize(&data_copy).map_err(|_| ProgramError::InvalidAccountData)?;
+
+   if table.meta.authority.is_none() {
+      return Err(ProgramError::Immutable);
+   }
+   if table.meta.authority != Some(*authority.key) {
+      return Err(ProgramError::InvalidAccountData);
+   }
+
+   let owned: Vec<Pubkey> = table
+      .addresses
+      .iter()
+      .filter(|addr| !remove_keys.contains(addr))
+      .copied()
+      .collect();
+
+   let updated = AddressLookupTable {
+      meta: table.meta,
+      addresses: Cow::Owned(owned),
+   };
+
+   let serialized = updated
+      .serialize_for_tests()
+      .map_err(|_| ProgramError::InvalidAccountData)?;
+
+   let rent = Rent::get()?;
+   let min_lamports = rent.minimum_balance(serialized.len()).max(1);
+   let lut_lamports = lookup_table.lamports();
+   if lut_lamports > min_lamports {
+      let refund = lut_lamports.saturating_sub(min_lamports);
+      // Debit LUT directly (program-owned); avoid CPI from LUT as non-signer (Mollusk rejects it).
+      **lookup_table.try_borrow_mut_lamports()? = lut_lamports
+         .checked_sub(refund)
+         .ok_or(ProgramError::InsufficientFunds)?;
+      **payer.try_borrow_mut_lamports()? = payer
+         .lamports()
+         .checked_add(refund)
+         .ok_or(ProgramError::ArithmeticOverflow)?;
+   } else if lut_lamports < min_lamports {
       let delta = min_lamports.saturating_sub(lut_lamports);
       invoke(
          &system_instruction::transfer(payer.key, lookup_table.key, delta),

@@ -122,13 +122,13 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    for i in 0..number_of_mms {
       // 0. program_id (readonly) - verified as executable
       // 1. mm_config_pda (readonly) - verified as owned by the mm program
-      // 1. mm_event_state_pda (readonly) - validated by verify_event_state
-      // 2. mm_market_data_pda (readonly) - validated by checking exists and owned by the mm program
-      // 3. mm_quote_buffer (writable) - validated by verify_quote_buffer
-      // 4. mm_encumbrance_pda (writable) - validated by verify_encumbrance_pda
-      // 4. mm_liability_token_account (writable) - validated by verify_liability_token_account
-      // 5. mm_token_account (writable) - validated by verify_token_account
-      // 6. mm_netting_pda (writable), - validated by verify_netting_pda
+      // 2. mm_event_state_pda (readonly) - validated by verify_event_state
+      // 3. mm_market_data_pda (readonly) - validated by checking exists and owned by the mm program
+      // 4. mm_quote_buffer (writable) - validated by verify_quote_buffer
+      // 5. mm_encumbrance_pda (writable) - validated by verify_encumbrance_pda
+      // 6. mm_liability_token_account (writable) - validated by verify_liability_token_account
+      // 7. mm_token_account (writable) - validated by verify_token_account
+      // 8. mm_netting_pda (writable), - validated by verify_netting_pda
       
       let base = i * MM_ACCOUNTS_PER_MM;
       let mm_program_account = &mm_accounts[base];

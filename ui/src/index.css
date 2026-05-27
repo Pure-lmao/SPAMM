@@ -1031,34 +1031,26 @@ h1 {
    letter-spacing: -0.02em;
 }
 
-.bet-slip-tray__header-actions {
-   display: flex;
-   align-items: center;
-   gap: 0.5rem;
-}
-
-.bet-slip-tray__clear {
-   display: flex;
-   align-items: center;
-   justify-content: center;
-   width: 2rem;
-   height: 2rem;
-   padding: 0;
-   border: none;
-   border-radius: 8px;
+.bet-slip-tray__clear-all {
+   align-self: flex-start;
+   padding: 0.2rem 0.5rem;
+   border: 1px solid var(--border);
+   border-radius: 6px;
    background: transparent;
    color: var(--muted);
-   font-size: 1.35rem;
-   line-height: 1;
+   font-size: 0.75rem;
+   font-weight: 500;
+   line-height: 1.3;
    cursor: pointer;
 }
 
-.bet-slip-tray__clear:hover:not(:disabled) {
+.bet-slip-tray__clear-all:hover:not(:disabled) {
    color: var(--text);
+   border-color: var(--muted);
    background: var(--wash-hover);
 }
 
-.bet-slip-tray__clear:disabled {
+.bet-slip-tray__clear-all:disabled {
    opacity: 0.35;
    cursor: not-allowed;
 }

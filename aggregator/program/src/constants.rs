@@ -2,6 +2,9 @@ use pinocchio::Address;
 
 pub const MAX_NUMBER_OF_MMS: usize = 5;
 
+/// Max MMs per `get_quote_proxy` / `get_parlay_quote_proxy` (quote-only; larger than fill cap).
+pub const MAX_NUMBER_OF_MMS_PROXY: usize = 20;
+
 /// Max SPL token sub-instructions in one `settle_bet` CPI batch (tight bound):
 /// 5 fillers × (1 enc→user + 1 bet→…) + bet→user (stake) + bet→user (dust) + ATA close = 13.
 pub const SETTLE_BET_TOKEN_BATCH_IX_CAP: usize = 13;
@@ -14,6 +17,12 @@ pub const SETTLE_PARLAY_TOKEN_BATCH_IX_CAP: usize = 8;
 
 /// Max `Transfer::DATA_LEN` / `CloseAccount::DATA_LEN` in batch is 9; use 9 for buffer sizing.
 pub const SETTLE_TOKEN_BATCH_MAX_INNER_DATA: usize = 9;
+
+/// Max SPL token sub-instructions in `safe_close_ata` (optional transfer + close).
+pub const SAFE_CLOSE_ATA_BATCH_IX_CAP: usize = 2;
+
+/// Flattened CPI account slots for `safe_close_ata` batch.
+pub const SAFE_CLOSE_ATA_BATCH_CPI_ACCOUNTS: usize = SAFE_CLOSE_ATA_BATCH_IX_CAP * 3;
 
 /// Max legs per parlay (quote buffer, fill ix wire, and on-chain parlay bet account).
 pub const MAX_PARLAY_LEGS: usize = 5;

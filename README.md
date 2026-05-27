@@ -497,10 +497,13 @@ The first byte of aggregator instruction `data` selects the handler.
 | 5 | `grade_bets` |
 | 6 | `settle_bet` |
 | 7 | `settle_parlay` |
+| 8 | `get_quote_proxy` |
+| 9 | `get_parlay_quote_proxy` |
 | 50 | `create_netting_account` |
 | 51 | `add_line_to_netting_account` |
 | 52 | `remove_line_from_netting_account` |
 | 53 | `close_netting_account` |
+| 54 | `deregister_mm` |
 | 100 | `withdraw_from_liability_account` |
 | 254 | `write_arbitrary_data` |
 | 255 | `force_close_pda` |
@@ -578,6 +581,35 @@ Accounts:
 | 15 | mm parlay quote buffer | readonly | |
 
 This is called by a SPAMM admin to register the SPAMM with the aggregator. The MM program id, MM config PDA, quote buffers, encumbrance PDA, collateral ATA, and liability ATA are appended to that address lookup table so transactions can reference them via the ALT.
+
+### deregister_mm
+Discriminator: **54**
+
+Data: `None`
+
+Accounts:
+
+| Index | Account | Role | Notes |
+|-------|---------|------|-------|
+| 0 | aggregator admin | writable, signer | Must match `admin` in aggregator config PDA |
+| 1 | mm admin | writable | Receives rent from closed encumbrance PDA and liability ATA; must match MM config admin |
+| 2 | mm program | readonly | Must be executable |
+| 3 | mm config pda | readonly | |
+| 4 | mm encumbrance pda | writable | Must exist; `encumbrance` field must be **0** |
+| 5 | mm liability token account | writable | Closed after transferring tokens to MM collateral ATA |
+| 6 | aggregator config pda | readonly | ALT authority |
+| 7 | mm list pda | writable | MM program id removed from list |
+| 8 | mint | readonly | |
+| 9 | token program | readonly | |
+| 10 | associated token program | readonly | |
+| 11 | system program | readonly | |
+| 12 | lookup table | writable | |
+| 13 | address lookup table program | readonly | |
+| 14 | mm token account | writable | Receives liability ATA token balance |
+| 15 | mm quote buffer | readonly | |
+| 16 | mm parlay quote buffer | readonly | |
+
+Called by the aggregator admin after off-chain checks that the MM has no open bets. Reverses `register_mm`: removes the seven MM addresses from the ALT, sweeps liability tokens to the MM collateral ATA, closes the liability ATA and encumbrance PDA (rent to `mm_admin`), and removes the MM program id from `mm_list`.
 
 ### fill_bet
 Discriminator: **3**
@@ -668,6 +700,52 @@ Accounts:
 | 16+2*L | mm event state (leg *L*) | readonly | |
 
 This is called by a user to place a multi-leg parlay.
+
+### get_quote_proxy
+Discriminator: **8**.
+
+Read-only quote aggregation for the UI: CPI each MM’s **`get_quote`**, collect valid quotes, and return them via **`sol_set_return_data`** (no bet PDA, no token moves). Instruction `data` uses the same layout as **`fill_bet`** (`FillBetIxData`); **`bet_id`** is decoded but **not used**.
+
+Return data: concatenation of zero or more:
+
+```rust
+struct ProxyQuoteData {
+   mm_address: Address,   // MM program id
+   max_amount: u64,
+   odds_scaled: u32,
+}
+```
+
+Accounts:
+
+| Index | Account | Role | Notes |
+|-------|---------|------|-------|
+| 0 | user | readonly | Passed to each MM `get_quote` CPI |
+| Per MM (5 × N, N ≤ 20) | | | |
+| 1+0*N | mm program | readonly | |
+| 1+1*N | mm config pda | readonly | |
+| 1+2*N | mm event state pda | readonly | |
+| 1+3*N | mm market data pda | readonly | |
+| 1+4*N | mm quote buffer | writable | |
+
+Invalid or empty MM quotes are skipped; duplicate MM program ids fail the instruction.
+
+### get_parlay_quote_proxy
+Discriminator: **9**.
+
+Same pattern as **`get_quote_proxy`**, but CPIs MM **`get_quote_parlay`** for each registered MM. Instruction `data` matches **`fill_parlay`** (`FillParlayIxData`); **`bet_id`** is unused. Return data is the same **`ProxyQuoteData`** array as **`get_quote_proxy`**.
+
+Accounts:
+
+| Index | Account | Role | Notes |
+|-------|---------|------|-------|
+| 0 | user | readonly | |
+| Per MM (3 + 2×L × N, L = `num_legs`, N ≤ 20) | | | |
+| 1+0*N | mm program | readonly | |
+| 1+1*N | mm config pda | readonly | |
+| 1+2*N | mm parlay quote buffer | writable | |
+| 1+(3+2*i)*N | mm market data (leg *i*) | readonly | |
+| 1+(4+2*i)*N | mm event state (leg *i*) | readonly | |
 
 ### grade_bets
 Discriminator: **5**

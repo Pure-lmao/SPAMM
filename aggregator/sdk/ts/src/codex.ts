@@ -37,11 +37,14 @@ import {
    CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    FILL_BET_IX_DISCRIMINATOR,
    FILL_PARLAY_IX_DISCRIMINATOR,
+   GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR,
+   GET_QUOTE_PROXY_IX_DISCRIMINATOR,
    FORCE_CLOSE_PDA_IX_DISCRIMINATOR,
    GRADE_BETS_IX_DISCRIMINATOR,
    INIT_PROGRAM_IX_DISCRIMINATOR,
    MM_FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
    MM_GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   DEREGISTER_MM_IX_DISCRIMINATOR,
    REGISTER_MM_IX_DISCRIMINATOR,
    REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    SETTLE_BET_IX_DISCRIMINATOR,
@@ -76,6 +79,8 @@ import {
    type MmParlayQuoteBuffer,
    type MmQuoteBuffer,
    type MmReturnData,
+   type ProxyQuoteData,
+   PROXY_QUOTE_DATA_LEN,
    type NettingLine,
    type NettingPdaAccountData,
    type NettingPdaDataHeader,
@@ -572,6 +577,36 @@ export const getMmReturnDataEncoder = (): Encoder<MmReturnData> =>
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
    ]);
 
+export const getProxyQuoteDataDecoder = (): Decoder<ProxyQuoteData> =>
+   getStructDecoder([
+      ['mmAddress', getAddressDecoder()],
+      ['maxAmount', getU64Decoder()],
+      ['oddsScaled', getU32BigintDecoder()],
+   ]);
+
+export const getProxyQuoteDataEncoder = (): Encoder<ProxyQuoteData> =>
+   getStructEncoder([
+      ['mmAddress', getAddressEncoder()],
+      ['maxAmount', getU64Encoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+   ]);
+
+/** Return data from aggregator `get_quote_proxy` / `get_parlay_quote_proxy` (0..N × `ProxyQuoteData`). */
+export function decodeProxyQuoteReturnData(data: ReadonlyUint8Array): ProxyQuoteData[] {
+   if (data.length % PROXY_QUOTE_DATA_LEN !== 0) {
+      throw new RangeError(
+         `proxy quote return data len ${data.length} is not a multiple of ${PROXY_QUOTE_DATA_LEN}`,
+      );
+   }
+   const decoder = getProxyQuoteDataDecoder();
+   const quotes: ProxyQuoteData[] = [];
+   const bytes = new Uint8Array(data);
+   for (let offset = 0; offset < bytes.length; offset += PROXY_QUOTE_DATA_LEN) {
+      quotes.push(decoder.decode(bytes.subarray(offset, offset + PROXY_QUOTE_DATA_LEN)));
+   }
+   return quotes;
+}
+
 export const getFillBetIxDataEncoder = (): Encoder<FillBetIxData> =>
    getStructEncoder([
       ['betId', getU64Encoder()],
@@ -883,6 +918,8 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
       }
       case 'registerMm':
          return new Uint8Array([REGISTER_MM_IX_DISCRIMINATOR]);
+      case 'deregisterMm':
+         return new Uint8Array([DEREGISTER_MM_IX_DISCRIMINATOR]);
       case 'fillBet': {
          const p = getFillBetIxDataEncoder().encode(ix.data);
          if (p.length !== FILL_BET_IX_DATA_LEN) {
@@ -896,6 +933,20 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
             throw new RangeError(`fill parlay payload length ${p.length}`);
          }
          return concatDiscriminator(FILL_PARLAY_IX_DISCRIMINATOR, p);
+      }
+      case 'getQuoteProxy': {
+         const p = getFillBetIxDataEncoder().encode(ix.data);
+         if (p.length !== FILL_BET_IX_DATA_LEN) {
+            throw new RangeError(`get quote proxy payload length ${p.length}`);
+         }
+         return concatDiscriminator(GET_QUOTE_PROXY_IX_DISCRIMINATOR, p);
+      }
+      case 'getParlayQuoteProxy': {
+         const p = encodeFillParlayIxData(ix.data);
+         if (p.length !== FILL_PARLAY_IX_DATA_LEN) {
+            throw new RangeError(`get parlay quote proxy payload length ${p.length}`);
+         }
+         return concatDiscriminator(GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR, p);
       }
       case 'gradeBets': {
          if (ix.betResults.length === 0) {
@@ -977,6 +1028,11 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError('registerMm: expected no payload');
          }
          return { kind: 'registerMm' };
+      case DEREGISTER_MM_IX_DISCRIMINATOR:
+         if (rest.length !== 0) {
+            throw new RangeError('deregisterMm: expected no payload');
+         }
+         return { kind: 'deregisterMm' };
       case FILL_BET_IX_DISCRIMINATOR:
          if (rest.length !== FILL_BET_IX_DATA_LEN) {
             throw new RangeError(`fillBet: expected ${FILL_BET_IX_DATA_LEN} bytes`);
@@ -987,6 +1043,16 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError(`fillParlay: expected ${FILL_PARLAY_IX_DATA_LEN} bytes`);
          }
          return { kind: 'fillParlay', data: decodeFillParlayIxData(restBytes) };
+      case GET_QUOTE_PROXY_IX_DISCRIMINATOR:
+         if (rest.length !== FILL_BET_IX_DATA_LEN) {
+            throw new RangeError(`getQuoteProxy: expected ${FILL_BET_IX_DATA_LEN} bytes`);
+         }
+         return { kind: 'getQuoteProxy', data: getFillBetIxDataDecoder().decode(restBytes) };
+      case GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR:
+         if (rest.length !== FILL_PARLAY_IX_DATA_LEN) {
+            throw new RangeError(`getParlayQuoteProxy: expected ${FILL_PARLAY_IX_DATA_LEN} bytes`);
+         }
+         return { kind: 'getParlayQuoteProxy', data: decodeFillParlayIxData(restBytes) };
       case GRADE_BETS_IX_DISCRIMINATOR:
          if (rest.length === 0) {
             throw new RangeError('gradeBets: expected at least one byte');

@@ -114,3 +114,13 @@ pub struct QuoteData {
 pub const QUOTE_DATA_MAX_AMOUNT_OFFSET: usize = 0;
 pub const QUOTE_DATA_ODDS_SCALED_OFFSET: usize = 8;
 pub const QUOTE_DATA_LEN: usize = 12;
+
+#[repr(C)]
+#[derive(Copy, Clone, ZeroPod)]
+pub struct ProxyQuoteData {
+   pub mm_address: Address,
+   pub max_amount: u64,
+   pub odds_scaled: u32,
+}
+
+pub const PROXY_QUOTE_DATA_LEN: usize = <ProxyQuoteData as ZeroPodFixed>::SIZE;

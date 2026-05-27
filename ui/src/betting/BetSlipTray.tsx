@@ -449,19 +449,6 @@ export function BetSlipTray(): ReactElement | null {
             {...(isParlay ? { role: "button", tabIndex: 0, "aria-expanded": expanded } : {})}
          >
             <h2 className="bet-slip-tray__title">{headerTitle}</h2>
-            <div className="bet-slip-tray__header-actions">
-               <button
-                  type="button"
-                  className="bet-slip-tray__clear"
-                  onClick={(e) => {
-                     e.stopPropagation();
-                     clearSlip();
-                  }}
-                  aria-label="Clear bet slip"
-               >
-                  ×
-               </button>
-            </div>
          </header>
 
          {!isCollapsed && (
@@ -487,6 +474,16 @@ export function BetSlipTray(): ReactElement | null {
                            </li>
                         ))}
                      </ul>
+                  )}
+
+                  {!slipLocked && (
+                     <button
+                        type="button"
+                        className="bet-slip-tray__clear-all"
+                        onClick={() => clearSlip()}
+                     >
+                        Clear all
+                     </button>
                   )}
 
                   <div className="bet-slip-tray__fields">

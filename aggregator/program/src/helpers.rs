@@ -1,21 +1,34 @@
+use core::mem::MaybeUninit;
+
 use pinocchio::{
-   AccountView, Address, ProgramResult, cpi::Signer, error::ProgramError, hint::unlikely,
+   AccountView, Address, ProgramResult,
+   cpi::{CpiAccount, Signer},
+   error::ProgramError, hint::unlikely,
    address::address_eq,
+   instruction::InstructionAccount,
 };
 use pinocchio_log::log;
-use pinocchio_token::{ID as TOKEN_PROGRAM_ID, instructions::{CloseAccount, Transfer as TokenTransfer}};
+use pinocchio_token::{
+   ID as TOKEN_PROGRAM_ID,
+   instructions::{Batch, CloseAccount, IntoBatch, Transfer as TokenTransfer},
+};
 use pinocchio_associated_token_account::ID as ASSOCIATED_TOKEN_PROGRAM_ID;
 use pinocchio_system::ID as SYSTEM_ID;
+
 
 use zeropod::ZeroPodFixed;
 
 use crate::{
    ID,
-   constants::{ADDRESS_LOOKUP_TABLE_PROGRAM, CONFIG_PDA, LOOKUP_TABLE, MINT, MM_LIST_PDA, ODDS_SCALE},
+   constants::{
+      ADDRESS_LOOKUP_TABLE_PROGRAM, CONFIG_PDA, LOOKUP_TABLE, MAX_NUMBER_OF_MMS_PROXY, MINT, MM_LIST_PDA,
+      ODDS_SCALE, SAFE_CLOSE_ATA_BATCH_CPI_ACCOUNTS, SAFE_CLOSE_ATA_BATCH_IX_CAP,
+      SETTLE_TOKEN_BATCH_MAX_INNER_DATA,
+   },
    parsers::get_token_account_balance,
    readers::{read_address_unchecked, read_u8_unchecked},
    state::{
-      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventId, EventStateData, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, other::{
+      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventId, EventStateData, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, mm_quote::ProxyQuoteData, other::{
          CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_STATUS_OFFSET, MM_ENCUMBRANCE_PDA_BUMP_OFFSET, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED
       }
    },
@@ -542,7 +555,8 @@ pub fn close_pda_return_rent(
 
    pda.set_lamports(0);
    recipient.set_lamports(dest_lamports + pda_lamports);
-   pda.close()
+   pda.close()?;
+   Ok(())
 }
 
 #[inline(always)]
@@ -550,23 +564,27 @@ pub fn safe_close_ata(
    ata: &mut AccountView,
    lamport_dest: &mut AccountView,
    token_dest: &mut AccountView,
-   authority: &mut AccountView,
+   authority: &AccountView,
    signers: &[Signer],
 ) -> ProgramResult {
    let token_balance = get_token_account_balance(ata)?;
+   let mut batch_data = [const {
+      MaybeUninit::<u8>::uninit()
+   }; 1 + SAFE_CLOSE_ATA_BATCH_IX_CAP * (2 + SETTLE_TOKEN_BATCH_MAX_INNER_DATA)];
+   let mut batch_ix_accounts =
+      [const { MaybeUninit::<InstructionAccount>::uninit() }; SAFE_CLOSE_ATA_BATCH_CPI_ACCOUNTS];
+   let mut batch_accounts =
+      [const { MaybeUninit::<CpiAccount>::uninit() }; SAFE_CLOSE_ATA_BATCH_CPI_ACCOUNTS];
+   let mut batch = Batch::new(
+      &mut batch_data,
+      &mut batch_ix_accounts,
+      &mut batch_accounts,
+   )?;
    if token_balance > 0 {
-      TokenTransfer::new(
-         ata,
-         token_dest,
-         authority,
-         token_balance,
-      ).invoke_signed(signers)?;
+      TokenTransfer::new(ata, token_dest, authority, token_balance).into_batch(&mut batch)?;
    }
-
-   CloseAccount::new(
-      ata, lamport_dest, authority
-   ).invoke_signed(signers)?;
-
+   CloseAccount::new(ata, lamport_dest, authority).into_batch(&mut batch)?;
+   batch.invoke_signed(signers)?;
    Ok(())
 }
 
@@ -597,4 +615,30 @@ pub fn calc_potential_payout(amount: u64, odds_scaled: u32) -> Result<u64, Progr
    .try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
 
    Ok(payout)
+}
+
+/// On-chain: write instruction return data for the first `valid_quote_count` quotes.
+/// Host (`cargo check`, Mollusk): no-op.
+///
+/// # Safety
+/// Callers must have initialized exactly `data[0..valid_quote_count]` via `MaybeUninit::write`.
+#[inline(always)]
+pub fn set_proxy_return_data(
+   data: [MaybeUninit<ProxyQuoteData>; MAX_NUMBER_OF_MMS_PROXY],
+   valid_quote_count: usize,
+) {
+   #[cfg(target_os = "solana")]
+   unsafe {
+      let bytes = core::slice::from_raw_parts(
+         data.as_ptr().cast::<u8>(),
+         valid_quote_count
+            .checked_mul(core::mem::size_of::<ProxyQuoteData>())
+            .unwrap_or(0),
+      );
+      pinocchio::cpi::set_return_data(bytes);
+   }
+   #[cfg(not(target_os = "solana"))]
+   {
+      let _ = (data, valid_quote_count);
+   }
 }

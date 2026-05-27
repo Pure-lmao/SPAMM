@@ -278,6 +278,16 @@ export type MmReturnData = {
    oddsScaled: bigint;
 };
 
+/** One MM quote from `get_quote_proxy` / `get_parlay_quote_proxy` return data (`ProxyQuoteData` on-chain). */
+export type ProxyQuoteData = {
+   mmAddress: Address;
+   maxAmount: bigint;
+   oddsScaled: bigint;
+};
+
+/** `state::mm_quote::PROXY_QUOTE_DATA_LEN` — `repr(C)` size of one `ProxyQuoteData`. */
+export const PROXY_QUOTE_DATA_LEN = 44;
+
 export type FillBetIxData = {
    betId: bigint;
    marketId: MarketId;
@@ -345,8 +355,11 @@ export type DecodedAggregatorInstruction =
    | { kind: 'initProgram'; recentSlot: bigint }
    | { kind: 'changeConfigStatus'; status: 0 | 1 }
    | { kind: 'registerMm' }
+   | { kind: 'deregisterMm' }
    | { kind: 'fillBet'; data: FillBetIxData }
    | { kind: 'fillParlay'; data: FillParlayIxData }
+   | { kind: 'getQuoteProxy'; data: FillBetIxData }
+   | { kind: 'getParlayQuoteProxy'; data: FillParlayIxData }
    | { kind: 'gradeBets'; betResults: Uint8Array }
    | { kind: 'settleBet' }
    | { kind: 'settleParlay' }

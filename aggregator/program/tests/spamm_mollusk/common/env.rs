@@ -82,13 +82,14 @@ fn mm_so_path() -> PathBuf {
    deploy_dir().join("spamm_market_maker.so")
 }
 
+/// Prefer the alt_stub crate artifact so tests do not run a stale `target/deploy` copy.
 fn alt_stub_so_path() -> PathBuf {
-   let local = deploy_dir().join("spamm_alt_stub.so");
-   if local.exists() {
-      return local;
+   let built = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+      .join("tests/spamm_mollusk/alt_stub/target/deploy/spamm_alt_stub.so");
+   if built.exists() {
+      return built;
    }
-   PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-      .join("tests/spamm_mollusk/alt_stub/target/deploy/spamm_alt_stub.so")
+   deploy_dir().join("spamm_alt_stub.so")
 }
 
 pub fn system_owned_empty() -> Account {
@@ -142,9 +143,12 @@ impl Env {
       }
 
       let alt_deploy = deploy.join("spamm_alt_stub.so");
-      if !alt_deploy.exists() {
-         std::fs::copy(&alt_src, &alt_deploy).unwrap_or_else(|e| {
-            panic!("copy ALT stub {:?} -> {:?}: {}", alt_src, alt_deploy, e);
+      let alt_built = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+         .join("tests/spamm_mollusk/alt_stub/target/deploy/spamm_alt_stub.so");
+      let alt_copy_src = if alt_built.exists() { alt_built } else { alt_src };
+      if alt_copy_src != alt_deploy {
+         std::fs::copy(&alt_copy_src, &alt_deploy).unwrap_or_else(|e| {
+            panic!("copy ALT stub {:?} -> {:?}: {}", alt_copy_src, alt_deploy, e);
          });
       }
 
@@ -375,38 +379,44 @@ impl Env {
       self.patch_spl_token_balance(mm_collateral_ata(), MM_COLLATERAL_TOKENS);
    }
 
-   pub fn register_mm_execute(&mut self) -> InstructionResult {
+   /// Account metas for aggregator `register_mm` (disc 2).
+   pub fn register_mm_metas() -> Vec<AccountMeta> {
       let sys_pk = keyed_account_for_system_program().0;
-      let tok_pk = token::ID;
-      let ata_pk = associated_token::ID;
-      let enc = encumbrance_pda();
-      let liab = liability_token_ata();
-      self.upsert(enc, system_owned_empty());
-      self.upsert(liab, system_owned_empty());
+      vec![
+         AccountMeta::new(mm_admin(), true),
+         AccountMeta::new_readonly(mm_program_id(), false),
+         AccountMeta::new_readonly(mm_config_pda(), false),
+         AccountMeta::new(encumbrance_pda(), false),
+         AccountMeta::new(liability_token_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
+         AccountMeta::new(mm_list_pda(), false),
+         AccountMeta::new_readonly(mint_pubkey(), false),
+         AccountMeta::new_readonly(token::ID, false),
+         AccountMeta::new_readonly(associated_token::ID, false),
+         AccountMeta::new_readonly(sys_pk, false),
+         AccountMeta::new(lookup_table_pubkey(), false),
+         AccountMeta::new_readonly(address_lookup_table_program_pubkey(), false),
+         AccountMeta::new_readonly(mm_collateral_ata(), false),
+         AccountMeta::new_readonly(mm_quote_buffer_pda(), false),
+         AccountMeta::new_readonly(mm_parlay_quote_buffer_pda(), false),
+      ]
+   }
 
-      let reg = self.agg_ix(
-         2,
-         vec![],
-         vec![
-            AccountMeta::new(mm_admin(), true),
-            AccountMeta::new_readonly(mm_program_id(), false),
-            AccountMeta::new_readonly(mm_config_pda(), false),
-            AccountMeta::new(enc, false),
-            AccountMeta::new(liab, false),
-            AccountMeta::new_readonly(config_pda(), false),
-            AccountMeta::new(mm_list_pda(), false),
-            AccountMeta::new_readonly(mint_pubkey(), false),
-            AccountMeta::new_readonly(tok_pk, false),
-            AccountMeta::new_readonly(ata_pk, false),
-            AccountMeta::new_readonly(sys_pk, false),
-            AccountMeta::new(lookup_table_pubkey(), false),
-            AccountMeta::new_readonly(address_lookup_table_program_pubkey(), false),
-            AccountMeta::new_readonly(mm_collateral_ata(), false),
-            AccountMeta::new_readonly(mm_quote_buffer_pda(), false),
-            AccountMeta::new_readonly(mm_parlay_quote_buffer_pda(), false),
-         ],
-      );
+   /// Seed empty encumbrance + liability slots, then run on-chain `register_mm` (creates PDA + ATA + ALT extend).
+   pub fn register_mm_execute(&mut self) -> InstructionResult {
+      self.upsert(encumbrance_pda(), system_owned_empty());
+      self.upsert(liability_token_ata(), system_owned_empty());
+      let reg = self.agg_ix(2, vec![], Self::register_mm_metas());
       self.run_ix(reg)
+   }
+
+   /// Aggregator active + MM program init + `register_mm` only (no events/markets/fills).
+   pub fn bootstrap_mm_registered(&mut self) -> InstructionResult {
+      self.bootstrap_agg_only();
+      self.prepare_mm_for_register(&[]);
+      let rr = self.register_mm_execute();
+      assert!(rr.program_result.is_ok(), "register_mm {:?}", rr);
+      rr
    }
 
    /// Full path: agg + MM program init + `init_event` + `init_market` for each market + `register_mm`.

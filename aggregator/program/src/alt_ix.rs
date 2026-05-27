@@ -11,6 +11,7 @@ use crate::constants::ADDRESS_LOOKUP_TABLE_PROGRAM;
 
 const IX_CREATE_LOOKUP_TABLE: u32 = 0;
 const IX_EXTEND_LOOKUP_TABLE: u32 = 2;
+const IX_REMOVE_LOOKUP_TABLE: u32 = 3;
 
 /// Writes `CreateLookupTable { recent_slot, bump_seed }` into `buf`.
 #[inline(always)]
@@ -52,6 +53,30 @@ pub fn write_extend_lookup_table_ix_data<'a>(
    Ok(&mut buf[..total])
 }
 
+/// Writes `RemoveLookupTable { addresses_to_remove }` into `buf` (discriminator `3`, stub program).
+#[inline(always)]
+pub fn write_remove_lookup_table_ix_data<'a>(
+   buf: &'a mut [u8],
+   addresses: &[Address],
+) -> Result<&'a mut [u8], ProgramError> {
+   let n = addresses.len();
+   let total = 4usize
+      .checked_add(8)
+      .and_then(|x| x.checked_add(n.checked_mul(32)?))
+      .ok_or(ProgramError::ArithmeticOverflow)?;
+   if buf.len() < total {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   buf[0..4].copy_from_slice(&IX_REMOVE_LOOKUP_TABLE.to_le_bytes());
+   buf[4..12].copy_from_slice(&(n as u64).to_le_bytes());
+   let mut off = 12;
+   for a in addresses {
+      buf[off..off + 32].copy_from_slice(a.as_ref());
+      off += 32;
+   }
+   Ok(&mut buf[..total])
+}
+
 /// CPI `CreateLookupTable`. `config_authority` is the config PDA (signer via `signer`).
 #[inline(always)]
 pub fn cpi_create_lookup_table(
@@ -67,6 +92,37 @@ pub fn cpi_create_lookup_table(
    let data = write_create_lookup_table_ix_data(&mut ix_data_buf, recent_slot, bump_seed)?;
    // Authority is a PDA signed via `signer`. Pinocchio builds CPI `AccountMeta` from
    // `InstructionAccount`; it must mark the PDA as signer so Extend (and relaxed Create) work.
+   let accounts = [
+      InstructionAccount::new(lookup_table.address(), true, false),
+      InstructionAccount::new(config_authority.address(), false, true),
+      InstructionAccount::new(payer.address(), true, true),
+      InstructionAccount::new(system_program.address(), false, false),
+   ];
+   let ix = InstructionView {
+      program_id: &ADDRESS_LOOKUP_TABLE_PROGRAM,
+      accounts: &accounts,
+      data,
+   };
+   invoke_signed(
+      &ix,
+      &[lookup_table, config_authority, payer, system_program],
+      &[signer],
+   )
+}
+
+/// CPI remove addresses from ALT (requires ALT program that implements discriminator `3`; see Mollusk `alt_stub`).
+#[inline(always)]
+pub fn cpi_remove_lookup_table_addresses(
+   lookup_table: &AccountView,
+   config_authority: &AccountView,
+   payer: &AccountView,
+   system_program: &AccountView,
+   addresses_to_remove: &[Address],
+   signer: Signer,
+) -> ProgramResult {
+   const TOTAL_LEN: usize = 4 + 8 + 32 * 7;
+   let mut ix_data_buf = [0u8; TOTAL_LEN];
+   let data = write_remove_lookup_table_ix_data(&mut ix_data_buf, addresses_to_remove)?;
    let accounts = [
       InstructionAccount::new(lookup_table.address(), true, false),
       InstructionAccount::new(config_authority.address(), false, true),

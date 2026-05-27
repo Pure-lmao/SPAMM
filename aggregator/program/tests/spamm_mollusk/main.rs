@@ -17,6 +17,7 @@ mod ix_grade_bets;
 mod ix_init_program;
 mod ix_netting;
 mod ix_register_mm;
+mod ix_deregister_mm;
 mod ix_router;
 mod ix_scenarios;
 mod ix_settle_bet;
