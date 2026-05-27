@@ -629,10 +629,11 @@ pub fn set_proxy_return_data(
 ) {
    #[cfg(target_os = "solana")]
    unsafe {
+      use crate::state::mm_quote::PROXY_QUOTE_DATA_LEN;
       let bytes = core::slice::from_raw_parts(
          data.as_ptr().cast::<u8>(),
          valid_quote_count
-            .checked_mul(core::mem::size_of::<ProxyQuoteData>())
+            .checked_mul(PROXY_QUOTE_DATA_LEN)
             .unwrap_or(0),
       );
       pinocchio::cpi::set_return_data(bytes);

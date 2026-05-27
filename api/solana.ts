@@ -87,7 +87,7 @@ export async function gradeBets() {
    console.log("Bets graded");
 }
 
-// gradeParlays().catch(console.error);
+gradeParlays().catch(console.error);
 export async function gradeParlays() {
    console.log("Grading parlays");
    const parlayBets = await getParlaysData(clients.rpc, {
@@ -101,15 +101,26 @@ export async function gradeParlays() {
    for (const bet of parlayBets) {
       const legResults = [];
       for (const leg of bet.data.legs) {
+         if (leg.marketId.eventId.sport === 0 &&
+            leg.marketId.eventId.league === 0 &&
+            leg.marketId.eventId.event === 0n &&
+            leg.marketId.period === 0 &&
+            leg.marketId.mkt === 0 &&
+            leg.marketId.player === 0n
+         ) {
+            continue;
+         }
          const event = allEvents.get(`${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event}`);
          if (event) {
             const legResult = getBetResult(leg.marketId.eventId.sport, leg.marketId.period, leg.marketId.mkt, leg.marketId.player, leg.side, event.home_score!, event.away_score!);
             if (legResult) {
                legResults.push(legResult);
             } else { 
+               console.log(`Leg ${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event} result not found`);
                legResults.push(null);
             }
          } else {
+            console.log(`Leg ${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event} not found`);
             legResults.push(null);
          }
       }
