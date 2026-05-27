@@ -1,6 +1,6 @@
 # Overview
 
-A Sports Programmatic Automated Market Maker (SPAMM) is a program that offers quotes for bets on sports markets. SPAMMs are inspired by propAMMs and their ability to offer better spreads than Binance. Why can't bettors get better odds than on sportsbooks? As SPAMMs compete for flow, the odds they offer will improve and eventually beat sportsbooks. By aggregating these offers, bettors will have access to great odds via a single transaction. A non-technical overview of SPAMMs can be found [here](Why-SPAMMs.md).
+A Sports Programmatic Automated Market Maker (SPAMM) is a program that offers quotes for bets on sports markets. SPAMMs are inspired by propAMMs and their ability to offer better spreads than Binance (in-depth report on this [here](https://x.com/minnus/status/2059730629319680352)). Why can't bettors get better odds than on sportsbooks? As SPAMMs compete for flow, the odds they offer will improve and eventually beat sportsbooks. By aggregating these offers, bettors will have access to great odds via a single transaction. A non-technical overview of SPAMMs can be found [here](Why-SPAMMs.md).
 
 The idea behind the framework could be further extended to binary or vanilla options, major prediction markets with a fair reference price (elections), or my as-yet-to-be-published idea of sports line options.
 
