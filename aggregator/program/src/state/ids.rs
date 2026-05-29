@@ -106,8 +106,35 @@ pub struct MarketId {
 }
 pub const MARKET_ID_LEN: usize = <MarketId as ZeroPodFixed>::SIZE;
 
+/// Side count for a market type (`mkt`), per `id-system.md`.
+#[inline(always)]
+pub fn num_sides_for_mkt(mkt: u16) -> Option<u8> {
+   match mkt {
+      0 | 4 => Some(2),
+      1 | 5 => Some(3),
+      6 => Some(6),
+      7 => Some(9),
+      10..=50 => Some(2),
+      51..=99 => Some(2),
+      100..=299 => Some(2),
+      300..=499 => Some(2),
+      1000..=1999 => Some(2),
+      2000..=2999 => Some(2),
+      3000..=3999 => Some(2),
+      4000..=4999 => Some(4),
+      5000..=5999 => Some(6),
+      10000..=10909 => Some(1),
+      _ => None,
+   }
+}
+
 impl MarketId {
    pub const WIRE_SIZE: usize = <Self as ZeroPodFixed>::SIZE;
+
+   #[inline(always)]
+   pub fn num_sides(&self) -> Option<u8> {
+      num_sides_for_mkt(self.mkt)
+   }
 
    #[inline(always)]
    pub fn is_pregame(&self) -> bool {

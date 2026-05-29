@@ -1,7 +1,7 @@
 //! CPI entry used by the aggregator to consume a parlay quote buffer and pull collateral from the MM ATA.
 //! Validates config + parlay buffer PDA, quote vs instruction, transfer, marks buffer used.
 //!
-//! Accounts **(7)** (aggregator order):
+//! Accounts **(8)** (aggregator order):
 //! 0. `user`
 //! 1. `mm_config_pda`
 //! 2. `mm_parlay_quote_buffer`
@@ -9,6 +9,7 @@
 //! 4. `liability_account`
 //! 5. `mint` (readonly)
 //! 6. `token_program` (readonly)
+//! 7. `instructions_sysvar` (readonly) — introspect parent `fill_parlay`
 
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer}, error::ProgramError, hint::{likely, unlikely},
@@ -18,6 +19,10 @@ use pinocchio_token::instructions::Transfer;
 
 use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA};
 use crate::state::FillParlayQuoteIxPayload;
+use spamm_aggregator::{
+   helpers::verify_invoked_via_aggregator_fill_ix,
+   instructions::FILL_PARLAY_IX_DISCRIMINATOR,
+};
 use spamm_aggregator::readers::read_u8_unchecked;
 use spamm_aggregator::state::mm_account_config::MM_CONFIG_PDA_BUMP_OFFSET;
 use spamm_aggregator::state::mm_parlay_quote::{MMParlayQuoteBuffer, MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR, MM_PARLAY_QUOTE_BUFFER_LEN};
@@ -37,10 +42,13 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       liability_account,
       _mint,
       _token_program,
+      instructions_sysvar,
    ] = accounts else {
       log!("fill_parlay_quote: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
+
+   verify_invoked_via_aggregator_fill_ix(instructions_sysvar, FILL_PARLAY_IX_DISCRIMINATOR)?;
 
    if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
       log!("fill_parlay_quote: mm config pda invalid");

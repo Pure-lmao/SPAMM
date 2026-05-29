@@ -255,7 +255,7 @@ fn fill_bet_duplicate_mm_program_in_tail() {
       event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
-   let tail = metas[10..].to_vec();
+   let tail = metas[11..].to_vec();
    metas.extend(tail);
    let mut buf = vec![3u8];
    let mut pay = [0u8; spamm_aggregator::instructions::FILL_BET_IX_DATA_LEN];
@@ -659,6 +659,7 @@ fn fill_bet_no_mm_accounts_rejected() {
       AccountMeta::new_readonly(tok, false),
       AccountMeta::new_readonly(ata, false),
       AccountMeta::new_readonly(sys, false),
+      AccountMeta::new_readonly(solana_sdk_ids::sysvar::instructions::ID, false),
    ];
    let ix = solana_instruction::Instruction::new_with_bytes(crate::common::agg_program_id(), &buf, metas);
    let r = env.run_ix(ix);
@@ -684,7 +685,7 @@ fn fill_bet_too_many_mm_groups_rejected() {
       event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
-   let group = metas[9..18].to_vec();
+   let group = metas[11..20].to_vec();
    assert_eq!(MAX_NUMBER_OF_MMS, 5);
    for _ in 0..5 {
       metas.extend(group.clone());

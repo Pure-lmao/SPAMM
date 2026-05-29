@@ -37,6 +37,7 @@ import {
    CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    FILL_BET_IX_DISCRIMINATOR,
    FILL_PARLAY_IX_DISCRIMINATOR,
+   GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR,
    GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR,
    GET_QUOTE_PROXY_IX_DISCRIMINATOR,
    FORCE_CLOSE_PDA_IX_DISCRIMINATOR,
@@ -79,7 +80,10 @@ import {
    type MmParlayQuoteBuffer,
    type MmQuoteBuffer,
    type MmReturnData,
+   type ProxyMarketMmQuotes,
    type ProxyQuoteData,
+   MARKET_QUOTES_PROXY_RETURN_MAX,
+   PROXY_MARKET_SIDE_ODDS_WIRE_LEN,
    PROXY_QUOTE_DATA_LEN,
    type NettingLine,
    type NettingPdaAccountData,
@@ -607,6 +611,40 @@ export function decodeProxyQuoteReturnData(data: ReadonlyUint8Array): ProxyQuote
    return quotes;
 }
 
+/** Return data from aggregator `get_market_quotes_proxy` (fixed-size MM chunks; `numSides` from `mkt`). */
+export function decodeMarketQuotesProxyReturnData(
+   data: ReadonlyUint8Array,
+   numSides: number,
+): ProxyMarketMmQuotes[] {
+   if (numSides <= 0) {
+      throw new RangeError('numSides must be positive');
+   }
+   const entryLen = 32 + numSides * PROXY_MARKET_SIDE_ODDS_WIRE_LEN;
+   if (data.length === 0 || data.length % entryLen !== 0) {
+      throw new RangeError(
+         `market quotes return data len ${data.length} is not a multiple of ${entryLen}`,
+      );
+   }
+   if (data.length > MARKET_QUOTES_PROXY_RETURN_MAX) {
+      throw new RangeError(`market quotes return data exceeds ${MARKET_QUOTES_PROXY_RETURN_MAX} bytes`);
+   }
+   const addrDecoder = getAddressDecoder();
+   const bytes = new Uint8Array(data);
+   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+   const quotes: ProxyMarketMmQuotes[] = [];
+   for (let offset = 0; offset < bytes.length; offset += entryLen) {
+      const mmAddress = addrDecoder.decode(bytes.subarray(offset, offset + 32));
+      const oddsScaled: bigint[] = [];
+      let sideOff = offset + 32;
+      for (let s = 0; s < numSides; s++) {
+         oddsScaled.push(BigInt(view.getUint32(sideOff, true)));
+         sideOff += PROXY_MARKET_SIDE_ODDS_WIRE_LEN;
+      }
+      quotes.push({ mmAddress, oddsScaled });
+   }
+   return quotes;
+}
+
 export const getFillBetIxDataEncoder = (): Encoder<FillBetIxData> =>
    getStructEncoder([
       ['betId', getU64Encoder()],
@@ -948,6 +986,13 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
          }
          return concatDiscriminator(GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR, p);
       }
+      case 'getMarketQuotesProxy': {
+         const p = getFillBetIxDataEncoder().encode(ix.data);
+         if (p.length !== FILL_BET_IX_DATA_LEN) {
+            throw new RangeError(`get market quotes proxy payload length ${p.length}`);
+         }
+         return concatDiscriminator(GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR, p);
+      }
       case 'gradeBets': {
          if (ix.betResults.length === 0) {
             throw new RangeError('gradeBets requires at least one result byte');
@@ -1053,6 +1098,11 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError(`getParlayQuoteProxy: expected ${FILL_PARLAY_IX_DATA_LEN} bytes`);
          }
          return { kind: 'getParlayQuoteProxy', data: decodeFillParlayIxData(restBytes) };
+      case GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR:
+         if (rest.length !== FILL_BET_IX_DATA_LEN) {
+            throw new RangeError(`getMarketQuotesProxy: expected ${FILL_BET_IX_DATA_LEN} bytes`);
+         }
+         return { kind: 'getMarketQuotesProxy', data: getFillBetIxDataDecoder().decode(restBytes) };
       case GRADE_BETS_IX_DISCRIMINATOR:
          if (rest.length === 0) {
             throw new RangeError('gradeBets: expected at least one byte');

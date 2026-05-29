@@ -19,7 +19,7 @@
 //!
 //! Return data (`sol_set_return_data`): **12** bytes — `max_amount` (u64 LE), `odds_scaled` (u32 LE).
 
-use pinocchio::{AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::unlikely};
+use pinocchio::{AccountView, Address, ProgramResult, address::address_eq, hint::unlikely};
 use pinocchio_log::log;
 use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state};
 use zeropod::ZeroPodFixed;
@@ -40,9 +40,16 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       mm_quote_buffer,
    ] = accounts else {
       log!("get_quote: mm accounts mismatch");
-      return Err(ProgramError::NotEnoughAccountKeys);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    };
-   let parsed_data = GetQuoteIxPayload::decode(data)?;
+   let parsed_data = GetQuoteIxPayload::decode(data);
+   if unlikely(parsed_data.is_err()) {
+      log!("get_quote: decode failed");
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
+   }
+   let parsed_data = parsed_data.unwrap();
    log!(
       "get_quote: decoded amount {} min_odds_scaled {} side {} ev_seq {} mkt {} sport {} pregame {}",
       parsed_data.amount,
@@ -59,39 +66,46 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    // SIDECHECK
    if unlikely(side > 2) {
       log!("get_quote: side must be 0, 1, or 2");
-      return Err(ProgramError::InvalidInstructionData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
    // SIDECHECK
    if unlikely(side == 2 && mkt != 1 && mkt != 5) {
       log!("get_quote: side 2 is only valid for mkt 1 or 5");
-      return Err(ProgramError::InvalidInstructionData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
 
    let event_state_sequence = parsed_data.event_state_sequence;
    if unlikely(event_state_sequence == 0) {
       log!("get_quote: event_state_sequence must be greater than 0");
-      return Err(ProgramError::InvalidInstructionData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
    if market_id.is_pregame() {
       if unlikely(event_state_sequence != 1) {
          log!("get_quote: pregame event_state_sequence must be 1");
-         return Err(ProgramError::InvalidInstructionData);
+         set_get_quote_return_data(0, 0)?;
+         return Ok(());
       }
    } else if unlikely(event_state_sequence < 2) {
       log!("get_quote: live event_state_sequence must be >= 2");
-      return Err(ProgramError::InvalidInstructionData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
 
    let event_game_state = parsed_data.event_game_state;
 
    if unlikely(!address_eq(mm_quote_buffer.address(), &QUOTE_BUFFER_PDA)) {
       log!("get_quote: quote buffer invalid");
-      return Err(ProgramError::InvalidAccountData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
 
    if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
       log!("get_quote: mm config pda invalid");
-      return Err(ProgramError::InvalidSeeds);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
 
    if unlikely(!verify_event_state(
@@ -102,28 +116,38 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       event_state_sequence,
    )) {
       log!("get_quote: event state invalid (see verify_event_state logs)");
-      return Err(ProgramError::InvalidAccountData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
 
    if unlikely(!mm_market_data_pda_ok(mm_market_data_pda, program_id, &market_id)) {
       log!("get_quote: market data pda invalid");
-      return Err(ProgramError::InvalidSeeds);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
 
-   let market_data = mm_market_data_pda.try_borrow()?;
+   let market_data = mm_market_data_pda.try_borrow();
+   if unlikely(market_data.is_err()) {
+      log!("get_quote: market data borrow failed");
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
+   }
+   let market_data = market_data.unwrap();
    log!("get_quote: market_data_len {}", market_data.len());
    if unlikely(market_data.len() < 8) {
       log!("get_quote: market data too short (need 8-byte oracle header + body)");
-      return Err(ProgramError::InvalidAccountData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
    // Market data: [disc][bump][u32 seq][body]; odds start at byte 6 (`init_market`).
    let body = &market_data[6..];
    log!("get_quote: body_len {} side {}", body.len(), side);
    let odds_scaled = match odds_from_market_data_body(&market_id, body, side) {
       Ok(o) => o,
-      Err(e) => {
+      Err(_e) => {
          log!("get_quote: odds_from_market_data_body failed");
-         return Err(e);
+         set_get_quote_return_data(0, 0)?;
+         return Ok(());
       }
    };
 
@@ -144,12 +168,25 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       event_state_sequence,
    };
 
-   let mut buf = mm_quote_buffer.try_borrow_mut()?;
+   let buf = mm_quote_buffer.try_borrow_mut();
+   if unlikely(buf.is_err()) {
+      log!("get_quote: quote buffer borrow failed");
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
+   }
+
+   let mut buf = buf.unwrap();
    if unlikely(buf.len() != MM_QUOTE_BUFFER_LEN) {
       log!("get_quote: quote buffer len mismatch");
-      return Err(ProgramError::InvalidAccountData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
-   quote.write_wire(&mut buf)?;
+   let result = quote.write_wire(&mut buf);
+   if unlikely(result.is_err()) {
+      log!("get_quote: quote write failed");
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
+   }
 
    Ok(())
 }

@@ -20,6 +20,7 @@ import {
    ODDS_SCALE,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    SPL_TOKEN_PROGRAM_ID,
+   SYSVAR_INSTRUCTIONS_ID,
    SYSTEM_PROGRAM_ID,
 } from './constants.js';
 import { encodeAggregatorInstructionData, encodeGetQuoteIxData, encodeGetQuoteParlayIxData } from './codex.js';
@@ -36,6 +37,8 @@ import {
    getMmQuoteBufferPda,
    getNettingPda,
    getParlayBetPda,
+   maxProxyMmsForMarketQuotes,
+   numSidesForMkt,
 } from './helpers.js';
 import {
    BetResult,
@@ -76,6 +79,7 @@ export const SETTLE_BET_IX_DISCRIMINATOR = 6;
 export const SETTLE_PARLAY_IX_DISCRIMINATOR = 7;
 export const GET_QUOTE_PROXY_IX_DISCRIMINATOR = 8;
 export const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR = 9;
+export const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR = 10;
 export const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 50;
 export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 51;
 export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 52;
@@ -290,7 +294,7 @@ export async function getDeregisterMmIx(
  * @param feepayer - **TS:** `Address` — writable signer paying rent and fees. **Rust:** `feepayer` (writable signer).
  * @param user - **TS:** `Address` — bet owner (readonly signer). **Rust:** `user` (signer).
  * @param mmPrograms - **TS:** `readonly Address[]` — one MM program id per quote leg (1..=MAX_NUMBER_OF_MMS). **Rust:** repeated 9-account MM slice per program (`mm_program` … `mm_netting_pda`). Quote buffer PDA derived per MM in TS (`mm_quote_buffer` seed on MM program).
- * @returns **`Promise<Instruction>`** — base 10 accounts + 9×N MM accounts; `data` = router discriminator + encoded `fill`. **Note:** mint / token / system program addresses are taken from constants in TS builders.
+ * @returns **`Promise<Instruction>`** — base 11 accounts + 9×N MM accounts; `data` = router discriminator + encoded `fill`. **Note:** mint / token / system program addresses are taken from constants in TS builders.
  */
 export async function getFillBetIx(
    fill: FillBetIxData,
@@ -317,6 +321,7 @@ export async function getFillBetIx(
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSTEM_PROGRAM_ID),
+      ro(SYSVAR_INSTRUCTIONS_ID),
    ];
    const perMarketMakerAccounts: { address: Address; role: AccountRole }[] = [];
    for (const mmProgram of mmPrograms) {
@@ -392,6 +397,55 @@ export async function getGetQuoteProxyIx(
       accounts: [ro(user), ...perMarketMakerAccounts],
       data: encodeAggregatorInstructionData({
          kind: 'getQuoteProxy',
+         data: quote,
+      }),
+   };
+}
+
+/**
+ * **`get_market_quotes_proxy`** — CPI each MM `get_quote` for every side in the market; return packed quotes via transaction return data.
+ *
+ * **Rust:** `get_market_quotes_proxy::get_market_quotes_proxy` (`GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR` = 10). Body matches `fill_bet` (`bet_id` / `side` unused). Return data is odds-only per side (`decodeMarketQuotesProxyReturnData` in `codex.ts`). `N` ≤ `min(20, maxProxyMmsForMarketQuotes(numSidesForMkt(mkt)))`.
+ *
+ * @param quote - Same fields as {@link getFillBetIx} / {@link FillBetIxData}.
+ * @param user - User pubkey for MM CPI (readonly).
+ * @param mmPrograms - MM program ids to query; count must fit return-data cap for the market's side count.
+ */
+export async function getGetMarketQuotesProxyIx(
+   quote: FillBetIxData,
+   user: Address,
+   mmPrograms: readonly Address[],
+): Promise<Instruction> {
+   validateFillBetIxData(quote, 'quote');
+   const numSides = numSidesForMkt(quote.marketId.mkt);
+   if (numSides === undefined) {
+      throw new RangeError(`unsupported mkt ${quote.marketId.mkt} for market quotes`);
+   }
+   const maxMms = Math.min(MAX_NUMBER_OF_MMS_PROXY, maxProxyMmsForMarketQuotes(numSides));
+   if (mmPrograms.length === 0 || mmPrograms.length > maxMms) {
+      throw new RangeError(
+         `mmPrograms.length must be in [1, ${maxMms}] for ${numSides}-side market (mkt=${quote.marketId.mkt})`,
+      );
+   }
+   const perMarketMakerAccounts: { address: Address; role: AccountRole }[] = [];
+   for (const mmProgram of mmPrograms) {
+      const [mmConfigPda] = await getMmConfigPda(mmProgram);
+      const [eventStatePda] = await getEventStatePda(mmProgram, quote.marketId.eventId);
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, quote.marketId);
+      const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
+      perMarketMakerAccounts.push(
+         ro(mmProgram),
+         ro(mmConfigPda),
+         ro(eventStatePda),
+         ro(marketDataPda),
+         rw(mmQuoteBufferPda),
+      );
+   }
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [ro(user), ...perMarketMakerAccounts],
+      data: encodeAggregatorInstructionData({
+         kind: 'getMarketQuotesProxy',
          data: quote,
       }),
    };
@@ -480,6 +534,7 @@ export async function getFillParlayIx(
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSTEM_PROGRAM_ID),
+      ro(SYSVAR_INSTRUCTIONS_ID),
       ro(mmProgram),
       rw(mmConfigPda),
       rw(mmParlayQuoteBufferPda),
@@ -934,6 +989,12 @@ export type AggregatorInstructionInput =
         mmProgram: Address;
      }
    | {
+        kind: 'getMarketQuotesProxy';
+        quote: FillBetIxData;
+        user: Address;
+        mmPrograms: readonly Address[];
+     }
+   | {
         kind: 'gradeBets';
         betResults: Uint8Array;
         admin: Address;
@@ -987,6 +1048,8 @@ export async function getInstructionIx(input: AggregatorInstructionInput, _rpc: 
          return getFillBetIx(input.fill, input.feepayer, input.user, input.mmPrograms);
       case 'fillParlay':
          return getFillParlayIx(input.fill, input.feepayer, input.user, input.mmProgram);
+      case 'getMarketQuotesProxy':
+         return getGetMarketQuotesProxyIx(input.quote, input.user, input.mmPrograms);
       case 'gradeBets':
          return getGradeBetsIx(input.admin, input.betResults, input.betAccounts);
       case 'settleBet':

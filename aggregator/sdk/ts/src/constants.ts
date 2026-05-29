@@ -12,6 +12,10 @@ export const SYSTEM_PROGRAM_ID: Address = address(
    '11111111111111111111111111111111'
 );
 
+export const SYSVAR_INSTRUCTIONS_ID: Address = address(
+   'Sysvar1nstructions1111111111111111111111111',
+);
+
 export const SPL_TOKEN_PROGRAM_ID: Address = address(
    'TokenkegQfeZyiNwAJbNbGKPFXCWuBvf9Ss623VQ5DA',
 );

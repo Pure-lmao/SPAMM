@@ -1,6 +1,6 @@
 import { loadKeypairSignerFromJsonFile } from "./utils.ts";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
-import { decodeMmReturnData, getBetData, getBetPda, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, getEventGameState, LOOKUP_TABLE_ID, ODDS_SCALE, Sport, getGetQuoteProxyIx, decodeProxyQuoteReturnData } from "spamm-aggregator-sdk";
+import { decodeMmReturnData, getBetData, getBetPda, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, getEventGameState, LOOKUP_TABLE_ID, ODDS_SCALE, Sport, getGetQuoteProxyIx, decodeProxyQuoteReturnData, getGetMarketQuotesProxyIx, decodeMarketQuotesProxyReturnData, numSidesForMkt } from "spamm-aggregator-sdk";
 import type { Address } from "@solana/kit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -13,16 +13,13 @@ export const USER_SIGNER = await loadKeypairSignerFromJsonFile(
    path.join(__dirname, "user_keypair.json"),
 );
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
-const DumbMarketMaker2 = "DUMBu5faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
-const DumbMarketMaker3 = "DUMBu6faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
-const DumbMarketMaker4 = "DUMBu7faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
-const DumbMarketMaker5 = "DUMBu8faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
+const WCMarketMaker = "WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address;
 
 const betId = 10n;
-const sport = 3 as Sport;
+const sport = 4 as Sport;
 const marketId = {
    eventId: {
-      event: 401815505n,
+      event: 401873203n,
       league: 11840,
       sport,
    },
@@ -111,6 +108,49 @@ async function getQuotesFromProxy() {
 }
 // getQuotesFromProxy().then(console.log).catch(console.error);
 
+async function getQuote() {
+   const quote = await getMmGetQuoteIx({
+      marketId,
+      side,
+      amount,
+      minOddsScaled,
+      eventGameState,
+      eventStateSequence,
+   }, WCMarketMaker, USER_SIGNER.address);
+   console.log(quote.accounts);
+   const returnData = await simulateTransaction(clients.rpc, [quote], [USER_SIGNER], true);
+   if (!returnData) {
+      throw new Error("No return data");
+   }
+   const parsedReturnData = decodeMmReturnData(Buffer.from(...returnData));
+   console.log(parsedReturnData);
+}
+// getQuote().catch(console.error);
+
+async function getMarketQuotesFromProxy() {
+   const mmList = await getMmListData(clients.rpc);
+   const marketQuotesProxyIx = await getGetMarketQuotesProxyIx(
+      {
+         betId,
+         marketId,
+         side,
+         amount,
+         minOddsScaled,
+         eventGameState,
+         eventStateSequence,
+      },
+      USER_SIGNER.address,
+      mmList.mmProgramAddresses,
+   );
+   const returnData = await simulateTransaction(clients.rpc, [marketQuotesProxyIx], [USER_SIGNER], true);
+   if (!returnData) {
+      throw new Error("No return data");
+   }
+   const parsedReturnData = decodeMarketQuotesProxyReturnData(Buffer.from(...returnData), numSidesForMkt(marketId.mkt)!);
+   return parsedReturnData;
+}
+// getMarketQuotesFromProxy().then(console.log).catch(console.error);
+
 async function placeBetWithBestMm() {
    const mmList = await getMmListData(clients.rpc);
    const quoteProxyIx = await getGetQuoteProxyIx(
@@ -148,8 +188,9 @@ async function placeBetWithBestMm() {
          eventGameState,
       }, USER_SIGNER.address, USER_SIGNER.address, validMms.slice(0, 5).map((mm) => mm.mmAddress),
    );
-   const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
-   console.log(txResult);
+   // console.log(ix.accounts);
+   // const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
+   // console.log(txResult);
 }
 // placeBetWithBestMm().catch(console.error);
 

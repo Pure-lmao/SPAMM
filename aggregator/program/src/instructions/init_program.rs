@@ -16,7 +16,7 @@
 
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer},
-   error::ProgramError, hint::unlikely, sysvars::{clock::CLOCK_ID, rent::RENT_ID},
+   error::ProgramError, hint::unlikely, sysvars::{clock::CLOCK_ID, instructions::INSTRUCTIONS_ID, rent::RENT_ID},
 };
 use pinocchio_associated_token_account::ID as ASSOCIATED_TOKEN_PROGRAM_ID;
 use pinocchio_log::log;
@@ -172,7 +172,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       config_signer_alt,
    )?;
 
-   let initial_addresses: [Address; 7] = [
+   let initial_addresses: [Address; 8] = [
       *config_pda.address(),
       MINT,
       TOKEN_PROGRAM_ID,
@@ -180,6 +180,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       SYSTEM_PROGRAM_ID,
       RENT_ID,
       CLOCK_ID,
+      INSTRUCTIONS_ID,
    ];
    let config_signer_extend = Signer::from(&signer_seeds);
    cpi_extend_lookup_table(

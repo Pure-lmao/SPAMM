@@ -17,14 +17,13 @@
 use core::mem::MaybeUninit;
 
 use pinocchio::{
-   AccountView, ProgramResult, address::address_eq,
+   AccountView, ProgramResult,
    cpi::invoke,
    error::ProgramError,
    instruction::{InstructionAccount, InstructionView},
 };
 
 use pinocchio_log::log;
-use pinocchio_system::ID as SYSTEM_ID;
 
 use crate::{
    constants::{MAX_NUMBER_OF_MMS_PROXY, MAX_PARLAY_LEGS, MAX_PARLAY_QUOTE_CPI_ACCOUNTS},
@@ -267,7 +266,6 @@ pub fn get_parlay_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> Prog
 
    let mut mm_quotes = [const { MaybeUninit::<ProxyQuoteData>::uninit() }; MAX_NUMBER_OF_MMS_PROXY];
    let mut valid_quote_count = 0usize;
-   let mut previous_mms = [&SYSTEM_ID; MAX_NUMBER_OF_MMS_PROXY];
 
    for i in 0..number_of_mms {
       let base = i * accounts_per_mm;
@@ -275,15 +273,6 @@ pub fn get_parlay_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> Prog
       let mm_config_pda = &mm_accounts[base + 1];
       let mm_parlay_quote_buffer = &mm_accounts[base + 2];
       let leg_accounts = &mm_accounts[base + MM_PARLAY_PROXY_FIXED_ACCOUNTS..base + accounts_per_mm];
-
-      if previous_mms[..i]
-         .iter()
-         .any(|prev| address_eq(mm_program_account.address(), *prev))
-      {
-         log!("get_parlay_quote_proxy: duplicate mm program account");
-         return Err(ProgramError::InvalidInstructionData);
-      }
-      previous_mms[i] = mm_program_account.address();
 
       let Some((max_amount, odds_scaled)) = cpi_get_quote_parlay_for_proxy(
          num_legs,

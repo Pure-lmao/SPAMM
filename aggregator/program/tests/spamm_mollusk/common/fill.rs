@@ -4,6 +4,7 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 use mollusk_svm_programs_token::{associated_token, token};
+use solana_sdk_ids::sysvar::instructions::ID as INSTRUCTIONS_SYSVAR_ID;
 
 use spamm_aggregator::instructions::{FillBetIxData, FillParlayIxData, FILL_BET_IX_DATA_LEN, FILL_PARLAY_IX_DATA_LEN};
 use spamm_aggregator::state::{EventGameState, MarketId, ParlayLegTable, ParlayLegWire};
@@ -42,6 +43,7 @@ pub fn fill_bet_metas_one_mm(
       AccountMeta::new_readonly(token::ID, false),
       AccountMeta::new_readonly(associated_token::ID, false),
       AccountMeta::new_readonly(sys, false),
+      AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new(mm_config_pda(), false),
       AccountMeta::new_readonly(event_state_pda(&eid), false),
@@ -86,6 +88,7 @@ pub fn fill_parlay_metas(bet_pda: Pubkey, bet_ata: Pubkey, markets: &[MarketId])
       AccountMeta::new_readonly(token::ID, false),
       AccountMeta::new_readonly(associated_token::ID, false),
       AccountMeta::new_readonly(sys, false),
+      AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new(mm_config_pda(), false),
       AccountMeta::new(mm_parlay_quote_buffer_pda(), false),

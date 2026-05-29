@@ -18,6 +18,9 @@ function formatAddressAsRustNewFromArrayBody(address: Address): string {
    const bytes = convertAddressToArray(address);
    return `${Array.from(bytes, b => `0x${b.toString(16).padStart(2, '0')}`).join(', ')},`;
 }
+// const [addr] = await getMmParlayQuoteBufferPda("WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address);
+// console.log(addr);
+// console.log(formatAddressAsRustNewFromArrayBody(addr));
 
 const pkString = '';
 /** Base58-encoded 32-byte seed or 64-byte secret key (wallet export format). */

@@ -1,7 +1,13 @@
 import { AccountRole, type Instruction } from '@solana/instructions';
 import type { Address } from '@solana/kit';
 
-import { MINT_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID, SPL_TOKEN_PROGRAM_ID, SYSTEM_PROGRAM_ID } from './constants.js';
+import {
+   MINT_ID,
+   SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   SPL_TOKEN_PROGRAM_ID,
+   SYSVAR_INSTRUCTIONS_ID,
+   SYSTEM_PROGRAM_ID,
+} from './constants.js';
 import {
    encodeFillParlayQuoteIxData,
    encodeGetQuoteIxData,
@@ -325,6 +331,7 @@ export async function getMmFillParlayQuoteIx(
          rw(liabilityAta),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: ixData,
    };

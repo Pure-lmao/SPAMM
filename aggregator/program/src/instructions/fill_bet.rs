@@ -1,9 +1,9 @@
 //! Loop over the MMs and get their quotes for the bet then fill the bet from best to worst
 //! CPI into the fill_quote function and update the outstanding liability amount for each MM and create the bet PDA
 //!
-//! Accounts: **9** then **9 × N** per MM (`N` = number of market makers).
+//! Accounts: **11** then **9 × N** per MM (`N` = number of market makers).
 //!
-//! **(9)**
+//! **(11)**
 //! 0. `feepayer` (writable signer)
 //! 1. `user` (readonly signer)
 //! 2. `user_ata` (writable)
@@ -12,7 +12,9 @@
 //! 5. `config_pda` (readonly)
 //! 6. `mint` (readonly)
 //! 7. `token_program` (readonly)
-//! 8. `system_program` (readonly)
+//! 8. `associated_token_program` (readonly)
+//! 9. `system_program` (readonly)
+//! 10. `instructions_sysvar` (readonly)
 //!
 //! **Per MM (9 each)**
 //! 0. `mm_program` (readonly)
@@ -47,7 +49,7 @@ use pinocchio_system::{ID as SYSTEM_ID, instructions::CreateAccount};
 use pinocchio_token::instructions::Transfer;
 use crate::{ID, 
    constants::MAX_NUMBER_OF_MMS, 
-   helpers::{calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda_or_placeholder, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
+   helpers::{calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_instructions_sysvar, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda_or_placeholder, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
    instructions::fill_helpers::{parse_quote_return_for_mm, refund_liability_deposit_mismatch},
    parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data}, 
    state::{
@@ -58,6 +60,7 @@ const MM_ACCOUNTS_PER_MM: usize = 9;
 
 pub const FILL_BET_IX_DISCRIMINATOR: u8 = 3;
 
+#[inline(never)]
 pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       feepayer, //verified as signer
@@ -70,6 +73,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       token_program, //verified by equ const
       associated_token_program, //verified by equ const
       system_program, //verified by equ const
+      instructions_sysvar, //verified by verify_instructions_sysvar
       mm_accounts @ ..,
    ] = accounts else {
       log!("fill_bet: accounts mismatch");
@@ -87,6 +91,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_token_program(&token_program)?;
    verify_associated_token_program(&associated_token_program)?;
    verify_system_program(&system_program)?;
+   verify_instructions_sysvar(&instructions_sysvar)?;
    verify_mint(&mint)?;
    verify_token_account(true, user_ata, user, mint, token_program)?;
    verify_config_pda(&config_pda, true)?;
@@ -471,6 +476,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          InstructionAccount::new(quote.mm_liability_token_account.address(), true, false),
          InstructionAccount::new(mint.address(), false, false),
          InstructionAccount::new(token_program.address(), false, false),
+         InstructionAccount::new(instructions_sysvar.address(), false, false),
       ];
 
       let fill_quote_invoke_accounts = [
@@ -482,6 +488,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          quote.mm_liability_token_account.as_ref(),
          mint.as_ref(),
          token_program.as_ref(),
+         instructions_sysvar.as_ref(),
       ];
 
       let fill_quote_ix = InstructionView {

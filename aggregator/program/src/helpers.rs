@@ -6,6 +6,7 @@ use pinocchio::{
    error::ProgramError, hint::unlikely,
    address::address_eq,
    instruction::InstructionAccount,
+   sysvars::instructions::{Instructions, INSTRUCTIONS_ID},
 };
 use pinocchio_log::log;
 use pinocchio_token::{
@@ -80,6 +81,41 @@ pub fn verify_system_program(system_program: &AccountView) -> ProgramResult {
       log!("verify_system_program: system program must be the system program");
       return Err(ProgramError::InvalidAccountOwner);
    }
+   Ok(())
+}
+
+#[inline(always)]
+pub fn verify_instructions_sysvar(instructions_sysvar: &AccountView) -> ProgramResult {
+   if unlikely(!address_eq(instructions_sysvar.address(), &INSTRUCTIONS_ID)) {
+      log!("verify_instructions_sysvar: must be instructions sysvar");
+      return Err(ProgramError::UnsupportedSysvar);
+   }
+   Ok(())
+}
+
+/// MM `fill_quote` / `fill_parlay_quote` CPI: must run under aggregator `fill_bet` / `fill_parlay`.
+#[inline(always)]
+pub fn verify_invoked_via_aggregator_fill_ix(
+   instructions_sysvar: &AccountView,
+   fill_ix_discriminator: u8,
+) -> ProgramResult {
+   verify_instructions_sysvar(instructions_sysvar)?;
+
+   let ix_sys = Instructions::try_from(instructions_sysvar)?;
+   let current_index = ix_sys.load_current_index() as usize;
+   let parent_ix = ix_sys.load_instruction_at(current_index)?;
+
+   if unlikely(!address_eq(parent_ix.get_program_id(), &ID)) {
+      log!("verify_invoked_via_aggregator_fill_ix: parent program must be aggregator");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+
+   let data = parent_ix.get_instruction_data();
+   if unlikely(data.is_empty() || data[0] != fill_ix_discriminator) {
+      log!("verify_invoked_via_aggregator_fill_ix: parent ix discriminator mismatch");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+
    Ok(())
 }
 
@@ -630,16 +666,31 @@ pub fn set_proxy_return_data(
    #[cfg(target_os = "solana")]
    unsafe {
       use crate::state::mm_quote::PROXY_QUOTE_DATA_LEN;
-      let bytes = core::slice::from_raw_parts(
-         data.as_ptr().cast::<u8>(),
-         valid_quote_count
-            .checked_mul(PROXY_QUOTE_DATA_LEN)
-            .unwrap_or(0),
-      );
-      pinocchio::cpi::set_return_data(bytes);
+      let out_len = valid_quote_count
+         .checked_mul(PROXY_QUOTE_DATA_LEN)
+         .unwrap_or(0);
+      let mut out = [0u8; MAX_NUMBER_OF_MMS_PROXY * PROXY_QUOTE_DATA_LEN];
+      for i in 0..valid_quote_count {
+         let q = data[i].assume_init_ref();
+         core::ptr::copy_nonoverlapping(
+            q as *const ProxyQuoteData as *const u8,
+            out.as_mut_ptr().add(i * PROXY_QUOTE_DATA_LEN),
+            PROXY_QUOTE_DATA_LEN,
+         );
+      }
+      pinocchio::cpi::set_return_data(&out[..out_len]);
    }
    #[cfg(not(target_os = "solana"))]
    {
       let _ = (data, valid_quote_count);
    }
+}
+
+/// On-chain: write `get_market_quotes_proxy` return bytes. Host: no-op.
+#[inline(always)]
+pub fn set_market_quotes_proxy_return_data(data: &[u8]) {
+   #[cfg(target_os = "solana")]
+   pinocchio::cpi::set_return_data(data);
+   #[cfg(not(target_os = "solana"))]
+   let _ = data;
 }

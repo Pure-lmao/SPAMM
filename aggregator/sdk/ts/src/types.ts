@@ -288,6 +288,16 @@ export type ProxyQuoteData = {
 /** `state::mm_quote::PROXY_QUOTE_DATA_LEN` — `repr(C)` size of one `ProxyQuoteData`. */
 export const PROXY_QUOTE_DATA_LEN = 44;
 
+/** All side odds for one MM from `get_market_quotes_proxy` (index = side). */
+export type ProxyMarketMmQuotes = {
+   mmAddress: Address;
+   oddsScaled: readonly bigint[];
+};
+
+/** `ProxyMarketSideOdds` wire size (`u32` odds per side). */
+export const PROXY_MARKET_SIDE_ODDS_WIRE_LEN = 4;
+export const MARKET_QUOTES_PROXY_RETURN_MAX = 1024;
+
 export type FillBetIxData = {
    betId: bigint;
    marketId: MarketId;
@@ -360,6 +370,7 @@ export type DecodedAggregatorInstruction =
    | { kind: 'fillParlay'; data: FillParlayIxData }
    | { kind: 'getQuoteProxy'; data: FillBetIxData }
    | { kind: 'getParlayQuoteProxy'; data: FillParlayIxData }
+   | { kind: 'getMarketQuotesProxy'; data: FillBetIxData }
    | { kind: 'gradeBets'; betResults: Uint8Array }
    | { kind: 'settleBet' }
    | { kind: 'settleParlay' }

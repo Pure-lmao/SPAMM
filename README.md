@@ -30,7 +30,7 @@ When this framework description uses **"MUST"** the program **MUST** adhere to t
 A SPAMM program is a program which complies with this framework and offers quotes for bets to the aggregator on sports markets. It should take advantage of low CU oracle account updates in order to land odds/state updates at the top of the block, before compute-heavy bet filling transactions. 
 
 ## Get_Quote function
-The **`get_quote`** function is called by the RPC to get the price to build the tx for the user then again by the **aggregator** when filling the bet to get best odds at **execution-time** (**no spoofing**). The function **MUST** return data using **`sol_set_return_data`**.
+The **`get_quote`** function is called by the RPC to get the price to build the tx for the user then again by the **aggregator** when filling the bet to get best odds at **execution-time** (**no spoofing**). The function **MUST** return data using **`sol_set_return_data`**. The function **MUST** NEVER return an error. You **MUST** catch all program errors and return a valid (0, 0) quote.
 
 The function **MUST** take the following accounts:
 
@@ -104,6 +104,7 @@ The function **MUST** take the following accounts:
 | 5 | MM Liability Token Account | writable |
 | 6 | Mint | readonly |
 | 7 | Token Program | readonly |
+| 8 | Instructions sysvar | readonly |
 
 The function **MUST** take the following data:
 ```rust
@@ -126,7 +127,7 @@ The **`is_used`** field in the quote buffer **MUST** be set to **1** to indicate
 During this function, you can change your Config PDA and Market Data PDA data if you wish.
 
 ## Get_Quote_Parlay function
-The `get_quote_parlay` function is invoked the same way as `get_quote`, but for **multiple legs**: each leg has its own market data / event state accounts and `ParlayLegWire` fields in the instruction `data`. It **MUST** return data using **`sol_set_return_data`** (`max_amount: u64` LE, `odds_scaled: u32` LE) for a valid quote. The max number of legs, *L*, is 5.
+The `get_quote_parlay` function is invoked the same way as `get_quote`, but for **multiple legs**: each leg has its own market data / event state accounts and `ParlayLegWire` fields in the instruction `data`. It **MUST** return data using **`sol_set_return_data`** (`max_amount: u64` LE, `odds_scaled: u32` LE) for a valid quote. The max number of legs, *L*, is 5. The function **MUST** NEVER return an error. You **MUST** catch all program errors and return a valid (0, 0) quote.
 
 The function **MUST** take the following accounts:
 
@@ -186,6 +187,7 @@ The function **MUST** take these accounts:
 | 4 | MM Liability Token Account | writable | Aggregator-owned destination |
 | 5 | Mint | readonly | |
 | 6 | Token program | readonly | |
+| 7 | Instructions sysvar | readonly | Introspect parent `fill_parlay` |
 
 The function **MUST** take the following `data`:
 
@@ -207,13 +209,13 @@ It contains the following data:
 struct Config {
    discriminator: u8 = 1,
    bump: u8,
-   admin: Address, // used for interacting with the aggreagtor program for non-quoting functions
+   admin: Address, // used for interacting with the aggregator program for non-quoting functions
    //...anything else you want
    // for example
    global_risk_limit: u64,
    global_risk: u64, // updated on fill_quote
    favourable_bettors: [Address; N], // read on get_quote to safely offer them a 5% bonus odds to increase chance of being filled, knowing they are losing bettors
-   smart_bettors: [Adrress; N], // read on get_quote to reduce odds, knowing that fills are usually unfavourable from these bettors
+   smart_bettors: [Address; N], // read on get_quote to reduce odds, knowing that fills are usually unfavourable from these bettors
 }
 ```
 
@@ -531,7 +533,7 @@ Accounts:
 | 4 | lookup table | writable | Must be uninitialized. Seeds: `[config_pda, recent_slot]` under the Address Lookup Table program |
 | 5 | address lookup table program | readonly | Must be the Address Lookup Table program |
 
-This is called by the aggregator admin to initialize the program and set up program-owned accounts. It creates an address lookup table authorized by the config PDA, seeds it with core addresses (config PDA, mint, token programs, system program, rent, clock), and stores the ALT pubkey on the config account.
+This is called by the aggregator admin to initialize the program and set up program-owned accounts. It creates an address lookup table authorized by the config PDA, seeds it with core addresses (config PDA, mint, token programs, system program, rent, clock, instructions sysvar), and stores the ALT pubkey on the config account.
 
 ### change_config_status
 Discriminator: **1**
@@ -643,20 +645,21 @@ Accounts (fixed prefix):
 | 7 | token program | readonly | |
 | 8 | associated token program | readonly | |
 | 9 | system program | readonly | |
+| 10 | instructions sysvar | readonly | Passed through to MM `fill_quote` CPI |
 
 Per MM (currently 5 max):
 
 | Offset | Account | Role | Notes |
 |--------|---------|------|-------|
-| 10+0*N | mm program | readonly | Must be executable (a program) |
-| 10+1*N | mm config pda | writable | |
-| 10+2*N | mm event state pda | readonly |  |
-| 10+3*N | mm market data pda | writable | |
-| 10+4*N | mm quote buffer | writable |  |
-| 10+5*N | mm encumbrance pda | writable |  |
-| 10+6*N | mm liability token account | writable | |
-| 10+7*N | mm token account | writable | |
-| 10+8*N | mm netting pda | writable | Must match expected but can be uninitialized |
+| 11+0*N | mm program | readonly | Must be executable (a program) |
+| 11+1*N | mm config pda | writable | |
+| 11+2*N | mm event state pda | readonly |  |
+| 11+3*N | mm market data pda | writable | |
+| 11+4*N | mm quote buffer | writable |  |
+| 11+5*N | mm encumbrance pda | writable |  |
+| 11+6*N | mm liability token account | writable | |
+| 11+7*N | mm token account | writable | |
+| 11+8*N | mm netting pda | writable | Must match expected but can be uninitialized |
 
 This is called by a user to place a bet.
 
@@ -690,14 +693,15 @@ Accounts:
 | 7 | token program | readonly | |
 | 8 | associated token program | readonly | |
 | 9 | system program | readonly | |
-| 10 | mm program | readonly | Must be executable (a program) |
-| 11 | mm config pda | writable | |
-| 12 | mm parlay quote buffer | writable | |
-| 13 | mm encumbrance pda | writable | |
-| 14 | mm liability token account | writable | |
-| 15 | mm token account | writable | |
-| 16+1*L | mm market data (leg *L*) | writable | |
-| 16+2*L | mm event state (leg *L*) | readonly | |
+| 10 | instructions sysvar | readonly | Passed through to MM `fill_parlay_quote` CPI |
+| 11 | mm program | readonly | Must be executable (a program) |
+| 12 | mm config pda | writable | |
+| 13 | mm parlay quote buffer | writable | |
+| 14 | mm encumbrance pda | writable | |
+| 15 | mm liability token account | writable | |
+| 16 | mm token account | writable | |
+| 17+1*L | mm market data (leg *L*) | writable | |
+| 17+2*L | mm event state (leg *L*) | readonly | |
 
 This is called by a user to place a multi-leg parlay.
 
@@ -729,6 +733,17 @@ Accounts:
 | 1+4*N | mm quote buffer | writable | |
 
 Invalid or empty MM quotes are skipped; duplicate MM program ids fail the instruction.
+
+### get_market_quotes_proxy
+Discriminator: **10**.
+
+Like **`get_quote_proxy`**, but CPIs each MM’s **`get_quote`** once per side for the market (`mkt` → side count per `id-system.md`: typically 2 or 3, up to 6 or 9). Instruction `data` matches **`fill_bet`** (`bet_id` and `side` are unused). Accounts are the same as **`get_quote_proxy`** (1 + 5×N).
+
+`N` must be ≤ `min(20, floor(1024 / (32 + num_sides × 4)))` so return data fits the 1024-byte cap (e.g. at most **15** MMs for 9-side markets, **20** for 2-side markets).
+
+Return data: concatenation of MM chunks, each `mm_address: [u8; 32]` then `num_sides` × `odds_scaled: u32` (amounts are not returned). Decoders use `mkt` for `num_sides` and parse chunk-wise (`len % entry_len === 0`).
+
+MMs with no valid quote on any side are omitted. Failed sides for an included MM are zero-filled.
 
 ### get_parlay_quote_proxy
 Discriminator: **9**.

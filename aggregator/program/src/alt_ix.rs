@@ -120,7 +120,7 @@ pub fn cpi_remove_lookup_table_addresses(
    addresses_to_remove: &[Address],
    signer: Signer,
 ) -> ProgramResult {
-   const TOTAL_LEN: usize = 4 + 8 + 32 * 7;
+   const TOTAL_LEN: usize = 4 + 8 + 32 * 8;
    let mut ix_data_buf = [0u8; TOTAL_LEN];
    let data = write_remove_lookup_table_ix_data(&mut ix_data_buf, addresses_to_remove)?;
    let accounts = [
@@ -151,7 +151,7 @@ pub fn cpi_extend_lookup_table(
    new_addresses: &[Address],
    signer: Signer,
 ) -> ProgramResult {
-   const TOTAL_LEN: usize = 4 + 8 + 32 * 7;
+   const TOTAL_LEN: usize = 4 + 8 + 32 * 8;
    let mut ix_data_buf = [0u8; TOTAL_LEN];
    let data = write_extend_lookup_table_ix_data(&mut ix_data_buf, new_addresses)?;
    let accounts = [

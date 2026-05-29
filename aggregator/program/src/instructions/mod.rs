@@ -1,8 +1,11 @@
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 use pinocchio_log::log;
 
+pub use fill_bet::FILL_BET_IX_DISCRIMINATOR;
+pub use fill_parlay::FILL_PARLAY_IX_DISCRIMINATOR;
+
 use crate::instructions::{
-   add_line_to_netting_account::ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR, change_config_status::CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR, close_netting_account::CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR, create_netting_account::CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR, deregister_mm::DEREGISTER_MM_IX_DISCRIMINATOR, fill_bet::FILL_BET_IX_DISCRIMINATOR, fill_parlay::FILL_PARLAY_IX_DISCRIMINATOR, get_parlay_quote_proxy::GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR, get_quote_proxy::GET_QUOTE_PROXY_IX_DISCRIMINATOR, grade_bets::GRADE_BETS_IX_DISCRIMINATOR, init_program::INIT_PROGRAM_IX_DISCRIMINATOR, register_mm::REGISTER_MM_IX_DISCRIMINATOR, remove_line_from_netting_account::REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR, settle_bet::SETTLE_BET_IX_DISCRIMINATOR, settle_parlay::SETTLE_PARLAY_IX_DISCRIMINATOR, withdraw_from_liability_account::WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR
+   add_line_to_netting_account::ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR, change_config_status::CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR, close_netting_account::CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR, create_netting_account::CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR, deregister_mm::DEREGISTER_MM_IX_DISCRIMINATOR, get_market_quotes_proxy::GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR, get_parlay_quote_proxy::GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR, get_quote_proxy::GET_QUOTE_PROXY_IX_DISCRIMINATOR, grade_bets::GRADE_BETS_IX_DISCRIMINATOR, init_program::INIT_PROGRAM_IX_DISCRIMINATOR, register_mm::REGISTER_MM_IX_DISCRIMINATOR, remove_line_from_netting_account::REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR, settle_bet::SETTLE_BET_IX_DISCRIMINATOR, settle_parlay::SETTLE_PARLAY_IX_DISCRIMINATOR, withdraw_from_liability_account::WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR
 };
 
 
@@ -11,6 +14,7 @@ mod fill_bet;
 mod fill_helpers;
 mod fill_parlay;
 mod get_quote_proxy;
+mod get_market_quotes_proxy;
 mod get_parlay_quote_proxy;
 mod create_netting_account;
 mod close_netting_account;
@@ -51,6 +55,7 @@ pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResu
       SETTLE_PARLAY_IX_DISCRIMINATOR => settle_parlay::process(accounts),
       GET_QUOTE_PROXY_IX_DISCRIMINATOR => get_quote_proxy::get_quote_proxy(accounts, data),
       GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR => get_parlay_quote_proxy::get_parlay_quote_proxy(accounts, data),
+      GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR => get_market_quotes_proxy::get_market_quotes_proxy(accounts, data),
 
       // netting PDA (per-event netting state)
       CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR => create_netting_account::process(accounts, data),

@@ -124,3 +124,35 @@ pub struct ProxyQuoteData {
 }
 
 pub const PROXY_QUOTE_DATA_LEN: usize = <ProxyQuoteData as ZeroPodFixed>::SIZE;
+
+/// In-memory `repr(C)` size may exceed wire (`u32` tail padding); return data is packed at `PROXY_QUOTE_DATA_LEN`.
+const _: () = assert!(core::mem::size_of::<ProxyQuoteData>() >= PROXY_QUOTE_DATA_LEN);
+
+/// One side odds value in `get_market_quotes_proxy` return data (`odds_scaled` only).
+#[repr(C)]
+#[derive(Copy, Clone, ZeroPod)]
+pub struct ProxyMarketSideOdds {
+   pub odds_scaled: u32,
+}
+pub const PROXY_MARKET_SIDE_ODDS_WIRE_LEN: usize = <ProxyMarketSideOdds as ZeroPodFixed>::SIZE;
+
+pub const MARKET_QUOTES_PROXY_RETURN_MAX: usize = 1024;
+pub const PROXY_MM_MARKET_QUOTES_ADDR_LEN: usize = 32;
+
+#[inline(always)]
+pub fn proxy_market_mm_entry_wire_len(num_sides: u8) -> usize {
+   PROXY_MM_MARKET_QUOTES_ADDR_LEN + (num_sides as usize) * PROXY_MARKET_SIDE_ODDS_WIRE_LEN
+}
+
+/// Max MM rows that fit in return data for `num_sides` (≤ [`crate::constants::MAX_NUMBER_OF_MMS_PROXY`]).
+#[inline(always)]
+pub fn max_proxy_mms_for_market_quotes(num_sides: u8) -> usize {
+   if num_sides == 0 {
+      return 0;
+   }
+   let entry = proxy_market_mm_entry_wire_len(num_sides);
+   MARKET_QUOTES_PROXY_RETURN_MAX / entry
+}
+
+const _: () = assert!(15 * (32 + 9 * 4) <= MARKET_QUOTES_PROXY_RETURN_MAX);
+const _: () = assert!(20 * (32 + 2 * 4) <= MARKET_QUOTES_PROXY_RETURN_MAX);

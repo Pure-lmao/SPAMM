@@ -1,13 +1,16 @@
 //! CPI entry used by the aggregator to fill a leg after quotes are sorted.
 //! Validates MM config + quote-buffer PDAs, instruction vs buffer snapshot, transfer from MM ATA.
 //!
-//! Accounts **(6)** (aggregator order):
+//! Accounts **(9)** (aggregator order):
 //! 0. `user`
 //! 1. `mm_market_data_pda` — unused here (reserved for future market-data checks)
 //! 2. `mm_config_pda`
 //! 3. `mm_quote_buffer`
 //! 4. `mm_token_account` — SPL authority must be the config PDA (`init_program`)
 //! 5. `liability_account`
+//! 6. `mint` (readonly)
+//! 7. `token_program` (readonly)
+//! 8. `instructions_sysvar` (readonly) — introspect parent `fill_bet`
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer}, error::ProgramError, hint::{likely, unlikely}
 };
@@ -16,7 +19,12 @@ use pinocchio_token::{instructions::Transfer,};
 
 use crate::{constants::{MM_CONFIG_PDA, QUOTE_BUFFER_PDA}, mm_helpers::check_quote_matches};
 use crate::state::FillQuoteIxPayload;
-use spamm_aggregator::{readers::read_u8_unchecked, writers::write_u8_unchecked};
+use spamm_aggregator::{
+   helpers::verify_invoked_via_aggregator_fill_ix,
+   instructions::FILL_BET_IX_DISCRIMINATOR,
+   readers::read_u8_unchecked,
+   writers::write_u8_unchecked,
+};
 use spamm_aggregator::state::mm_account_config::MM_CONFIG_PDA_BUMP_OFFSET;
 use spamm_aggregator::state::mm_quote::MM_QUOTE_BUFFER_DISCRIMINATOR;
 use spamm_aggregator::state::{MM_ACCOUNT_CONFIG_SEED, MMQuoteBuffer, MM_QUOTE_BUFFER_LEN};
@@ -36,11 +44,14 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       liability_account,
       _mint,
       _token_program,
+      instructions_sysvar,
 
    ] = accounts else {
       log!("fill_quote: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
+
+   verify_invoked_via_aggregator_fill_ix(instructions_sysvar, FILL_BET_IX_DISCRIMINATOR)?;
 
    if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
       log!("fill_quote: mm config pda invalid");

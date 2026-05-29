@@ -1,4 +1,5 @@
 use pinocchio::error::ProgramError;
+use pinocchio_log::log;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::state::{EventGameState, MarketId};
@@ -60,7 +61,10 @@ impl GetQuoteIxData {
 
    #[inline(always)]
    pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
-      let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| ProgramError::InvalidInstructionData)?;
+      let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| {
+         log!("get_quote: cannot decode get quote ix data");
+         ProgramError::InvalidInstructionData
+      })?;
       Ok(Self::from_zc(&z))
    }
 }

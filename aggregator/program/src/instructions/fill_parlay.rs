@@ -1,7 +1,7 @@
 //! Single MM: CPI `get_quote_parlay`, require odds ≥ `min_odds_scaled`, CPI `fill_parlay_quote`, then create parlay bet PDA + ATA.
 //!
-//! Accounts: **10** fixed, then **6 + 2 × L** for one MM (`L` = `num_legs`).
-//! **Fixed (10)**
+//! Accounts: **11** fixed, then **6 + 2 × L** for one MM (`L` = `num_legs`).
+//! **Fixed (11)**
 //! 0. `feepayer` (writable signer)
 //! 1. `user` (readonly signer)
 //! 2. `user_ata` (writable)
@@ -12,6 +12,7 @@
 //! 7. `token_program` (readonly)
 //! 8. `associated_token_program` (readonly)
 //! 9. `system_program` (readonly)
+//! 10. `instructions_sysvar` (readonly)
 //!
 //! **MM (6 + 2 × L)**
 //! 0. `mm_program` (readonly)
@@ -41,7 +42,7 @@ use crate::{
    ID,
    constants::{MAX_PARLAY_LEGS, MAX_PARLAY_QUOTE_CPI_ACCOUNTS},
    helpers::{
-      calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_parlay_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program
+      calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_instructions_sysvar, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_parlay_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program
    },
    instructions::fill_helpers::parse_quote_return_for_mm,
    parsers::{ParsedFillParlay, get_encumbrance, get_token_account_balance, parse_fill_parlay_data},
@@ -269,6 +270,7 @@ fn cpi_fill_parlay_quote_apply(
    mm_encumbrance_pda: &mut AccountView,
    mm_liability_token_account: &AccountView,
    mm_token_account: &AccountView,
+   instructions_sysvar: &AccountView,
 ) -> Result<(u64, u64), ProgramError> {
    if unlikely(!address_eq(mm_program_account.address(), &mm_address)) {
       return Err(ProgramError::InvalidAccountData);
@@ -333,6 +335,7 @@ fn cpi_fill_parlay_quote_apply(
       InstructionAccount::new(mm_liability_token_account.address(), true, false),
       InstructionAccount::new(mint.address(), false, false),
       InstructionAccount::new(token_program.address(), false, false),
+      InstructionAccount::new(instructions_sysvar.address(), false, false),
    ];
    let fill_quote_invoke_accounts = [
       user.as_ref(),
@@ -342,6 +345,7 @@ fn cpi_fill_parlay_quote_apply(
       mm_liability_token_account.as_ref(),
       mint.as_ref(),
       token_program.as_ref(),
+      instructions_sysvar.as_ref(),
    ];
    let fill_quote_ix = InstructionView {
       program_id: &mm_address,
@@ -472,6 +476,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       token_program,
       associated_token_program,
       system_program,
+      instructions_sysvar,
       mm_program_account,
       mm_config_pda,
       mm_parlay_quote_buffer,
@@ -490,6 +495,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_token_program(token_program)?;
    verify_associated_token_program(associated_token_program)?;
    verify_system_program(system_program)?;
+   verify_instructions_sysvar(instructions_sysvar)?;
    verify_mint(mint)?;
    verify_token_account(true, user_ata, user, mint, token_program)?;
    verify_config_pda(config_pda, true)?;
@@ -548,6 +554,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mm_encumbrance_pda,
       mm_liability_token_account,
       mm_token_account,
+      instructions_sysvar,
    )?;
 
    finalize_parlay_bet(

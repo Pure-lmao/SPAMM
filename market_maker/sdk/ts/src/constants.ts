@@ -20,6 +20,10 @@ export const SPL_ASSOCIATED_TOKEN_PROGRAM_ID: Address = address(
    'ATokenGPvbdGVxr1b2hvZbsiqW5xWH25efTNsLJA8knL',
 );
 
+export const SYSVAR_INSTRUCTIONS_ID: Address = address(
+   'Sysvar1nstructions1111111111111111111111111',
+);
+
 /** `constants::ODDS_SCALE` — odds are scaled by this factor (e.g. 15000 = 1.5x). */
 export const ODDS_SCALE = 10000n;
 

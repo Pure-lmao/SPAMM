@@ -266,3 +266,63 @@ export function getEventGameState(gamePhase: string, homePrimary: number, awayPr
       awaySecondary: awaySecondary,
    };
 }
+
+/** Side count for `mkt`, per `id-system.md` (`ids::num_sides_for_mkt`). */
+export function numSidesForMkt(mkt: number): number | undefined {
+   if (mkt === 0 || mkt === 4) {
+      return 2;
+   }
+   if (mkt === 1 || mkt === 5) {
+      return 3;
+   }
+   if (mkt === 6) {
+      return 6;
+   }
+   if (mkt === 7) {
+      return 9;
+   }
+   if (mkt >= 10 && mkt <= 50) {
+      return 2;
+   }
+   if (mkt >= 51 && mkt <= 99) {
+      return 2;
+   }
+   if (mkt >= 100 && mkt <= 299) {
+      return 2;
+   }
+   if (mkt >= 300 && mkt <= 499) {
+      return 2;
+   }
+   if (mkt >= 1000 && mkt <= 1999) {
+      return 2;
+   }
+   if (mkt >= 2000 && mkt <= 2999) {
+      return 2;
+   }
+   if (mkt >= 3000 && mkt <= 3999) {
+      return 2;
+   }
+   if (mkt >= 4000 && mkt <= 4999) {
+      return 4;
+   }
+   if (mkt >= 5000 && mkt <= 5999) {
+      return 6;
+   }
+   if (mkt >= 10000 && mkt <= 0xffff) {
+      return 1;
+   }
+   return undefined;
+}
+
+/** `mm_quote::proxy_market_mm_entry_wire_len` */
+export function proxyMarketMmEntryWireLen(numSides: number): number {
+   return 32 + numSides * 4;
+}
+
+/** `mm_quote::max_proxy_mms_for_market_quotes` */
+export function maxProxyMmsForMarketQuotes(numSides: number): number {
+   if (numSides <= 0) {
+      return 0;
+   }
+   return Math.floor(1024 / proxyMarketMmEntryWireLen(numSides));
+}

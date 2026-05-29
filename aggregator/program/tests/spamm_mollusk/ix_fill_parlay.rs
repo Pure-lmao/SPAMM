@@ -126,7 +126,7 @@ fn fill_parlay_wrong_mm_program() {
       legs: parlay_table(&[l0, l1]),
    };
    let mut metas = crate::common::fill_parlay_metas(bet, bat, &[m1, m2]);
-   metas[10] = AccountMeta::new_readonly(user(), false);
+   metas[11] = AccountMeta::new_readonly(user(), false);
    let mut buf = vec![4u8];
    let mut w = [0u8; spamm_aggregator::instructions::FILL_PARLAY_IX_DATA_LEN];
    payload.write_wire(&mut w).unwrap();

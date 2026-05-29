@@ -3,15 +3,16 @@ import type { ESPNEvent, ESPNOdds, Event } from "./types";
 import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchMarkets, fetchSports, fetchUngradedStartedEvents, getLeagues, updateEventScore, updateMarket } from "./localDb";
 import { safeJSONStringify } from "./utils";
 import {
-   decodeProxyQuoteReturnData,
+   decodeMarketQuotesProxyReturnData,
    getEventGameState,
-   getGetQuoteProxyIx,
+   getGetMarketQuotesProxyIx,
    getMmListData,
-   MAX_NUMBER_OF_MMS,
+   maxProxyMmsForMarketQuotes,
    MAX_NUMBER_OF_MMS_PROXY,
+   numSidesForMkt,
    ODDS_SCALE,
    type MarketId,
-   type ProxyQuoteData,
+   type ProxyMarketMmQuotes,
 } from "spamm-aggregator-sdk";
 import type { Base64EncodedDataResponse } from "@solana/kit";
 import { createRpcClients, simulateTransaction } from "../aggregator/client/txSend";
@@ -25,13 +26,21 @@ function returnDataToBytes(raw: Base64EncodedDataResponse): Uint8Array {
    return new Uint8Array(Buffer.from(...raw));
 }
 
-function bestOddsScaledFromProxyQuotes(quotes: readonly ProxyQuoteData[]): number {
-   const offers = quotes.filter((q) => q.maxAmount > 0n && q.oddsScaled > 0n);
-   if (offers.length === 0) {
-      return 0;
+/** Best odds per side index across all MMs from `get_market_quotes_proxy` return data. */
+function bestOddsPerSideFromMarketQuotes(
+   quotes: readonly ProxyMarketMmQuotes[],
+   numSides: number,
+): number[] {
+   const best = Array.from({ length: numSides }, () => 0);
+   for (const mm of quotes) {
+      for (let side = 0; side < numSides; side++) {
+         const odds = Number(mm.oddsScaled[side] ?? 0n);
+         if (odds > best[side]!) {
+            best[side] = odds;
+         }
+      }
    }
-   const best = offers.reduce((a, b) => (b.oddsScaled > a.oddsScaled ? b : a));
-   return Number(best.oddsScaled);
+   return best;
 }
 
 async function getScoreboard(sport: string, league: string, date: string): Promise<ESPNEvent[]> {
@@ -257,6 +266,12 @@ async function cacheOdds() {
    const minOddsScaled = ODDS_SCALE + 1n;
 
    for (const [, market] of markets) {
+      const numSides = numSidesForMkt(market.id);
+      if (numSides === undefined) {
+         console.warn(`Skipping odds cache for unsupported mkt ${market.id} (${market.mkt_string})`);
+         continue;
+      }
+
       const wireMarketId: MarketId = {
          mkt: market.id,
          period: market.period_id,
@@ -268,35 +283,37 @@ async function cacheOdds() {
          },
          isPregame: true,
       };
-      const odds: number[] = [];
-      const sidesCount = market.mkt_string === "1X2" ? 3 : 2;
-      for (let side = 0; side < sidesCount; side++) {
-         try {
-            const quoteIx = await getGetQuoteProxyIx(
-               {
-                  betId: QUOTE_PROBE_BET_ID,
-                  marketId: wireMarketId,
-                  side,
-                  amount: 1n,
-                  minOddsScaled,
-                  eventGameState,
-                  eventStateSequence: 1,
-               },
-               fakeSigner.address,
-               mmPrograms,
-            );
-            const returnData = await simulateTransaction(clients.rpc, [quoteIx], [fakeSigner], true);
-            if (!returnData) {
-               odds.push(0);
-               continue;
-            }
-            const quotes = decodeProxyQuoteReturnData(returnDataToBytes(returnData));
-            odds.push(bestOddsScaledFromProxyQuotes(quotes));
-         } catch (error: unknown) {
-            console.error(`Error simulating quote proxy for market ${market.id} event ${market.event_id} side ${side}`);
-            console.error(error instanceof Error ? error.message : String(error));
-            odds.push(0);
+
+      const mmProgramsForMarket = mmPrograms.slice(
+         0,
+         Math.min(MAX_NUMBER_OF_MMS_PROXY, maxProxyMmsForMarketQuotes(numSides)),
+      );
+
+      let odds = Array.from({ length: numSides }, () => 0);
+      try {
+         const quoteIx = await getGetMarketQuotesProxyIx(
+            {
+               betId: QUOTE_PROBE_BET_ID,
+               marketId: wireMarketId,
+               side: 0,
+               amount: 1n,
+               minOddsScaled,
+               eventGameState,
+               eventStateSequence: 1,
+            },
+            fakeSigner.address,
+            mmProgramsForMarket,
+         );
+         const returnData = await simulateTransaction(clients.rpc, [quoteIx], [fakeSigner], true);
+         if (returnData) {
+            const quotes = decodeMarketQuotesProxyReturnData(returnDataToBytes(returnData), numSides);
+            odds = bestOddsPerSideFromMarketQuotes(quotes, numSides);
          }
+      } catch (error: unknown) {
+         console.error(
+            `Error simulating market quotes proxy for market ${market.id} event ${market.event_id}`,
+         );
+         console.error(error instanceof Error ? error.message : String(error));
       }
       await sleep(500);
       updateMarket(

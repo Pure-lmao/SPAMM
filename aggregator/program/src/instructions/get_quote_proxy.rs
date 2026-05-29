@@ -17,14 +17,13 @@
 use core::mem::MaybeUninit;
 
 use pinocchio::{
-   AccountView, ProgramResult, address::address_eq,
+   AccountView, ProgramResult,
    cpi::invoke,
    error::ProgramError,
    instruction::{InstructionAccount, InstructionView},
 };
 
 use pinocchio_log::log;
-use pinocchio_system::ID as SYSTEM_ID;
 use crate::{
    constants::MAX_NUMBER_OF_MMS_PROXY,
    helpers::{
@@ -45,7 +44,7 @@ pub const GET_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 8;
 
 /// CPI `get_quote` for one MM; ix buffers live only in this frame.
 #[inline(never)]
-fn cpi_get_quote_for_proxy(
+pub(crate) fn cpi_get_quote_for_proxy(
    user: &AccountView,
    mm_program_account: &AccountView,
    mm_config_pda: &AccountView,
@@ -161,7 +160,6 @@ pub fn get_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
 
    let mut mm_quotes = [const { MaybeUninit::<ProxyQuoteData>::uninit() }; MAX_NUMBER_OF_MMS_PROXY];
    let mut valid_quote_count = 0usize;
-   let mut previous_mms = [&SYSTEM_ID; MAX_NUMBER_OF_MMS_PROXY];
 
    for i in 0..number_of_mms {
       let base = i * MM_ACCOUNTS_PER_MM;
@@ -170,15 +168,6 @@ pub fn get_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
       let mm_event_state_pda = &mm_accounts[base + 2];
       let mm_market_data_pda = &mm_accounts[base + 3];
       let mm_quote_buffer = &mm_accounts[base + 4];
-
-      if previous_mms[..i]
-         .iter()
-         .any(|prev| address_eq(mm_program_account.address(), *prev))
-      {
-         log!("get_quote_proxy: duplicate mm program account");
-         return Err(ProgramError::InvalidInstructionData);
-      }
-      previous_mms[i] = mm_program_account.address();
 
       let Some((max_amount, odds_scaled)) = cpi_get_quote_for_proxy(
          user,
