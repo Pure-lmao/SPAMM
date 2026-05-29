@@ -136,7 +136,7 @@ function addBetAccount(
    meta: BetAccountAddMeta,
 ): void {
    const database = getDb();
-   database.run(`INSERT INTO bet_accounts 
+   database.run(`INSERT OR IGNORE INTO bet_accounts 
       (id, bet_id, type, user_address, selections, amount_requested, amount_filled, min_odds_requested, payout,
       result, created_at, created_sig, last_update_slot, status) 
       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
