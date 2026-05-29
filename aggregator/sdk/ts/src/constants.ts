@@ -28,9 +28,9 @@ export const ADDRESS_LOOKUP_TABLE_PROGRAM_ID: Address = address(
    'AddressLookupTab1e1111111111111111111111111',
 );
 
-// slot: 462125461
+// slot: 465810424
 export const LOOKUP_TABLE_ID: Address = address(
-   '7AChvrzBkq9zuSWFE89VT5Q4QGDpPG6sYKJMgLYnMDzS',
+   'XRCYQiVHeE3Q83v4piQh2yHiyVmr62MikYacgYBZnYt',
 );
 
 /** `constants::ODDS_SCALE` — odds are scaled by this factor (e.g. 15000 = 1.5x). */

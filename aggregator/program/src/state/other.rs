@@ -33,6 +33,7 @@ pub struct MmListPdaData {
 pub const MM_LIST_PDA_DISCRIMINATOR: u8 = 3;
 pub const MM_LIST_HEADER_LEN: usize = <MmListPdaData as ZeroPodFixed>::SIZE;
 pub const MM_LIST_PDA_NUMBER_OF_MMS_OFFSET: usize = 1;
+pub const MM_LIST_ENTRY_LEN: usize = 32;
 
 
 pub const EVENT_STATE_SEED: &[u8] = b"event_state";

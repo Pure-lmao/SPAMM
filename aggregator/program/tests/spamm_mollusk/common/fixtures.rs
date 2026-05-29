@@ -120,6 +120,11 @@ pub fn wrong_signer() -> Pubkey {
    Pubkey::new_from_array([0xEE; 32])
 }
 
+/// Second pubkey stored in `mm_list` when testing removal of the first entry (not a registered MM).
+pub fn mm_list_peer_program() -> Pubkey {
+   Pubkey::new_from_array([0xBB; 32])
+}
+
 // --- Event / market ids (plan) ---
 
 pub fn event_id_soccer() -> EventId {

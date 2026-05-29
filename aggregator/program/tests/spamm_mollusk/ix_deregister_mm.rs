@@ -7,8 +7,9 @@ use spl_token_interface::state::Account as TokenAccount;
 use crate::common::{
    address_lookup_table_program_pubkey, admin, assert_encumbrance_discriminator, assert_program_err,
    config_pda, encumbrance_pda, liability_token_ata, lookup_table_pubkey, mm_admin, mm_collateral_ata,
-   mm_config_pda, mm_list_pda, mm_parlay_quote_buffer_pda, mm_program_id, mm_quote_buffer_pda,
-   mint_pubkey, read_encumbrance, read_mm_list_tail, record_cu_success, wrong_signer, Env,
+   mm_config_pda, mm_list_pda, mm_list_peer_program, mm_parlay_quote_buffer_pda, mm_program_id,
+   mm_quote_buffer_pda, mint_pubkey, patch_mm_list_entries, read_encumbrance, read_mm_list_tail,
+   record_cu_success, wrong_signer, Env,
 };
 use mollusk_svm_programs_token::{associated_token, token};
 
@@ -86,6 +87,33 @@ fn deregister_mm_wrong_aggregator_admin() {
    let dereg = env.agg_ix(54, vec![], deregister_metas(wrong_signer(), mm_admin()));
    let r = env.run_ix(dereg);
    assert_program_err(&r, solana_program_error::ProgramError::IncorrectAuthority);
+}
+
+/// Removing index 0 must copy the trailing pubkey with a byte-wise swap (header len is 3 → misaligned `Address`).
+#[test]
+fn deregister_mm_removes_first_of_two_preserves_peer() {
+   let mut env = Env::new();
+   setup_register_then_deregister_prep(&mut env);
+
+   let peer = mm_list_peer_program();
+   patch_mm_list_entries(
+      &mut env,
+      &mm_list_pda(),
+      &[mm_program_id(), peer],
+   );
+   let (n, addrs) = read_mm_list_tail(&env, &mm_list_pda());
+   assert_eq!(n, 2);
+   assert_eq!(addrs[0], mm_program_id());
+   assert_eq!(addrs[1], peer);
+
+   let dereg = env.agg_ix(54, vec![], deregister_metas(admin(), mm_admin()));
+   let r = env.run_ix(dereg);
+   assert!(r.program_result.is_ok(), "deregister_mm {:?}", r);
+
+   let (n, addrs) = read_mm_list_tail(&env, &mm_list_pda());
+   assert_eq!(n, 1, "one MM should remain");
+   assert_eq!(addrs[0], peer, "remaining entry must be the second pubkey");
+   record_cu_success("deregister_mm/first_of_two", &r);
 }
 
 #[test]

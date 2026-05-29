@@ -28,9 +28,6 @@ use pinocchio::{
 use pinocchio_log::log;
 
 use crate::{
-   ID,
-   alt_ix::cpi_remove_lookup_table_addresses,
-   constants::CONFIG_PDA_SEED,
    helpers::{
       close_pda_return_rent, get_rent_local, safe_close_ata, verify_address_lookup_table_program,
       verify_associated_token_program, verify_authority, verify_config_pda, verify_lookup_table,
@@ -42,7 +39,7 @@ use crate::{
    readers::{read_address_unchecked, read_u16_le_unchecked},
    state::{
       MM_LIST_HEADER_LEN,
-      other::{MM_ENCUMBRANCE_PDA_SEED, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET},
+      other::{MM_ENCUMBRANCE_PDA_SEED, MM_LIST_ENTRY_LEN, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET},
    },
    writers::write_u16_le_unchecked,
 };
@@ -60,7 +57,7 @@ fn find_mm_list_index(mm_list: &AccountView, mm_program: &Address) -> Result<usi
       unsafe { read_u16_le_unchecked(mm_list.data_ptr(), MM_LIST_PDA_NUMBER_OF_MMS_OFFSET) }
          as usize;
    let expected_len = MM_LIST_HEADER_LEN
-      .checked_add(number_of_mms.checked_mul(32).ok_or(ProgramError::ArithmeticOverflow)?)
+      .checked_add(number_of_mms.checked_mul(MM_LIST_ENTRY_LEN).ok_or(ProgramError::ArithmeticOverflow)?)
       .ok_or(ProgramError::ArithmeticOverflow)?;
    if unlikely(data_len != expected_len) {
       log!("deregister_mm: mm_list length does not match number_of_mms");
@@ -69,7 +66,7 @@ fn find_mm_list_index(mm_list: &AccountView, mm_program: &Address) -> Result<usi
 
    let ptr = mm_list.data_ptr();
    for i in 0..number_of_mms {
-      let off = MM_LIST_HEADER_LEN + i * 32;
+      let off = MM_LIST_HEADER_LEN + i * MM_LIST_ENTRY_LEN;
       let entry = unsafe { read_address_unchecked(ptr, off) };
       if address_eq(&entry, mm_program) {
          return Ok(i);
@@ -96,11 +93,15 @@ fn remove_mm_from_list(
 
    let ptr = mm_list_pda.data_mut_ptr();
    if idx + 1 < number_of_mms {
-      let last_off = MM_LIST_HEADER_LEN + (number_of_mms - 1) * 32;
-      let idx_off = MM_LIST_HEADER_LEN + idx * 32;
+      let last_off = MM_LIST_HEADER_LEN + (number_of_mms - 1) * MM_LIST_ENTRY_LEN;
+      let idx_off = MM_LIST_HEADER_LEN + idx * MM_LIST_ENTRY_LEN;
+      // Byte copy only: entries sit at header_len (3), so pubkeys are never Address-aligned.
       unsafe {
-         let last = core::ptr::read(ptr.add(last_off));
-         core::ptr::write(ptr.add(idx_off), last);
+         core::ptr::copy_nonoverlapping(
+            ptr.add(last_off),
+            ptr.add(idx_off),
+            MM_LIST_ENTRY_LEN,
+         );
       }
    }
 
@@ -110,7 +111,7 @@ fn remove_mm_from_list(
    }
 
    let new_len = MM_LIST_HEADER_LEN
-      .checked_add(new_count.checked_mul(32).ok_or(ProgramError::ArithmeticOverflow)?)
+      .checked_add(new_count.checked_mul(MM_LIST_ENTRY_LEN).ok_or(ProgramError::ArithmeticOverflow)?)
       .ok_or(ProgramError::ArithmeticOverflow)?;
    let new_rent = get_rent_local(new_len as u64);
    let cur_lamports = mm_list_pda.lamports();
@@ -211,32 +212,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    ];
    let encumbrance_pda_signer = Signer::from(&encumbrance_pda_seeds);
 
-   let (_, config_bump) = Address::find_program_address(&[CONFIG_PDA_SEED], &ID);
-   let config_bump_seed = &[config_bump];
-   let config_signer_seeds: [Seed<'_>; 2] = [
-      Seed::from(CONFIG_PDA_SEED),
-      Seed::from(config_bump_seed),
-   ];
-   let config_signer = Signer::from(&config_signer_seeds);
-
-   let remove_addresses: [Address; 7] = [
-      *mm_program.address(),
-      *mm_config_pda.address(),
-      *mm_quote_buffer.address(),
-      *mm_parlay_quote_buffer.address(),
-      *mm_encumbrance_pda.address(),
-      *mm_token_account.address(),
-      *mm_liability_token_account.address(),
-   ];
-
-   cpi_remove_lookup_table_addresses(
-      lookup_table,
-      our_config_pda,
-      aggregator_admin,
-      system_program,
-      &remove_addresses,
-      config_signer,
-   )?;
    safe_close_ata(
       mm_liability_token_account,
       mm_admin,

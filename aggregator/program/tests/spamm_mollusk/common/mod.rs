@@ -11,7 +11,8 @@ pub use assertions::{
    assert_account_closed_or_system_empty, assert_bet_after_fill, assert_encumbrance_discriminator,
    assert_fill_bet_single_mm_economics, assert_netting_pda_initialized, assert_parlay_after_fill,
    clone_account_stub, decode_bet, decode_parlay_bet, read_config_authority_status,
-   read_encumbrance, read_mm_list_tail, read_netting_lines_snapshot, read_netting_soccer_header_and_lines,
+   patch_mm_list_entries, read_encumbrance, read_mm_list_tail, read_netting_lines_snapshot,
+   read_netting_soccer_header_and_lines,
    read_token_balance, uniform_parlay_combined_odds,
 };
 pub use env::{

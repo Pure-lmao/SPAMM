@@ -82,6 +82,27 @@ pub fn read_config_authority_status(env: &Env, config_pda: &Pubkey) -> (Pubkey, 
    (authority, status)
 }
 
+/// Overwrite `mm_list` body with `entries` (header + pubkeys); for swap-remove tests.
+pub fn patch_mm_list_entries(env: &mut Env, mm_list_key: &Pubkey, entries: &[Pubkey]) {
+   use spamm_aggregator::state::{MM_LIST_HEADER_LEN, MM_LIST_PDA_DISCRIMINATOR};
+   use spamm_aggregator::state::other::{MM_LIST_ENTRY_LEN, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET};
+
+   let len = MM_LIST_HEADER_LEN + entries.len() * MM_LIST_ENTRY_LEN;
+   let mut acct = env
+      .get_account(mm_list_key)
+      .unwrap_or_else(|| panic!("missing mm_list {mm_list_key}"))
+      .clone();
+   acct.data.resize(len, 0);
+   acct.data[0] = MM_LIST_PDA_DISCRIMINATOR;
+   acct.data[MM_LIST_PDA_NUMBER_OF_MMS_OFFSET..MM_LIST_PDA_NUMBER_OF_MMS_OFFSET + 2]
+      .copy_from_slice(&(entries.len() as u16).to_le_bytes());
+   for (i, pk) in entries.iter().enumerate() {
+      let off = MM_LIST_HEADER_LEN + i * MM_LIST_ENTRY_LEN;
+      acct.data[off..off + MM_LIST_ENTRY_LEN].copy_from_slice(pk.as_ref());
+   }
+   env.upsert(*mm_list_key, acct);
+}
+
 pub fn read_mm_list_tail(env: &Env, mm_list_pda: &Pubkey) -> (u16, Vec<Pubkey>) {
    let acct = env
       .get_account(mm_list_pda)
