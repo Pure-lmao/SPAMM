@@ -1029,6 +1029,31 @@ h1 {
    font-size: 1rem;
    font-weight: 600;
    letter-spacing: -0.02em;
+   flex: 1 1 auto;
+   min-width: 0;
+}
+
+.bet-slip-tray__dismiss {
+   flex-shrink: 0;
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   width: 2rem;
+   height: 2rem;
+   padding: 0;
+   border: 1px solid var(--border);
+   border-radius: 6px;
+   background: transparent;
+   color: var(--muted);
+   font-size: 1.25rem;
+   line-height: 1;
+   cursor: pointer;
+}
+
+.bet-slip-tray__dismiss:hover {
+   color: var(--text);
+   border-color: var(--muted);
+   background: var(--wash-hover);
 }
 
 .bet-slip-tray__clear-all {
@@ -1091,12 +1116,6 @@ h1 {
    .bet-slip-tray__fields .bet-modal-input {
       width: 100%;
    }
-}
-
-.bet-slip-tray__selection-single {
-   padding: 0.35rem 0.45rem;
-   border-radius: 8px;
-   background: var(--wash-subtle);
 }
 
 .bet-slip-tray__selection-text {
@@ -1218,6 +1237,24 @@ h1 {
    font-weight: 600;
    color: var(--odds-colour);
    font-variant-numeric: tabular-nums;
+   white-space: nowrap;
+}
+
+.bet-slip-tray__action-btns {
+   display: flex;
+   flex-wrap: wrap;
+   align-items: stretch;
+   gap: 0.5rem;
+   flex: 0 0 auto;
+}
+
+.bet-slip-tray__action-btns .bet-modal-btn--ghost {
+   display: flex;
+   align-items: center;
+   justify-content: center;
+   min-width: 6.5rem;
+   align-self: stretch;
+   padding: 0.45rem 0.85rem;
    white-space: nowrap;
 }
 

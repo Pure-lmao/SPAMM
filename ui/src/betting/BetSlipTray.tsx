@@ -65,6 +65,7 @@ export function BetSlipTray(): ReactElement | null {
    const [placedBetSummary, setPlacedBetSummary] = useState<PlacedBetSummary | null>(null);
    const sendLockRef = useRef(false);
    const prevCountRef = useRef(0);
+   const legsAtPlaceRef = useRef<string | null>(null);
 
    const { account, isConnected } = useWallet();
    const { signer, ready: signerReady } = useKitTransactionSigner();
@@ -234,8 +235,34 @@ export function BetSlipTray(): ReactElement | null {
    }, []);
 
    useEffect(() => {
-      setSlipLocked(sendPhase !== "idle");
+      setSlipLocked(sendPhase === "signing" || sendPhase === "confirming");
    }, [sendPhase, setSlipLocked]);
+
+   useEffect(() => {
+      if (sendPhase !== "done") {
+         if (sendPhase === "idle") {
+            legsAtPlaceRef.current = null;
+         }
+         return;
+      }
+      const sig = selections.map((s) => s.id).join("|");
+      if (legsAtPlaceRef.current === null) {
+         legsAtPlaceRef.current = sig;
+         return;
+      }
+      if (sig !== legsAtPlaceRef.current) {
+         setPlacedBetSummary(null);
+         setSendPhase("idle");
+         legsAtPlaceRef.current = null;
+      }
+   }, [selections, sendPhase]);
+
+   const dismissSlip = useCallback(() => {
+      setPlacedBetSummary(null);
+      setSendErr(null);
+      setSendPhase("idle");
+      clearSlip();
+   }, [clearSlip]);
 
    const runSendPipeline = async () => {
       if (sendLockRef.current || selections.length === 0) {
@@ -449,13 +476,38 @@ export function BetSlipTray(): ReactElement | null {
             {...(isParlay ? { role: "button", tabIndex: 0, "aria-expanded": expanded } : {})}
          >
             <h2 className="bet-slip-tray__title">{headerTitle}</h2>
+            {sendPhase === "done" && (
+               <button
+                  type="button"
+                  className="bet-slip-tray__dismiss"
+                  aria-label="Dismiss bet slip"
+                  onClick={(e) => {
+                     e.stopPropagation();
+                     dismissSlip();
+                  }}
+               >
+                  ×
+               </button>
+            )}
          </header>
 
          {!isCollapsed && (
             <div className="bet-slip-tray__body">
                <div className="bet-slip-tray__top">
                   {selections.length === 1 ? (
-                     <div className="bet-slip-tray__selection-single">{selectionBlock(selections[0]!)}</div>
+                     <div className="bet-slip-tray__leg">
+                        {selectionBlock(selections[0]!)}
+                        {!slipLocked && (
+                           <button
+                              type="button"
+                              className="bet-slip-tray__leg-remove"
+                              aria-label={`Remove ${selections[0]!.marketLabel}`}
+                              onClick={() => removeSelection(selections[0]!.id)}
+                           >
+                              ×
+                           </button>
+                        )}
+                     </div>
                   ) : (
                      <ul className="bet-slip-tray__legs">
                         {selections.map((sel) => (
@@ -480,9 +532,15 @@ export function BetSlipTray(): ReactElement | null {
                      <button
                         type="button"
                         className="bet-slip-tray__clear-all"
-                        onClick={() => clearSlip()}
+                        onClick={() => {
+                           if (sendPhase === "done") {
+                              dismissSlip();
+                              return;
+                           }
+                           clearSlip();
+                        }}
                      >
-                        Clear all
+                        {sendPhase === "done" ? "Dismiss" : "Clear all"}
                      </button>
                   )}
 
@@ -597,28 +655,39 @@ export function BetSlipTray(): ReactElement | null {
                      <span className="bet-slip-tray__return-label">Potential return</span>
                      <span className="bet-slip-tray__return-value">{potentialReturnLabel}</span>
                   </div>
-                  <button
-                     type="button"
-                     className={
-                        !needsWallet && sendPhase === "confirming"
-                           ? "bet-modal-btn bet-modal-btn--primary bet-modal-btn--tx-confirming"
-                           : "bet-modal-btn bet-modal-btn--primary"
-                     }
-                     disabled={primaryDisabled}
-                     onClick={() => {
-                        if (needsWallet) {
-                           onConnectClick();
-                           return;
+                  <div className="bet-slip-tray__action-btns">
+                     {sendPhase === "done" && (
+                        <button
+                           type="button"
+                           className="bet-modal-btn bet-modal-btn--ghost"
+                           onClick={() => dismissSlip()}
+                        >
+                           Dismiss
+                        </button>
+                     )}
+                     <button
+                        type="button"
+                        className={
+                           !needsWallet && sendPhase === "confirming"
+                              ? "bet-modal-btn bet-modal-btn--primary bet-modal-btn--tx-confirming"
+                              : "bet-modal-btn bet-modal-btn--primary"
                         }
-                        if (sendPhase === "done") {
-                           reuseSelections();
-                           return;
-                        }
-                        void runSendPipeline();
-                     }}
-                  >
-                     {primaryLabel}
-                  </button>
+                        disabled={primaryDisabled}
+                        onClick={() => {
+                           if (needsWallet) {
+                              onConnectClick();
+                              return;
+                           }
+                           if (sendPhase === "done") {
+                              reuseSelections();
+                              return;
+                           }
+                           void runSendPipeline();
+                        }}
+                     >
+                        {primaryLabel}
+                     </button>
+                  </div>
                </div>
                </div>
             </div>

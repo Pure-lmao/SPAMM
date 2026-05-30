@@ -16,7 +16,7 @@ import type { BetSlipSelection, BetSlipSelectionInput } from "./types";
 type BetSlipCtx = {
    selections: readonly BetSlipSelection[];
    expanded: boolean;
-   /** True after Place bet until Reuse selection(s); blocks parlay leg edits and new picks. */
+   /** True while a bet tx is signing/confirming; blocks slip edits and new picks. */
    slipLocked: boolean;
    setSlipLocked: (locked: boolean) => void;
    toggleSelection: (input: BetSlipSelectionInput) => void;

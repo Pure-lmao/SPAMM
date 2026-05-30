@@ -11,6 +11,18 @@ The **aggregator** is responsible for filling user bets with offers from the int
 
 The aggregator program is responsible for **grading** the bets. Funds are transferred to the winners by calling **`settle_bet`** on a graded bet.
 
+There are many ways SPAMMs could work:
+- one might generally quote most markets based on a sports data feed and add basic vig and risk management.
+- one might try to capture losing-bettor flow by gathering lots of data and filling their config PDA with those wallets that they want to give an odds boost to.
+- one might focus on a specific league such as NBA and try to quote it very tightly to get almost 100% of the flow.
+- one might be run by a team that originates their own odds for a league like NFL, and quotes it with a skew vs the wider market in order to get a position without leaking alpha to the market by betting into it directly.
+- one might avoid competing against sharper MMs on major markets and only offer quotes on smaller leagues and esports, where the sharper MMs are less likely to be, with higher vig.
+- one might only offer parlays and quote them competitively to get most of the parlay flow.
+- one might fill the config PDA and market data PDAs with lots of correlation data to offer accurate same-game parlay quotes.
+- one might be run by a frontend and offer odds boosts on specific markets to specific users as a user retention method by only quoting that market and filling the market data PDA with the allowed users.
+- one might simply pull orderbooks from other exchanges, dump them in the market data PDAs, and offer based on that.
+- since markets are not controlled by the actual SPAMM aggregator in any way (the API is really just "suggested" market ids so everyone is on the same page about them), a product could build on top of the framework for something niche could and offer their own markets on their own SPAMM for their own frontend users (although I am always willing to add new thing to the API because forcing SPAMMs to compete is what makes odds great for users)
+
 ## Deployment
 
 The **SPAMM Aggregator** program is deployed to Solana **devnet** at the address **`5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H`**. The betting token is **`Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr`** which you can get [here](https://spl-token-faucet.com/). If the devnet SOL airdrop is 429, you can get some [here](https://faucet.solana.com/).
@@ -1007,6 +1019,6 @@ This is called by the aggregator admin to force close a PDA on devnet.
 
 There are some Mollusk integration tests that I got AI to write. There should be decent enough coverage (although only the example SPAMM is used so routing etc isn't tested) but I cannot be bothered to actually write them myself because Mollusk is a pain in the arse to write with manually and no one really care right now.
 
-### Token
+## Token
 
 There is no token. I'm only saying this because people made a token claiming to be a previous project claiming to be real and hopefully this stops it happening here. 
