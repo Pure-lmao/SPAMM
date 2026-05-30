@@ -154,15 +154,6 @@ export function validateGetQuoteParlayIxData(ix: GetQuoteParlayIxData, label = '
    for (let i = 0; i < ix.legs.length; i++) {
       validateParlayLegWire(ix.legs[i]!, `${label}.legs[${i}]`);
    }
-   for (let i = 0; i < ix.legs.length; i++) {
-      for (let j = i + 1; j < ix.legs.length; j++) {
-         const ei = ix.legs[i]!.marketId.eventId;
-         const ej = ix.legs[j]!.marketId.eventId;
-         if (ei.event === ej.event && ei.league === ej.league && ei.sport === ej.sport) {
-            throw new RangeError(`${label}: parlay legs must be on distinct events`);
-         }
-      }
-   }
 }
 
 export function validateFillParlayQuoteIxData(ix: FillParlayQuoteIxData, label = 'fillParlayQuote'): void {

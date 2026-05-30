@@ -183,15 +183,6 @@ export function validateGetQuoteParlayIxData(
    for (let i = 0; i < ix.legs.length; i++) {
       validateParlayLegWire(ix.legs[i]!, `${label}.legs[${i}]`);
    }
-   for (let i = 0; i < ix.legs.length; i++) {
-      for (let j = i + 1; j < ix.legs.length; j++) {
-         const ei = ix.legs[i]!.marketId.eventId;
-         const ej = ix.legs[j]!.marketId.eventId;
-         if (ei.event === ej.event && ei.league === ej.league && ei.sport === ej.sport) {
-            throw new RangeError(`${label}: parlay legs must be on distinct events`);
-         }
-      }
-   }
 }
 
 export function validateFillParlayIxData(data: FillParlayIxData, label = 'fillParlay'): void {
@@ -210,15 +201,6 @@ export function validateFillParlayIxData(data: FillParlayIxData, label = 'fillPa
    }
    for (let i = 0; i < data.legs.length; i++) {
       validateParlayLegWire(data.legs[i]!, `${label}.legs[${i}]`);
-   }
-   for (let i = 0; i < data.legs.length; i++) {
-      for (let j = i + 1; j < data.legs.length; j++) {
-         const ei = data.legs[i]!.marketId.eventId;
-         const ej = data.legs[j]!.marketId.eventId;
-         if (ei.event === ej.event && ei.league === ej.league && ei.sport === ej.sport) {
-            throw new RangeError(`${label}: parlay legs must be on distinct events`);
-         }
-      }
    }
 }
 
