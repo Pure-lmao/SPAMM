@@ -391,7 +391,7 @@ export function fetchMarkets(): Map<string, Market> {
 
 export function fetchUpcomingMarkets(): Map<string, Market> {
    const database = getDb();
-   const events = database.query<Event, [string]>("SELECT DISTINCT event_id FROM events WHERE start_time > ?").all(Date.now().toString());
+   const events = database.query<Event, [string]>("SELECT DISTINCT id FROM events WHERE start_time > ?").all(Date.now().toString());
    const evenIds = events.map((e) => e.id);
    const markets = database.query<Market, string[]>(`SELECT * FROM markets WHERE event_id IN (${evenIds.map(() => `?`).join(",")})`).all(...evenIds.map((id) => id.toString()));
    const map = new Map<string, Market>();
