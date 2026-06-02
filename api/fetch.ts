@@ -1,6 +1,6 @@
 import { fetch, sleep } from "bun";
 import type { ESPNEvent, ESPNOdds, Event } from "./types";
-import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchMarkets, fetchSports, fetchUngradedStartedEvents, getLeagues, updateEventScore, updateMarket } from "./localDb";
+import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, getLeagues, updateEventScore, updateMarket } from "./localDb";
 import { safeJSONStringify } from "./utils";
 import {
    decodeMarketQuotesProxyReturnData,
@@ -121,7 +121,7 @@ async function setUpcomingEvents() {
    const leagues = fetchLeagues();
    const sports = fetchSports();
    const events = fetchEvents();
-   const markets = fetchMarkets();
+   const markets = fetchUpcomingMarkets();
 
    const marketIdSet = new Set<string>();
    for (const [marketId, market] of markets) {
@@ -251,7 +251,7 @@ async function setFinishedEvents() {
 
 async function cacheOdds() {
    console.log("Caching odds");
-   const markets = fetchMarkets();
+   const markets = fetchUpcomingMarkets();
    const clients = createRpcClients();
    const marketMakers = await getMmListData(clients.rpc);
    const mmPrograms = marketMakers.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY);

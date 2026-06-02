@@ -389,6 +389,18 @@ export function fetchMarkets(): Map<string, Market> {
    return map;
 }
 
+export function fetchUpcomingMarkets(): Map<string, Market> {
+   const database = getDb();
+   const events = database.query<Event, [string]>("SELECT DISTINCT event_id FROM events WHERE start_time > ?").all(Date.now().toString());
+   const evenIds = events.map((e) => e.id);
+   const markets = database.query<Market, string[]>(`SELECT * FROM markets WHERE event_id IN (${evenIds.map(() => `?`).join(",")})`).all(...evenIds.map((id) => id.toString()));
+   const map = new Map<string, Market>();
+   for (const r of markets) {
+      map.set(`${r.sport_id}:${r.league_id}:${r.event_id}:${r.period_id}:${r.mkt_string}`, r);
+   }
+   return map;
+}
+
 function fetchMarket(marketId: number, eventId: number, leagueId: number, sportId: number): Market | null {
    const database = getDb();
    const row = database.query<Market, string[]>(
