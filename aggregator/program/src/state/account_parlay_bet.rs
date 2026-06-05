@@ -24,12 +24,13 @@ pub struct ParlayBetAccountData {
    pub bet_id: u64,
    pub amount: u64,
    pub payout: u64,
+   pub timestamp: u32,
    pub filler_address: Address,
    pub result: BetResult,
    pub num_legs: u8,
    pub legs: ParlayLegTable,
 }
-pub const PARLAY_BET_RESULT_OFFSET: usize = 122;
+pub const PARLAY_BET_RESULT_OFFSET: usize = 126;
 
 pub const PARLAY_BET_ACCOUNT_LEN: u64 = <ParlayBetAccountData as ZeroPodFixed>::SIZE as u64;
 
@@ -44,6 +45,7 @@ impl ParlayBetAccountData {
          bet_id: self.bet_id.into(),
          amount: self.amount.into(),
          payout: self.payout.into(),
+         timestamp: self.timestamp.into(),
          filler_address: self.filler_address,
          result: self.result.into(),
          num_legs: self.num_legs,
@@ -66,6 +68,7 @@ impl ParlayBetAccountData {
          bet_id: zc.bet_id.get(),
          amount: zc.amount.get(),
          payout: zc.payout.get(),
+         timestamp: zc.timestamp.get(),
          filler_address: zc.filler_address,
          result: BetResult::from_u8(zc.result.get()),
          num_legs: zc.num_legs,

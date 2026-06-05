@@ -11,6 +11,7 @@
         "react": "^19.0.0",
         "react-dom": "^19.0.0",
         "react-router-dom": "^7.15.1",
+        "spamm-score-predict-sdk": "file:../score_predict/sdk/ts",
       },
       "devDependencies": {
         "@types/react": "^19.0.0",
@@ -820,6 +821,8 @@
     "source-map-js": ["source-map-js@1.2.1", "", {}, "sha512-UXWMKhLOwVKb728IUtQPXxfYU+usdybtUrK/8uGE8CQMvrhOpwvzDBwj0QhSL7MQc7vIsISBG8VQ8+IDQxpfQA=="],
 
     "source-map-support": ["source-map-support@0.5.21", "", { "dependencies": { "buffer-from": "^1.0.0", "source-map": "^0.6.0" } }, "sha512-uBHU3L3czsIyYXKX88fdrGovxdSCoTGDRZ6SYXtSRxLZUzHg5P/66Ht6uoUlHu9EZod+inXhKo3qQgwXUT/y1w=="],
+
+    "spamm-score-predict-sdk": ["spamm-score-predict-sdk@file:../score_predict/sdk/ts", { "dependencies": { "@solana/kit": "^6.8.0" }, "devDependencies": { "typescript": "^5.7.2" } }],
 
     "stackframe": ["stackframe@1.3.4", "", {}, "sha512-oeVtt7eWQS+Na6F//S4kJ2K2VbRlS9D43mAlMyVpVWovy9o+jfgH8O9agzANzaiLjclA0oYzUXEM4PurhSUChw=="],
 

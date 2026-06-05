@@ -1,8 +1,7 @@
 //! Shared helpers for MM `get_quote` and `get_quote_parlay` (odds body layout, parlay math).
 
 use pinocchio::{ProgramResult, error::ProgramError, hint::unlikely};
-use pinocchio_log::log;
-use spamm_aggregator::state::{MarketId, ParlayLegTable, Sport};
+use pinocchio_log::log;use spamm_aggregator::state::{MarketId, ParlayLegTable, Sport};
 
 /// Soccer Full-Time (`mkt` 1) and Double Chance (`mkt` 5): three `u32` LE odds in the body in order
 /// **home, away, draw**; wire `side` is `0` / `1` / `2` for the same three outcomes.

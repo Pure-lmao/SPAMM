@@ -9,12 +9,13 @@
 //!
 //! Instruction `data`: [`crate::state::GetQuoteParlayIxPayload`] (after MM router discriminator).
 
-use pinocchio::{AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::unlikely};
+use pinocchio::{AccountView, Address, address::address_eq, hint::unlikely};
 use pinocchio_log::log;
 use zeropod::ZeroPodFixed;
 
 use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA};
 use crate::instructions::quote_helpers::{ensure_distinct_parlay_event_ids, odds_from_market_data_body};
+use spamm_aggregator::QuoteResult;
 use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state};
 use crate::state::{GetQuoteParlayIxPayload, GetQuoteReturnWire};
 use spamm_aggregator::constants::{MAX_PARLAY_LEGS, ODDS_SCALE};
@@ -22,9 +23,10 @@ use spamm_aggregator::state::mm_parlay_quote::{MMParlayQuoteBuffer, MM_PARLAY_QU
 use spamm_aggregator::state::Sport;
 pub use spamm_aggregator::state::GET_QUOTE_PARLAY_IX_DISCRIMINATOR;
 
-pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> QuoteResult {
    let [
       user,
+      _clock_program,
       mm_config_pda,
       mm_parlay_quote_buffer,
       leg_accounts @ ..,
@@ -212,7 +214,8 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    let mut buf = buf.unwrap();
    if unlikely(buf.len() != MM_PARLAY_QUOTE_BUFFER_LEN) {
       log!("get_quote_parlay: quote buffer len mismatch");
-      return Err(ProgramError::InvalidAccountData);
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
    }
    let result = quote.write_wire(&mut buf);
    if unlikely(result.is_err()) {
@@ -225,7 +228,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 }
 
 #[inline(always)]
-fn set_get_quote_return_data(max_amount: u64, odds_scaled: u32) -> ProgramResult {
+fn set_get_quote_return_data(max_amount: u64, odds_scaled: u32) -> QuoteResult {
    let ret = GetQuoteReturnWire {
       max_amount,
       odds_scaled,

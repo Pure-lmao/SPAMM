@@ -5,6 +5,7 @@ import react from "@vitejs/plugin-react";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const sdkEntry = path.resolve(__dirname, "../aggregator/sdk/ts/src/index.ts");
+const scorePredictSdkEntry = path.resolve(__dirname, "../score_predict/sdk/ts/src/index.ts");
 
 const apiTarget = process.env.API_PROXY_TARGET ?? "http://127.0.0.1:8787";
 
@@ -12,6 +13,7 @@ export default defineConfig({
    resolve: {
       alias: {
          "spamm-aggregator-sdk": sdkEntry,
+         "spamm-score-predict-sdk": scorePredictSdkEntry,
       },
    },
    plugins: [react()],

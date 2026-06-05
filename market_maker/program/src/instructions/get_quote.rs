@@ -19,21 +19,23 @@
 //!
 //! Return data (`sol_set_return_data`): **12** bytes — `max_amount` (u64 LE), `odds_scaled` (u32 LE).
 
-use pinocchio::{AccountView, Address, ProgramResult, address::address_eq, hint::unlikely};
+use pinocchio::{AccountView, Address, address::address_eq, hint::unlikely};
 use pinocchio_log::log;
 use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state};
 use zeropod::ZeroPodFixed;
 
 use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, QUOTE_BUFFER_PDA};
 use crate::instructions::quote_helpers::odds_from_market_data_body;
+use spamm_aggregator::QuoteResult;
 use crate::state::{GetQuoteIxPayload, GetQuoteReturnWire};
 use spamm_aggregator::state::mm_quote::MM_QUOTE_BUFFER_DISCRIMINATOR;
 use spamm_aggregator::state::{MMQuoteBuffer, MM_QUOTE_BUFFER_LEN};
 pub use spamm_aggregator::state::GET_QUOTE_IX_DISCRIMINATOR;
 
-pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> QuoteResult {
    let [
       user,
+      _clock_program,
       mm_market_data_pda,
       event_state_pda,
       mm_config_pda,
@@ -192,7 +194,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 }
 
 #[inline(always)]
-fn set_get_quote_return_data(max_amount: u64, odds_scaled: u32) -> ProgramResult {
+fn set_get_quote_return_data(max_amount: u64, odds_scaled: u32) -> QuoteResult {
    let ret = GetQuoteReturnWire {
       max_amount,
       odds_scaled,

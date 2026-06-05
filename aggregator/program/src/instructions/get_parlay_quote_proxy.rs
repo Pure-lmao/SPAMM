@@ -39,7 +39,7 @@ use crate::{
    },
 };
 
-const MM_PARLAY_PROXY_FIXED_ACCOUNTS: usize = 3;
+const MM_PARLAY_PROXY_FIXED_ACCOUNTS: usize = 4;
 
 pub const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 9;
 
@@ -56,6 +56,7 @@ fn cpi_get_quote_parlay_for_proxy(
    min_odds_scaled: u32,
    legs: ParlayLegTable,
    user: &AccountView,
+   clock_program: &AccountView,
    mm_program_account: &AccountView,
    mm_config_pda: &AccountView,
    mm_parlay_quote_buffer: &AccountView,
@@ -92,14 +93,15 @@ fn cpi_get_quote_parlay_for_proxy(
       MaybeUninit::uninit().assume_init()
    };
    maybe_metas[0].write(InstructionAccount::new(user.address(), false, false));
-   maybe_metas[1].write(InstructionAccount::new(mm_config_pda.address(), false, false));
-   maybe_metas[2].write(InstructionAccount::new(mm_parlay_quote_buffer.address(), true, false));
+   maybe_metas[1].write(InstructionAccount::new(clock_program.address(), false, false));
+   maybe_metas[2].write(InstructionAccount::new(mm_config_pda.address(), false, false));
+   maybe_metas[3].write(InstructionAccount::new(mm_parlay_quote_buffer.address(), true, false));
 
    for (leg_i, leg_pair) in leg_accounts.chunks_exact(2).enumerate().take(num_legs) {
       let market_data_pda = &leg_pair[0];
       let event_state_pda = &leg_pair[1];
-      let md_index = 3 + leg_i * 2;
-      let es_index = 4 + leg_i * 2;
+      let md_index = 4 + leg_i * 2;
+      let es_index = 5 + leg_i * 2;
       let Some(leg) = legs.get(leg_i) else {
          return None;
       };
@@ -125,7 +127,7 @@ fn cpi_get_quote_parlay_for_proxy(
       maybe_metas[es_index].write(InstructionAccount::new(event_state_pda.address(), false, false));
    }
 
-   let number_of_accounts: usize = 3 + 2 * num_legs;
+   let number_of_accounts: usize = 4 + 2 * num_legs;
    let metas_slice: &[InstructionAccount] = unsafe {
       core::slice::from_raw_parts(
          maybe_metas.as_ptr().cast::<InstructionAccount>(),
@@ -143,6 +145,7 @@ fn cpi_get_quote_parlay_for_proxy(
          &ix,
          &[
             user.as_ref(),
+            clock_program.as_ref(),
             mm_config_pda.as_ref(),
             mm_parlay_quote_buffer.as_ref(),
             leg_accounts[0].as_ref(),
@@ -156,6 +159,7 @@ fn cpi_get_quote_parlay_for_proxy(
          &ix,
          &[
             user.as_ref(),
+            clock_program.as_ref(),
             mm_config_pda.as_ref(),
             mm_parlay_quote_buffer.as_ref(),
             leg_accounts[0].as_ref(),
@@ -171,6 +175,7 @@ fn cpi_get_quote_parlay_for_proxy(
          &ix,
          &[
             user.as_ref(),
+            clock_program.as_ref(),
             mm_config_pda.as_ref(),
             mm_parlay_quote_buffer.as_ref(),
             leg_accounts[0].as_ref(),
@@ -188,6 +193,7 @@ fn cpi_get_quote_parlay_for_proxy(
          &ix,
          &[
             user.as_ref(),
+            clock_program.as_ref(),
             mm_config_pda.as_ref(),
             mm_parlay_quote_buffer.as_ref(),
             leg_accounts[0].as_ref(),
@@ -235,6 +241,7 @@ fn cpi_get_quote_parlay_for_proxy(
 pub fn get_parlay_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       user,
+      clock_program,
       mm_accounts @ ..,
    ] = accounts else {
       log!("get_parlay_quote_proxy: accounts mismatch");
@@ -280,6 +287,7 @@ pub fn get_parlay_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> Prog
          min_odds_scaled,
          legs,
          user,
+         clock_program,
          mm_program_account,
          mm_config_pda,
          mm_parlay_quote_buffer,

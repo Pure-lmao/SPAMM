@@ -37,6 +37,7 @@ export type WalletParlayRow = {
    kind: "parlay";
    address: string;
    betId: bigint;
+   timestamp: number;
    amount: bigint;
    payout: bigint;
    result: BetResult;
@@ -47,17 +48,12 @@ export type WalletParlayRow = {
 
 export type WalletBetRow = WalletSingleRow | WalletParlayRow;
 
-/** @deprecated Use {@link WalletBetRow} */
-export type ClosedParlayLeg = WalletParlayLeg;
-/** @deprecated Use {@link WalletSingleRow} */
-export type ClosedSingleRow = WalletSingleRow;
-/** @deprecated Use {@link WalletParlayRow} */
-export type ClosedParlayRow = WalletParlayRow;
-/** @deprecated Use {@link WalletBetRow} */
-export type ClosedBetRow = WalletBetRow;
-
 export function walletBetRowBetId(row: WalletBetRow): bigint {
    return row.kind === "single" ? row.data.betId : row.betId;
+}
+
+export function walletBetRowTimestamp(row: WalletBetRow): number {
+   return row.kind === "single" ? row.data.timestamp : row.timestamp;
 }
 
 export function walletBetRowResult(row: WalletBetRow): BetResult {
@@ -66,9 +62,9 @@ export function walletBetRowResult(row: WalletBetRow): BetResult {
 
 export function sortWalletBetRows<T extends WalletBetRow>(rows: readonly T[]): T[] {
    return [...rows].sort((a, b) => {
-      const aId = walletBetRowBetId(a);
-      const bId = walletBetRowBetId(b);
-      return aId < bId ? 1 : aId > bId ? -1 : 0;
+      const aTs = walletBetRowTimestamp(a);
+      const bTs = walletBetRowTimestamp(b);
+      return aTs < bTs ? 1 : aTs > bTs ? -1 : 0;
    });
 }
 
@@ -178,6 +174,7 @@ export function normalizeBetRecordFromApi(raw: unknown): BetRecord | null {
       amount_filled,
       min_odds_requested,
       payout,
+      timestamp: Number(r.timestamp),
       result: result as BetResult,
       created_at: Number(r.created_at),
       created_sig: String(r.created_sig ?? ""),
@@ -224,6 +221,7 @@ function closedBetRecordToSingleRow(rec: BetRecord): WalletSingleRow | null {
          side: sel.side,
          amount: amountFilled,
          payout: toBigIntField(rec.payout, "payout"),
+         timestamp: rec.timestamp,
          eventStateSequence: 0,
          eventGameState: {
             gamePhase: "",
@@ -250,6 +248,7 @@ function closedBetRecordToParlayRow(rec: BetRecord): WalletParlayRow | null {
       kind: "parlay",
       address: rec.id,
       betId: toBigIntField(rec.bet_id, "bet_id"),
+      timestamp: rec.timestamp,
       amount: toBigIntField(rec.amount_filled, "amount_filled"),
       payout: toBigIntField(rec.payout, "payout"),
       result: rec.result,
@@ -284,6 +283,7 @@ export async function fetchOpenWalletBets(
          kind: "parlay" as const,
          address: String(r.address),
          betId: r.data.betId,
+         timestamp: r.data.timestamp,
          amount: r.data.amount,
          payout: r.data.payout,
          result: r.data.result,

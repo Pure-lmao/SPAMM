@@ -46,6 +46,7 @@ pub const GET_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 8;
 #[inline(never)]
 pub(crate) fn cpi_get_quote_for_proxy(
    user: &AccountView,
+   clock_program: &AccountView,
    mm_program_account: &AccountView,
    mm_config_pda: &AccountView,
    mm_event_state_pda: &AccountView,
@@ -93,6 +94,7 @@ pub(crate) fn cpi_get_quote_for_proxy(
    }
    let get_quote_ix_accounts = [
       InstructionAccount::new(user.address(), false, false),
+      InstructionAccount::new(clock_program.address(), false, false),
       InstructionAccount::new(mm_market_data_pda.address(), false, false),
       InstructionAccount::new(mm_event_state_pda.address(), false, false),
       InstructionAccount::new(mm_config_pda.address(), false, false),
@@ -107,6 +109,7 @@ pub(crate) fn cpi_get_quote_for_proxy(
       &get_quote_ix,
       &[
          user.as_ref(),
+         clock_program.as_ref(),
          mm_market_data_pda.as_ref(),
          mm_event_state_pda.as_ref(),
          mm_config_pda.as_ref(),
@@ -133,6 +136,7 @@ pub(crate) fn cpi_get_quote_for_proxy(
 pub fn get_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       user,
+      clock_program,
       mm_accounts @ ..,
    ] = accounts else {
       log!("get_quote_proxy: accounts mismatch");
@@ -171,6 +175,7 @@ pub fn get_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> ProgramResu
 
       let Some((max_amount, odds_scaled)) = cpi_get_quote_for_proxy(
          user,
+         clock_program,
          mm_program_account,
          mm_config_pda,
          mm_event_state_pda,

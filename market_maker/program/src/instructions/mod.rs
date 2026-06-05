@@ -27,6 +27,8 @@ mod force_close_pda;
 mod update_event_state;
 mod quote_helpers;
 
+use spamm_aggregator::quote_ok;
+
 #[inline(never)]
 pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {
    match d {
@@ -40,9 +42,9 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
 
       // Aggregator CPI (`lib.rs` strips router byte): MUST match `GET_QUOTE_IX_DISCRIMINATOR` /
       // `FILL_QUOTE_IX_DISCRIMINATOR` in `spamm_aggregator`.
-      GET_QUOTE_IX_DISCRIMINATOR => get_quote::process(program_id, accounts, data),
+      GET_QUOTE_IX_DISCRIMINATOR => quote_ok(get_quote::process(program_id, accounts, data)),
       FILL_QUOTE_IX_DISCRIMINATOR => fill_quote::process(program_id, accounts, data),
-      GET_QUOTE_PARLAY_IX_DISCRIMINATOR => get_quote_parlay::process(program_id, accounts, data),
+      GET_QUOTE_PARLAY_IX_DISCRIMINATOR => quote_ok(get_quote_parlay::process(program_id, accounts, data)),
       FILL_QUOTE_PARLAY_IX_DISCRIMINATOR => fill_parlay_quote::process(program_id, accounts, data),
 
       INIT_EVENT_IX_DISCRIMINATOR => init_event::process(program_id, accounts, data),

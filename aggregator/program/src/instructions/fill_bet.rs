@@ -1,9 +1,9 @@
 //! Loop over the MMs and get their quotes for the bet then fill the bet from best to worst
 //! CPI into the fill_quote function and update the outstanding liability amount for each MM and create the bet PDA
 //!
-//! Accounts: **11** then **9 × N** per MM (`N` = number of market makers).
+//! Accounts: **12** then **9 × N** per MM (`N` = number of market makers).
 //!
-//! **(11)**
+//! **(12)**
 //! 0. `feepayer` (writable signer)
 //! 1. `user` (readonly signer)
 //! 2. `user_ata` (writable)
@@ -15,6 +15,7 @@
 //! 8. `associated_token_program` (readonly)
 //! 9. `system_program` (readonly)
 //! 10. `instructions_sysvar` (readonly)
+//! 11. `clock_program` (readonly)
 //!
 //! **Per MM (9 each)**
 //! 0. `mm_program` (readonly)
@@ -40,7 +41,13 @@
 use core::mem::MaybeUninit;
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer, invoke}, error::ProgramError, hint::unlikely, instruction::{InstructionAccount, InstructionView}
+   AccountView, Address, 
+   ProgramResult, 
+   address::address_eq, 
+   cpi::{Seed, Signer, invoke}, 
+   error::ProgramError, hint::unlikely, 
+   instruction::{InstructionAccount, InstructionView},
+   sysvars::clock::Clock,
 };
 
 use pinocchio_associated_token_account::instructions::Create;
@@ -53,7 +60,7 @@ use crate::{ID,
    instructions::fill_helpers::{parse_quote_return_for_mm, refund_liability_deposit_mismatch},
    parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data}, 
    state::{
-      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, EventGameState, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::{apply_netting, calculate_netting, NettingCalc}, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
+      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, EventGameState, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting}, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
    }, writers::write_i64_le_unchecked,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
@@ -74,6 +81,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program, //verified by equ const
       system_program, //verified by equ const
       instructions_sysvar, //verified by verify_instructions_sysvar
+      clock_program, //verified by equ const
       mm_accounts @ ..,
    ] = accounts else {
       log!("fill_bet: accounts mismatch");
@@ -95,6 +103,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_mint(&mint)?;
    verify_token_account(true, user_ata, user, mint, token_program)?;
    verify_config_pda(&config_pda, true)?;
+   // verify_clock_program(&clock_program)?; checked by from_account_view_unchecked
 
    // Amount, odds, side, sport, and event_state_sequence vs is_pregame are validated in `parse_fill_bet_data`.
    let parsed_data = parse_fill_bet_data(data)?;
@@ -271,6 +280,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       };
       let get_quote_ix_accounts = [
          InstructionAccount::new(user.address(), false, false),
+         InstructionAccount::new(clock_program.address(), false, false),
          InstructionAccount::new(mm_market_data_pda.address(), false, false),
          InstructionAccount::new(mm_event_state_pda.address(), false, false),
          InstructionAccount::new(mm_config_pda.address(), false, false),
@@ -285,6 +295,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          &get_quote_ix,
          &[
             user.as_ref(), 
+            clock_program.as_ref(),
             mm_market_data_pda.as_ref(),
             mm_event_state_pda.as_ref(),
             mm_config_pda.as_ref(),
@@ -602,6 +613,12 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    ];
    let bet_pda_signers = [Signer::from(&bet_pda_signer_seed)];
 
+   let clock = Clock::from_account_view(clock_program)?;
+   let timestamp_i64 = clock.unix_timestamp;
+   let timestamp: u32 = timestamp_i64.try_into().map_err(|_| {
+      log!("fill_bet: failed to convert timestamp to u32");
+      ProgramError::InvalidAccountData
+   })?;
 
    let bet_account_data = BetAccountData {
       discriminator: BET_ACCOUNT_DISCRIMINATOR,
@@ -615,6 +632,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       payout: filled_payout,
       market_id,
       event_game_state,
+      timestamp,
       result: BetResult::Pending,
       filler_0: finalized_bet_fillers[0],
       filler_1: finalized_bet_fillers[1],

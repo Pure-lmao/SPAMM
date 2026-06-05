@@ -6,7 +6,10 @@ use pinocchio::{
    error::ProgramError, hint::unlikely,
    address::address_eq,
    instruction::InstructionAccount,
-   sysvars::instructions::{Instructions, INSTRUCTIONS_ID},
+   sysvars::{
+      instructions::{Instructions, INSTRUCTIONS_ID},
+      clock::CLOCK_ID,
+   },
 };
 use pinocchio_log::log;
 use pinocchio_token::{
@@ -15,6 +18,7 @@ use pinocchio_token::{
 };
 use pinocchio_associated_token_account::ID as ASSOCIATED_TOKEN_PROGRAM_ID;
 use pinocchio_system::ID as SYSTEM_ID;
+
 
 
 use zeropod::ZeroPodFixed;
@@ -89,6 +93,15 @@ pub fn verify_instructions_sysvar(instructions_sysvar: &AccountView) -> ProgramR
    if unlikely(!address_eq(instructions_sysvar.address(), &INSTRUCTIONS_ID)) {
       log!("verify_instructions_sysvar: must be instructions sysvar");
       return Err(ProgramError::UnsupportedSysvar);
+   }
+   Ok(())
+}
+
+#[inline(always)]
+pub fn verify_clock_program(clock_program: &AccountView) -> ProgramResult {
+   if unlikely(!address_eq(clock_program.address(), &CLOCK_ID)) {
+      log!("verify_clock_program: clock program must be the clock program");
+      return Err(ProgramError::InvalidAccountOwner);
    }
    Ok(())
 }

@@ -22,6 +22,7 @@ import {
    SPL_TOKEN_PROGRAM_ID,
    SYSVAR_INSTRUCTIONS_ID,
    SYSTEM_PROGRAM_ID,
+   CLOCK_ID,
 } from './constants.js';
 import { encodeAggregatorInstructionData, encodeGetQuoteIxData, encodeGetQuoteParlayIxData } from './codex.js';
 import {
@@ -322,6 +323,7 @@ export async function getFillBetIx(
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSTEM_PROGRAM_ID),
       ro(SYSVAR_INSTRUCTIONS_ID),
+      ro(CLOCK_ID)
    ];
    const perMarketMakerAccounts: { address: Address; role: AccountRole }[] = [];
    for (const mmProgram of mmPrograms) {
@@ -394,7 +396,8 @@ export async function getGetQuoteProxyIx(
    }
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [ro(user), ...perMarketMakerAccounts],
+      accounts: [ro(user), ro(CLOCK_ID),
+         ...perMarketMakerAccounts],
       data: encodeAggregatorInstructionData({
          kind: 'getQuoteProxy',
          data: quote,
@@ -443,7 +446,8 @@ export async function getGetMarketQuotesProxyIx(
    }
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [ro(user), ...perMarketMakerAccounts],
+      accounts: [ro(user), ro(CLOCK_ID),
+         ...perMarketMakerAccounts],
       data: encodeAggregatorInstructionData({
          kind: 'getMarketQuotesProxy',
          data: quote,
@@ -486,7 +490,8 @@ export async function getGetParlayQuoteProxyIx(
    }
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [ro(user), ...perMarketMakerAccounts],
+      accounts: [ro(user), ro(CLOCK_ID),
+         ...perMarketMakerAccounts],
       data: encodeAggregatorInstructionData({
          kind: 'getParlayQuoteProxy',
          data: quote,
@@ -535,6 +540,7 @@ export async function getFillParlayIx(
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSTEM_PROGRAM_ID),
       ro(SYSVAR_INSTRUCTIONS_ID),
+      ro(CLOCK_ID),
       ro(mmProgram),
       rw(mmConfigPda),
       rw(mmParlayQuoteBufferPda),
@@ -590,6 +596,7 @@ export async function getMmGetQuoteParlayIx(
    const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
    const accounts: { address: Address; role: AccountRole }[] = [
       ro(user),
+      ro(CLOCK_ID),
       ro(mmConfigPda),
       rw(mmParlayQuoteBufferPda),
    ];
@@ -650,6 +657,7 @@ export async function getMmGetQuoteIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         ro(CLOCK_ID),
          ro(marketDataPda),
          ro(eventStatePda),
          ro(mmConfigPda),

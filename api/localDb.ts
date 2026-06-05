@@ -1,8 +1,21 @@
 
 import { Database } from "bun:sqlite";
-import type { Sport, League, Event, Market, GroupedSport, GroupedLeague, GroupedEvent } from "./types";
+import type {
+   Sport,
+   League,
+   Event,
+   Market,
+   GroupedSport,
+   GroupedLeague,
+   GroupedEvent,
+   PredictionContest,
+   PredictionContestToday,
+   PredictionContestKind,
+   PredictionContestStatus,
+} from "./types";
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { sportsTodayDateString } from './sportsDay';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const DB_PATH = path.join(__dirname, "data.db");
@@ -541,4 +554,261 @@ export function getEventsByApiId(): Map<string, Event> {
 function deleteEvent(eventId: string): void {
    const database = getDb();
    database.query("DELETE FROM events WHERE api_event_id = ?").run(eventId);
+}
+
+// ---- Prediction contests (score predict) ----
+
+export function initPredictionContestsTable(): void {
+   const database = getDb();
+   database.run(`
+      CREATE TABLE IF NOT EXISTS prediction_contests (
+         id INTEGER PRIMARY KEY,
+         contest_date TEXT NOT NULL,
+         deadline INTEGER NOT NULL,
+         kind TEXT NOT NULL,
+         title TEXT NOT NULL,
+         description TEXT NOT NULL,
+         tweet_template TEXT NOT NULL,
+         reply_to_tweet_id TEXT,
+         event_sport_id INTEGER,
+         event_league_id INTEGER,
+         event_id INTEGER,
+         home_flag_url TEXT,
+         away_flag_url TEXT,
+         image_url TEXT,
+         status TEXT NOT NULL,
+         result_prediction BLOB,
+         result_notes TEXT,
+         created_at INTEGER NOT NULL,
+         graded_at INTEGER
+      )
+   `);
+   migratePredictionContestsTable();
+}
+
+function migratePredictionContestsTable(): void {
+   const database = getDb();
+   const cols = database
+      .query<{ name: string }, []>('PRAGMA table_info(prediction_contests)')
+      .all();
+   if (!cols.some((c) => c.name === 'reply_to_tweet_id')) {
+      database.run('ALTER TABLE prediction_contests ADD COLUMN reply_to_tweet_id TEXT');
+   }
+}
+
+/** Numeric status id or extract from `https://x.com/.../status/123`. */
+export function normalizeReplyToTweetId(raw: string | null | undefined): string | null {
+   const s = raw?.trim();
+   if (!s) {
+      return null;
+   }
+   if (/^\d+$/.test(s)) {
+      return s;
+   }
+   const m = s.match(/status\/(\d+)/i);
+   return m?.[1] ?? null;
+}
+
+type PredictionContestRow = {
+   id: number;
+   contest_date: string;
+   deadline: number;
+   kind: string;
+   title: string;
+   description: string;
+   tweet_template: string;
+   reply_to_tweet_id: string | null;
+   event_sport_id: number | null;
+   event_league_id: number | null;
+   event_id: number | null;
+   home_flag_url: string | null;
+   away_flag_url: string | null;
+   image_url: string | null;
+   status: string;
+   result_prediction: Uint8Array | null;
+   result_notes: string | null;
+   created_at: number;
+   graded_at: number | null;
+};
+
+function rowToPredictionContest(row: PredictionContestRow): PredictionContest {
+   return {
+      id: row.id,
+      contest_date: row.contest_date,
+      deadline: row.deadline,
+      kind: row.kind as PredictionContestKind,
+      title: row.title,
+      description: row.description,
+      tweet_template: row.tweet_template,
+      reply_to_tweet_id: row.reply_to_tweet_id,
+      event_sport_id: row.event_sport_id,
+      event_league_id: row.event_league_id,
+      event_id: row.event_id,
+      home_flag_url: row.home_flag_url,
+      away_flag_url: row.away_flag_url,
+      image_url: row.image_url,
+      status: row.status as PredictionContestStatus,
+      result_prediction: row.result_prediction,
+      result_notes: row.result_notes,
+      created_at: row.created_at,
+      graded_at: row.graded_at,
+   };
+}
+
+export function contestEntryOpen(contest: PredictionContest, nowMs: number = Date.now()): boolean {
+   return contest.status === 'open' && nowMs < contest.deadline;
+}
+
+
+export { sportsTodayDateString } from './sportsDay';
+
+export type AddPredictionContestInput = Omit<
+   PredictionContest,
+   'id' | 'status' | 'result_prediction' | 'result_notes' | 'graded_at' | 'reply_to_tweet_id'
+> & {
+   id?: number;
+   status?: PredictionContestStatus;
+   reply_to_tweet_id?: string | null;
+};
+
+export function addPredictionContest(input: AddPredictionContestInput): PredictionContest {
+   initPredictionContestsTable();
+   const database = getDb();
+   const status = input.status ?? 'open';
+   const created_at = input.created_at ?? Date.now();
+   const reply_to_tweet_id = input.reply_to_tweet_id ?? null;
+   if (input.id != null) {
+      database
+         .query(
+            `INSERT OR REPLACE INTO prediction_contests (
+               id, contest_date, deadline, kind, title, description, tweet_template, reply_to_tweet_id,
+               event_sport_id, event_league_id, event_id, home_flag_url, away_flag_url, image_url,
+               status, result_prediction, result_notes, created_at, graded_at
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL)`,
+         )
+         .run(
+            input.id,
+            input.contest_date,
+            input.deadline,
+            input.kind,
+            input.title,
+            input.description,
+            input.tweet_template,
+            reply_to_tweet_id,
+            input.event_sport_id,
+            input.event_league_id,
+            input.event_id,
+            input.home_flag_url,
+            input.away_flag_url,
+            input.image_url,
+            status,
+            created_at,
+         );
+      return fetchPredictionContest(input.id)!;
+   }
+   const result = database
+      .query(
+         `INSERT INTO prediction_contests (
+            contest_date, deadline, kind, title, description, tweet_template, reply_to_tweet_id,
+            event_sport_id, event_league_id, event_id, home_flag_url, away_flag_url, image_url,
+            status, result_prediction, result_notes, created_at, graded_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, NULL, ?, NULL)`,
+      )
+      .run(
+         input.contest_date,
+         input.deadline,
+         input.kind,
+         input.title,
+         input.description,
+         input.tweet_template,
+         reply_to_tweet_id,
+         input.event_sport_id,
+         input.event_league_id,
+         input.event_id,
+         input.home_flag_url,
+         input.away_flag_url,
+         input.image_url,
+         status,
+         created_at,
+      );
+   const id = Number(result.lastInsertRowid);
+   return fetchPredictionContest(id)!;
+}
+
+export function fetchPredictionContest(id: number): PredictionContest | null {
+   initPredictionContestsTable();
+   const database = getDb();
+   const row = database
+      .query<PredictionContestRow, [string]>(`SELECT * FROM prediction_contests WHERE id = ?`)
+      .get(id.toString());
+   return row ? rowToPredictionContest(row) : null;
+}
+
+export function fetchPredictionContestByDate(date: string): PredictionContest | null {
+   initPredictionContestsTable();
+   const database = getDb();
+   const row = database
+      .query<PredictionContestRow, [string]>(
+         `SELECT * FROM prediction_contests WHERE contest_date = ? ORDER BY id DESC LIMIT 1`,
+      )
+      .get(date);
+   return row ? rowToPredictionContest(row) : null;
+}
+
+export function fetchPredictionContestsHistory(limit: number = 30): PredictionContest[] {
+   initPredictionContestsTable();
+   const database = getDb();
+   const rows = database
+      .query<PredictionContestRow, [string]>(
+         `SELECT * FROM prediction_contests ORDER BY contest_date DESC, id DESC LIMIT ?`,
+      )
+      .all(limit.toString());
+   return rows.map(rowToPredictionContest);
+}
+
+export function listPredictionContests(): PredictionContest[] {
+   initPredictionContestsTable();
+   const database = getDb();
+   const rows = database
+      .query<PredictionContestRow, []>(`SELECT * FROM prediction_contests ORDER BY id DESC`)
+      .all();
+   return rows.map(rowToPredictionContest);
+}
+
+export function updatePredictionContestResult(
+   id: number,
+   resultPrediction: Uint8Array,
+   notes: string | null,
+): PredictionContest | null {
+   initPredictionContestsTable();
+   const database = getDb();
+   database
+      .query(
+         `UPDATE prediction_contests SET
+            result_prediction = ?, result_notes = ?, status = 'graded', graded_at = ?
+          WHERE id = ?`,
+      )
+      .run(resultPrediction, notes, Date.now(), id);
+   return fetchPredictionContest(id);
+}
+
+export function fetchPredictionContestToday(): PredictionContestToday | null {
+   const contest = fetchPredictionContestByDate(sportsTodayDateString());
+   if (!contest) {
+      return null;
+   }
+   return {
+      ...contest,
+      entry_open: contestEntryOpen(contest),
+   };
+}
+
+export function predictionContestToJson(contest: PredictionContest): Record<string, unknown> {
+   return {
+      ...contest,
+      result_prediction:
+         contest.result_prediction == null
+            ? null
+            : Array.from(contest.result_prediction),
+   };
 }

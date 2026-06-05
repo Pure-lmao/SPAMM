@@ -42,17 +42,20 @@ When this framework description uses **"MUST"** the program **MUST** adhere to t
 A SPAMM program is a program which complies with this framework and offers quotes for bets to the aggregator on sports markets. It should take advantage of low CU oracle account updates in order to land odds/state updates at the top of the block, before compute-heavy bet filling transactions. 
 
 ## Get_Quote function
-The **`get_quote`** function is called by the RPC to get the price to build the tx for the user then again by the **aggregator** when filling the bet to get best odds at **execution-time** (**no spoofing**). The function **MUST** return data using **`sol_set_return_data`**. The function **MUST** NEVER return an error. You **MUST** catch all program errors and return a valid (0, 0) quote.
+The **`get_quote`** function is called by the RPC to get the price to build the tx for the user then again by the **aggregator** when filling the bet to get best odds at **execution-time** (**no spoofing**). The function **MUST** return data using **`sol_set_return_data`**. The function **MUST** NEVER return an error. You **MUST** catch all program errors and return a valid (0, 0) quote. You should use the `QuoteResult` return type, rather then `ProgramResult`, and you can wrap the response in `quote_ok` to return a `ProgramResult` in your dispatch handler.
+
+**I will state that again: YOU MUST CATCH ALL PROGRAM ERRORS AND RETURN A VALID (0, 0) QUOTE. No program errors EVER or I will hunt you down and force you to buy Cardano NFTs.**
 
 The function **MUST** take the following accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
 | 0 | User | readonly | Pass-through for pricing; not required to sign when invoked via CPI |
-| 1 | MM Market Data PDA | writable | |
-| 2 | MM Event State PDA | readonly | |
-| 3 | MM Config PDA | readonly |  |
-| 4 | MM Quote Buffer | readonly |  |
+| 1 | Clock Program | readonly | |
+| 2 | MM Market Data PDA | writable | |
+| 3 | MM Event State PDA | readonly | |
+| 4 | MM Config PDA | readonly |  |
+| 5 | MM Quote Buffer | readonly |  |
 
 The function **MUST** take the following data:
 
@@ -139,17 +142,18 @@ The **`is_used`** field in the quote buffer **MUST** be set to **1** to indicate
 During this function, you can change your Config PDA and Market Data PDA data if you wish.
 
 ## Get_Quote_Parlay function
-The `get_quote_parlay` function is invoked the same way as `get_quote`, but for **multiple legs**: each leg has its own market data / event state accounts and `ParlayLegWire` fields in the instruction `data`. It **MUST** return data using **`sol_set_return_data`** (`max_amount: u64` LE, `odds_scaled: u32` LE) for a valid quote. The max number of legs, *L*, is 5. The function **MUST** NEVER return an error. You **MUST** catch all program errors and return a valid (0, 0) quote.
+The `get_quote_parlay` function is invoked the same way as `get_quote`, but for **multiple legs**: each leg has its own market data / event state accounts and `ParlayLegWire` fields in the instruction `data`. It **MUST** return data using **`sol_set_return_data`** (`max_amount: u64` LE, `odds_scaled: u32` LE) for a valid quote. The max number of legs, *L*, is 5. The function **MUST** NEVER return an error. You **MUST** catch all program errors and return a valid (0, 0) quote. As with `get_quote`, you should use the `QuoteResult` return type, rather then `ProgramResult`, and you can wrap the response in `quote_ok` to return a `ProgramResult` in your dispatch handler.
 
 The function **MUST** take the following accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
 | 0 | User | readonly | Pass-through for pricing; not required to sign when invoked via CPI |
+| 1 | Clock Program | readonly | |
 | 1 | MM Config PDA | readonly |  |
-| 2 | MM Parlay Quote Buffer | readonly | |
-| 2 + 1×*L* | MM Market Data PDA (leg *L*) | readonly | One per leg |
-| 2 + 2×*L* | MM Event State PDA (leg *L*) | readonly | One per leg |
+| 3 | MM Parlay Quote Buffer | readonly | |
+| 4 + 1×*L* | MM Market Data PDA (leg *L*) | readonly | One per leg |
+| 4 + 2×*L* | MM Event State PDA (leg *L*) | readonly | One per leg |
 
 The function **MUST** take the following instruction `data`:
 
@@ -427,7 +431,9 @@ By offering **liability netting** on most markets, the aggregator massively impr
 
 Settling bets could be the responsibility of the SPAMM if netting was not involved, but I believe it is a major improvement to have. As it is, the aggregator already holds a lot of responsibility so settling bets fairly is a natural extension. The alternative is no netting, SPAMMs hold the bet accounts, and users specify which SPAMMs are allowed to fill the bet based on the user trust of the SPAMM (similar to users opting out of Singbet filling orders on Mollybet since they are known to cancel bets for no reason). Forcing the user to profile every SPAMM is not a good user experience and would hinder new SPAMMs joining the network.
 
-Parlays allow combining up to 5 legs. It is on the SPAMM to check they arent linked or price them correctly if they are (SGPs). There are only 5 legs per bet and no execution-time routing because of the tx size limit and I can't be bothered dealing with Account Lookup Tables at this time.
+Parlays allow combining up to 5 legs. It is on the SPAMM to check they arent linked or price them correctly if they are (SGPs). There are only 5 legs per bet and no execution-time routing because of the tx size limit and I can't be bothered dealing with Account Lookup Tables at this time. **edit:** I added Account Lookup Tables so this can be changed but I still dont think it is viable to have ex-time routing due to tx size limits. The number of legs can be increased but waiting to do a full revamp of parlays for better settlement system.
+
+Event start times are **not** published onchain as part of the Event Id despite it probably being useful. The reason for this is that event times can change, like tennis and esports where the schedule is flexible, or due to weather etc. Market makers are likely to use event start time (as minutes until event start) as part of the quoting and, if the event time was published onchain, the aggregator would be responsible for keeping this correct. It is beyond the scope of the aggregator responsibility to keep this up to manage market maker risk, so market makers should be responsible for managing their own understanding of the event start time by posting it in the market data PDA. The onchain aggregator program should be as minimal as possible. Event start times (of best effort) are provided in the API, along with any other non-essential metadata.
 
 ## Trust Assumptions
 
@@ -658,20 +664,21 @@ Accounts (fixed prefix):
 | 8 | associated token program | readonly | |
 | 9 | system program | readonly | |
 | 10 | instructions sysvar | readonly | Passed through to MM `fill_quote` CPI |
+| 11 | clock program | readonly | Passed through to MM `get_quote` CPI |
 
 Per MM (currently 5 max):
 
 | Offset | Account | Role | Notes |
 |--------|---------|------|-------|
-| 11+0*N | mm program | readonly | Must be executable (a program) |
-| 11+1*N | mm config pda | writable | |
-| 11+2*N | mm event state pda | readonly |  |
-| 11+3*N | mm market data pda | writable | |
-| 11+4*N | mm quote buffer | writable |  |
-| 11+5*N | mm encumbrance pda | writable |  |
-| 11+6*N | mm liability token account | writable | |
-| 11+7*N | mm token account | writable | |
-| 11+8*N | mm netting pda | writable | Must match expected but can be uninitialized |
+| 12+0*N | mm program | readonly | Must be executable (a program) |
+| 12+1*N | mm config pda | writable | |
+| 12+2*N | mm event state pda | readonly |  |
+| 12+3*N | mm market data pda | writable | |
+| 12+4*N | mm quote buffer | writable |  |
+| 12+5*N | mm encumbrance pda | writable |  |
+| 12+6*N | mm liability token account | writable | |
+| 12+7*N | mm token account | writable | |
+| 12+8*N | mm netting pda | writable | Must match expected but can be uninitialized |
 
 This is called by a user to place a bet.
 
@@ -706,6 +713,7 @@ Accounts:
 | 8 | associated token program | readonly | |
 | 9 | system program | readonly | |
 | 10 | instructions sysvar | readonly | Passed through to MM `fill_parlay_quote` CPI |
+| 11 | clock program | readonly | Passed through to MM `get_quote_parlay` CPI |
 | 11 | mm program | readonly | Must be executable (a program) |
 | 12 | mm config pda | writable | |
 | 13 | mm parlay quote buffer | writable | |
@@ -737,12 +745,13 @@ Accounts:
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
 | 0 | user | readonly | Passed to each MM `get_quote` CPI |
+| 1 | clock program | readonly | Passed to each MM `get_quote` CPI |
 | Per MM (5 × N, N ≤ 20) | | | |
-| 1+0*N | mm program | readonly | |
-| 1+1*N | mm config pda | readonly | |
-| 1+2*N | mm event state pda | readonly | |
-| 1+3*N | mm market data pda | readonly | |
-| 1+4*N | mm quote buffer | writable | |
+| 2+0*N | mm program | readonly | |
+| 2+1*N | mm config pda | readonly | |
+| 2+2*N | mm event state pda | readonly | |
+| 2+3*N | mm market data pda | readonly | |
+| 2+4*N | mm quote buffer | writable | |
 
 Invalid or empty MM quotes are skipped; duplicate MM program ids fail the instruction.
 
@@ -767,12 +776,13 @@ Accounts:
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
 | 0 | user | readonly | |
+| 1 | clock program | readonly | |
 | Per MM (3 + 2×L × N, L = `num_legs`, N ≤ 20) | | | |
 | 1+0*N | mm program | readonly | |
-| 1+1*N | mm config pda | readonly | |
-| 1+2*N | mm parlay quote buffer | writable | |
-| 1+(3+2*i)*N | mm market data (leg *i*) | readonly | |
-| 1+(4+2*i)*N | mm event state (leg *i*) | readonly | |
+| 2+1*N | mm config pda | readonly | |
+| 2+2*N | mm parlay quote buffer | writable | |
+| 2+(3+2*i)*N | mm market data (leg *i*) | readonly | |
+| 2+(4+2*i)*N | mm event state (leg *i*) | readonly | |
 
 ### grade_bets
 Discriminator: **5**

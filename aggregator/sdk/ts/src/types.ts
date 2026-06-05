@@ -119,6 +119,7 @@ export type BetAccountData = {
    side: number;
    amount: bigint;
    payout: bigint;
+   timestamp: number;
    eventStateSequence: number;
    eventGameState: EventGameState;
    result: BetResult;
@@ -138,6 +139,7 @@ export type ParlayBetAccountData = {
    betId: bigint;
    amount: bigint;
    payout: bigint;
+   timestamp: number;
    fillerAddress: Address;
    result: BetResult;
    numLegs: number;

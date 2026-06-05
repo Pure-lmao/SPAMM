@@ -1,5 +1,17 @@
 import { airdropUser } from "./solana";
-import { fetchEvents, fetchEventsByLeague, fetchEventsBySport, fetchEventsGrouped, fetchLeagues, fetchLeaguesBySport, fetchSports } from "./localDb";
+import {
+   fetchEvents,
+   fetchEventsByLeague,
+   fetchEventsBySport,
+   fetchEventsGrouped,
+   fetchLeagues,
+   fetchLeaguesBySport,
+   fetchSports,
+   fetchPredictionContest,
+   fetchPredictionContestToday,
+   fetchPredictionContestsHistory,
+   predictionContestToJson,
+} from "./localDb";
 import { safeJSONStringify } from "./utils";
 import { getClosedBetRecordsByUser } from "quickIndexer";
 
@@ -58,6 +70,9 @@ function withCors(req: Request, res: Response): Response {
  * - /api/leagues?sport={sportId}
  * - /api/airdrop/sol?user={userAddress}
  * - /api/betHistory?user={userAddress}
+ * - /api/predictions/today
+ * - /api/predictions/contest?id=
+ * - /api/predictions/history?limit=
  */
 export class ApiServer {
    private async handleGetEvents(params: URLSearchParams): Promise<Response> {
@@ -125,6 +140,43 @@ export class ApiServer {
       return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
    }
 
+   private async handleGetPredictionsToday(): Promise<Response> {
+      const contest = fetchPredictionContestToday();
+      if (!contest) {
+         return new Response("null", { headers: { "Content-Type": "application/json" } });
+      }
+      return new Response(
+         safeJSONStringify({
+            ...predictionContestToJson(contest),
+            entry_open: contest.entry_open,
+         }),
+         { headers: { "Content-Type": "application/json" } },
+      );
+   }
+
+   private async handleGetPredictionContest(params: URLSearchParams): Promise<Response> {
+      const idRaw = params.get("id");
+      if (!idRaw) {
+         return Response.json({ error: "Missing query param id=" }, { status: 400 });
+      }
+      const contest = fetchPredictionContest(Number(idRaw));
+      if (!contest) {
+         return Response.json({ error: "Contest not found" }, { status: 404 });
+      }
+      return new Response(safeJSONStringify(predictionContestToJson(contest)), {
+         headers: { "Content-Type": "application/json" },
+      });
+   }
+
+   private async handleGetPredictionsHistory(params: URLSearchParams): Promise<Response> {
+      const limitRaw = params.get("limit");
+      const limit = limitRaw != null ? Number(limitRaw) : 30;
+      const rows = fetchPredictionContestsHistory(Number.isFinite(limit) ? limit : 30);
+      return new Response(safeJSONStringify(rows.map(predictionContestToJson)), {
+         headers: { "Content-Type": "application/json" },
+      });
+   }
+
    fetch(req: Request): Response | Promise<Response> {
       const url = new URL(req.url);
 
@@ -148,6 +200,15 @@ export class ApiServer {
       }
       if (url.pathname === "/api/betHistory") {
          return this.handleGetBetHistory(params).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/predictions/today") {
+         return this.handleGetPredictionsToday().then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/predictions/contest") {
+         return this.handleGetPredictionContest(params).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/predictions/history") {
+         return this.handleGetPredictionsHistory(params).then((r) => withCors(req, r));
       }
 
       return withCors(req, new Response("Not Found", { status: 404 }));

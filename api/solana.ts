@@ -87,7 +87,7 @@ export async function gradeBets() {
    console.log("Bets graded");
 }
 
-gradeParlays().catch(console.error);
+// gradeParlays().catch(console.error);
 export async function gradeParlays() {
    console.log("Grading parlays");
    const parlayBets = await getParlaysData(clients.rpc, {

@@ -27,7 +27,7 @@ pub const SAFE_CLOSE_ATA_BATCH_CPI_ACCOUNTS: usize = SAFE_CLOSE_ATA_BATCH_IX_CAP
 /// Max legs per parlay (quote buffer, fill ix wire, and on-chain parlay bet account).
 pub const MAX_PARLAY_LEGS: usize = 5;
 
-pub const MAX_PARLAY_QUOTE_CPI_ACCOUNTS: usize = 3 + 2 * MAX_PARLAY_LEGS;
+pub const MAX_PARLAY_QUOTE_CPI_ACCOUNTS: usize = 4 + 2 * MAX_PARLAY_LEGS;
 
 pub const ODDS_SCALE: u128 = 10000;
 

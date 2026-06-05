@@ -68,6 +68,38 @@ export type GroupedSport = {
    leagues: GroupedLeague[];
 };
 
+export type PredictionContestStatus = 'open' | 'locked' | 'graded';
+
+export type PredictionContestKind = 'match_score' | 'daily_total';
+
+export type PredictionContest = {
+   id: number;
+   contest_date: string;
+   deadline: number;
+   kind: PredictionContestKind;
+   title: string;
+   description: string;
+   tweet_template: string;
+   /** X/Twitter status id; appended as `in_reply_to` on the post intent URL when set. */
+   reply_to_tweet_id: string | null;
+   event_sport_id: number | null;
+   event_league_id: number | null;
+   event_id: number | null;
+   home_flag_url: string | null;
+   away_flag_url: string | null;
+   image_url: string | null;
+   status: PredictionContestStatus;
+   result_prediction: Uint8Array | null;
+   result_notes: string | null;
+   created_at: number;
+   graded_at: number | null;
+};
+
+/** API response for today's contest. */
+export type PredictionContestToday = PredictionContest & {
+   entry_open: boolean;
+};
+
 export type ESPNEvent = {
    id: string;
    uid: string;

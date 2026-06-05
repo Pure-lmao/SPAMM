@@ -3,13 +3,14 @@
 //!
 //! Accounts **(8)** (aggregator order):
 //! 0. `user`
-//! 1. `mm_config_pda`
-//! 2. `mm_parlay_quote_buffer`
-//! 3. `mm_token_account`
-//! 4. `liability_account`
-//! 5. `mint` (readonly)
-//! 6. `token_program` (readonly)
-//! 7. `instructions_sysvar` (readonly) — introspect parent `fill_parlay`
+//! 1. `clock_program`
+//! 2. `mm_config_pda`
+//! 3. `mm_parlay_quote_buffer`
+//! 4. `mm_token_account`
+//! 5. `liability_account`
+//! 6. `mint` (readonly)
+//! 7. `token_program` (readonly)
+//! 8. `instructions_sysvar` (readonly) — introspect parent `fill_parlay`
 
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer}, error::ProgramError, hint::{likely, unlikely},

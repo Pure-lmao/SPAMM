@@ -59,6 +59,7 @@ pub struct BetAccountData {
    pub side: u8,
    pub amount: u64,
    pub payout: u64,
+   pub timestamp: u32,
    pub event_state_sequence: u16,
    pub event_game_state: EventGameState,
    pub result: BetResult,
@@ -70,7 +71,7 @@ pub struct BetAccountData {
 }
 
 pub const BET_ACCOUNT_LEN: u64 = <BetAccountData as ZeroPodFixed>::SIZE as u64;
-pub const BET_RESULT_OFFSET: usize = 1+1+32+32+8+MARKET_ID_LEN+1+8+8+2+EVENT_GAME_STATE_LEN;
+pub const BET_RESULT_OFFSET: usize = 1+1+32+32+8+MARKET_ID_LEN+1+8+8+4+2+EVENT_GAME_STATE_LEN;
 
 impl BetFiller {
    #[inline(always)]
@@ -98,6 +99,7 @@ impl BetAccountData {
          side: self.side,
          amount: self.amount.into(),
          payout: self.payout.into(),
+         timestamp: self.timestamp.into(),
          event_state_sequence: self.event_state_sequence.into(),
          event_game_state: self.event_game_state.to_zc(),
          result: self.result.into(),
@@ -138,6 +140,7 @@ impl BetAccountData {
          side: zc.side,
          amount: zc.amount.get(),
          payout: zc.payout.get(),
+         timestamp: zc.timestamp.get(),
          event_state_sequence: zc.event_state_sequence.get(),
          event_game_state: EventGameState::from_zc(&zc.event_game_state),
          result: BetResult::from_u8(zc.result.get()),

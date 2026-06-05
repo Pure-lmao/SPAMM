@@ -1,7 +1,7 @@
 //! Single MM: CPI `get_quote_parlay`, require odds ≥ `min_odds_scaled`, CPI `fill_parlay_quote`, then create parlay bet PDA + ATA.
 //!
-//! Accounts: **11** fixed, then **6 + 2 × L** for one MM (`L` = `num_legs`).
-//! **Fixed (11)**
+//! Accounts: **12** fixed, then **6 + 2 × L** for one MM (`L` = `num_legs`).
+//! **Fixed (12)**
 //! 0. `feepayer` (writable signer)
 //! 1. `user` (readonly signer)
 //! 2. `user_ata` (writable)
@@ -13,6 +13,7 @@
 //! 8. `associated_token_program` (readonly)
 //! 9. `system_program` (readonly)
 //! 10. `instructions_sysvar` (readonly)
+//! 11. `clock_program` (readonly)
 //!
 //! **MM (6 + 2 × L)**
 //! 0. `mm_program` (readonly)
@@ -29,7 +30,8 @@
 
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, cpi::{CpiAccount, Seed, Signer, invoke, invoke_unchecked},
-   error::ProgramError, hint::unlikely, instruction::{InstructionAccount, InstructionView},
+   error::ProgramError, hint::unlikely, instruction::{InstructionAccount, InstructionView}, 
+   sysvars::clock::Clock,
 };
 use core::mem::MaybeUninit;
 use pinocchio_associated_token_account::instructions::Create;
@@ -116,6 +118,7 @@ fn cpi_get_quote_parlay(
    min_odds_scaled: u32,
    legs: ParlayLegTable,
    user: &AccountView,
+   clock_program: &AccountView,
    mint: &AccountView,
    token_program: &AccountView,
    mm_program_account: &AccountView,
@@ -179,16 +182,18 @@ fn cpi_get_quote_parlay(
    };
    maybe_metas[0].write(InstructionAccount::new(user.address(), false, false));
    CpiAccount::init_from_account_view(user, &mut cpi_accounts[0]);
-   maybe_metas[1].write(InstructionAccount::new(mm_config_pda.address(), false, false));
-   CpiAccount::init_from_account_view(mm_config_pda, &mut cpi_accounts[1]);
-   maybe_metas[2].write(InstructionAccount::new(mm_parlay_quote_buffer.address(), true, false));
-   CpiAccount::init_from_account_view(mm_parlay_quote_buffer, &mut cpi_accounts[2]);
+   maybe_metas[1].write(InstructionAccount::new(clock_program.address(), false, false));
+   CpiAccount::init_from_account_view(clock_program, &mut cpi_accounts[1]);
+   maybe_metas[2].write(InstructionAccount::new(mm_config_pda.address(), false, false));
+   CpiAccount::init_from_account_view(mm_config_pda, &mut cpi_accounts[2]);
+   maybe_metas[3].write(InstructionAccount::new(mm_parlay_quote_buffer.address(), true, false));
+   CpiAccount::init_from_account_view(mm_parlay_quote_buffer, &mut cpi_accounts[3]);
 
    for (leg_i, leg_pair) in leg_accounts.chunks_exact_mut(2).enumerate().take(num_legs) {
       let market_data_pda = &leg_pair[0];
       let event_state_pda = &leg_pair[1];
-      let md_index = 3 + leg_i * 2;
-      let es_index = 4 + leg_i * 2;
+      let md_index = 4 + leg_i * 2;
+      let es_index = 5 + leg_i * 2;
       let Some(leg) = legs.get(leg_i) else {
          return Err(ProgramError::InvalidInstructionData);
       };
@@ -216,7 +221,7 @@ fn cpi_get_quote_parlay(
       CpiAccount::init_from_account_view(event_state_pda, &mut cpi_accounts[es_index]);
    }
 
-   let number_of_accounts: usize = 3 + 2 * num_legs;
+   let number_of_accounts: usize = 4 + 2 * num_legs;
    let metas_slice: &[InstructionAccount] = unsafe {
       core::slice::from_raw_parts(maybe_metas.as_ptr().cast::<InstructionAccount>(), number_of_accounts)
    };
@@ -393,6 +398,7 @@ fn finalize_parlay_bet(
    mint: &AccountView,
    token_program: &AccountView,
    system_program: &AccountView,
+   clock_program: &AccountView,
    bet_id: u64,
    bet_id_bytes: [u8; 8],
    filled_amount: u64,
@@ -418,6 +424,13 @@ fn finalize_parlay_bet(
    ];
    let bet_pda_signers = [Signer::from(&bet_pda_signer_seed)];
 
+   let clock = Clock::from_account_view(clock_program)?;
+   let timestamp_i64 = clock.unix_timestamp;
+   let timestamp: u32 = timestamp_i64.try_into().map_err(|_| {
+      log!("fill_parlay: failed to convert timestamp to u32");
+      ProgramError::InvalidAccountData
+   })?;
+
    let bet_account_data = ParlayBetAccountData {
       discriminator: PARLAY_BET_ACCOUNT_DISCRIMINATOR,
       bump: bet_bump,
@@ -426,6 +439,7 @@ fn finalize_parlay_bet(
       bet_id,
       amount: filled_amount,
       payout: filled_payout,
+      timestamp,
       filler_address,
       result: BetResult::Pending,
       num_legs: num_legs as u8,
@@ -477,6 +491,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       system_program,
       instructions_sysvar,
+      clock_program,
       mm_program_account,
       mm_config_pda,
       mm_parlay_quote_buffer,
@@ -529,6 +544,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       min_odds_scaled,
       legs,
       user,
+      clock_program,
       mint,
       token_program,
       mm_program_account,
@@ -566,6 +582,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mint,
       token_program,
       system_program,
+      clock_program,
       bet_id,
       bet_id_bytes,
       filled_amount,

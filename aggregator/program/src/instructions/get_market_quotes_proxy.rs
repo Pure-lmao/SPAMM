@@ -1,6 +1,6 @@
 //! CPI each MM `get_quote` for every side in the market; return packed quotes for the UI.
 //!
-//! Accounts: **1 + 5 × N** (same as [`get_quote_proxy`]). `N` ≤ `min(20, max_proxy_mms_for_market_quotes(num_sides))`.
+//! Accounts: **2 + 5 × N** (same as [`get_quote_proxy`]). `N` ≤ `min(20, max_proxy_mms_for_market_quotes(num_sides))`.
 //!
 //! Data: [`FillBetIxData`] (`bet_id` and `side` decoded but unused).
 //!
@@ -43,6 +43,7 @@ fn write_proxy_side_odds(out: &mut [u8], off: usize, odds_scaled: u32) {
 pub fn get_market_quotes_proxy(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       user,
+      clock_program,
       mm_accounts @ ..,
    ] = accounts else {
       log!("get_market_quotes_proxy: accounts mismatch");
@@ -101,6 +102,7 @@ pub fn get_market_quotes_proxy(accounts: &mut [AccountView], data: &[u8]) -> Pro
          let side_off = offset + (side as usize) * PROXY_MARKET_SIDE_ODDS_WIRE_LEN;
          let (max_amount, odds_scaled) = cpi_get_quote_for_proxy(
             user,
+            clock_program,
             mm_program_account,
             mm_config_pda,
             mm_event_state_pda,

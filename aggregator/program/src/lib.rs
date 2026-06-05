@@ -5,9 +5,12 @@ pub mod constants;
 pub mod instructions;
 pub mod parsers;
 pub mod helpers;
+pub mod quote_result;
 pub mod readers;
 pub mod writers;
 pub mod state;
+
+pub use quote_result::{quote_ok, QuoteResult};
 
 use pinocchio::{error::ProgramError, AccountView, ProgramResult};
 use pinocchio_log::log;

@@ -130,9 +130,24 @@ async function writeArbitraryData(
 
 // getMmListData(clients.rpc).then(console.log).catch(console.error);
 
-// getBetsData(clients.rpc).then(bets => {
+// getBetsData(clients.rpc).then(async bets => {
 //    console.log(bets.length);
+//    const settleIxs = [];
 //    for (const bet of bets) {
 //       console.log(bet.data.owner);
+//       console.log(bet.data.result);
+//       if (bet.data.result != 0) {
+//          const ix = await getSettleBetIx(ADMIN_SIGNER.address, bet.address, bet.data);
+//          settleIxs.push(ix);
+//       }
 //    }
+//    // const response = await sendAndConfirmInstructions(settleIxs, [ADMIN_SIGNER]);
+//    // console.log(response);
 // }).catch(console.error);
+
+// const allParlays = await getParlaysData(clients.rpc);
+// allParlays.forEach(parlay => {
+//    console.log(parlay.data);
+//    console.log(parlay.data.legs[0]);
+//    console.log(parlay.data.legs[1]);
+// });

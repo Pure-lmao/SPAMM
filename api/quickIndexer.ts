@@ -43,6 +43,7 @@ export type BetRecord = {
    amount_filled: number;
    min_odds_requested: number;
    payout: number;
+   timestamp: number;
    result: BetResult;
    created_at: number;
    created_sig: string;
@@ -105,6 +106,7 @@ function initIndexerTable(): void {
       amount_filled INTEGER NOT NULL,
       min_odds_requested INTEGER NOT NULL,
       payout INTEGER NOT NULL,
+      timestamp INTEGER NOT NULL,
       result INTEGER NOT NULL,
       created_at INTEGER NOT NULL,
       created_sig TEXT NOT NULL,
@@ -133,13 +135,14 @@ function addBetAccount(
    amountFilled: bigint,
    minOddsRequested: bigint,
    payout: bigint,
+   timestamp: number,
    meta: BetAccountAddMeta,
 ): void {
    const database = getDb();
    database.run(`INSERT OR IGNORE INTO bet_accounts 
       (id, bet_id, type, user_address, selections, amount_requested, amount_filled, min_odds_requested, payout,
-      result, created_at, created_sig, last_update_slot, status) 
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
+      timestamp, result, created_at, created_sig, last_update_slot, status) 
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`, 
       [
          betAddress, 
          betId.toString(), 
@@ -150,6 +153,7 @@ function addBetAccount(
          Number(amountFilled), 
          Number(minOddsRequested),
          Number(payout),
+         Number(timestamp),
          BetResult.Pending, 
          meta.createdAt,
          meta.createdSig,
@@ -338,6 +342,7 @@ async function runIndexer() {
                   feepayer: ix.accounts[1]!,
                   marketId: decodedTransaction.data.marketId,
                   amount: decodedTransaction.data.amount,
+                  timestamp: Number(transactionMeta.blockTime!),
                   payout: decodedTransaction.data.amount * decodedTransaction.data.minOddsScaled / ODDS_SCALE,
                   result: BetResult.Pending,
                   side: decodedTransaction.data.side,
@@ -360,6 +365,7 @@ async function runIndexer() {
                betAccount.amount,
                decodedTransaction.data.minOddsScaled,
                betAccount.payout,
+               betAccount.timestamp,
                meta,
             );
          } else if (decodedTransaction.kind === "fillParlay") {
@@ -375,6 +381,7 @@ async function runIndexer() {
                   feepayer: ix.accounts[1]!,
                   amount: decodedTransaction.data.amount,
                   payout: decodedTransaction.data.amount * decodedTransaction.data.minOddsScaled / ODDS_SCALE,
+                  timestamp: Number(transactionMeta.blockTime!),
                   result: BetResult.Pending,
                   fillerAddress: SYSTEM_PROGRAM_ID,
                   numLegs: decodedTransaction.data.numLegs,
@@ -392,6 +399,7 @@ async function runIndexer() {
                parlayAccount.amount,
                decodedTransaction.data.minOddsScaled,
                parlayAccount.payout,
+               parlayAccount.timestamp,
                meta,
             );
          } else if (decodedTransaction.kind === "gradeBets") {
