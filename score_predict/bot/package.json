@@ -13,6 +13,7 @@
       "spamm-score-predict-sdk": "file:../sdk/ts"
    },
    "devDependencies": {
-      "@types/bun": "latest"
+      "@types/bun": "latest",
+      "@types/node": "^25.9.1"
    }
 }

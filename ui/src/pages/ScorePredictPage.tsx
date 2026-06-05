@@ -340,13 +340,20 @@ export function ScorePredictPage(): ReactElement {
          </div>
 
          <header className="score-predict-hero">
-            {(contest.home_flag_url || contest.away_flag_url) && (
-               <div className="score-predict-hero__flags">
-                  {contest.home_flag_url && (
-                     <img className="score-predict-hero__flag" src={contest.home_flag_url} alt="" />
+            {(contest.home_flag_url || contest.away_flag_url || contest.image_url) && (
+               <div className="score-predict-hero__art">
+                  {contest.image_url && (
+                     <img className="score-predict-hero__image" src={contest.image_url} alt="" />
                   )}
-                  {contest.away_flag_url && (
-                     <img className="score-predict-hero__flag" src={contest.away_flag_url} alt="" />
+                  {(contest.home_flag_url || contest.away_flag_url) && (
+                     <div className="score-predict-hero__flags">
+                        {contest.home_flag_url && (
+                           <img className="score-predict-hero__flag" src={contest.home_flag_url} alt="" />
+                        )}
+                        {contest.away_flag_url && (
+                           <img className="score-predict-hero__flag" src={contest.away_flag_url} alt="" />
+                        )}
+                     </div>
                   )}
                </div>
             )}
@@ -474,7 +481,7 @@ export function ScorePredictPage(): ReactElement {
                                  >
                                     this post
                                  </a>{' '}
-                                 if you post manually (the button above sets this automatically).
+                                 if you post manually (the button below does this this automatically).
                               </p>
                            )}
                      </>

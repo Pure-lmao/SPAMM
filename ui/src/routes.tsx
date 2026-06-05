@@ -6,6 +6,7 @@ import { HomePage } from "./pages/HomePage";
 import { MyBetsPage } from "./pages/MyBetsPage";
 import { ScorePredictPage } from "./pages/ScorePredictPage";
 import { ScorePredictHistoryPage } from "./pages/ScorePredictHistoryPage";
+import { NotFoundPage } from "./pages/NotFoundPage";
 
 export function AppRoutes(): ReactElement {
    return (
@@ -16,6 +17,7 @@ export function AppRoutes(): ReactElement {
             <Route path="score-predict" element={<ScorePredictPage />} />
             <Route path="score-predict/history" element={<ScorePredictHistoryPage />} />
             <Route path="events/:sportId/:leagueId/:eventId" element={<EventMarketsPage />} />
+            <Route path="*" element={<NotFoundPage />} />
          </Route>
       </Routes>
    );

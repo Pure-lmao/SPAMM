@@ -1,0 +1,21 @@
+{
+   "compilerOptions": {
+      "baseUrl": ".",
+      "paths": {
+         "spamm-score-predict-sdk": ["../sdk/ts/src/index.ts"]
+      },
+      "lib": ["ESNext"],
+      "target": "ESNext",
+      "module": "Preserve",
+      "moduleDetection": "force",
+      "moduleResolution": "bundler",
+      "allowImportingTsExtensions": true,
+      "verbatimModuleSyntax": true,
+      "noEmit": true,
+      "strict": true,
+      "skipLibCheck": true,
+      "noFallthroughCasesInSwitch": true,
+      "types": ["bun", "node"]
+   },
+   "include": ["./**/*.ts"]
+}

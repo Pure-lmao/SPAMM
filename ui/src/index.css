@@ -2927,6 +2927,68 @@ a.inline-nav-link:hover {
    font-size: 0.95rem;
 }
 
+.not-found-page {
+   display: flex;
+   flex: 1;
+   align-items: center;
+   justify-content: center;
+   min-height: min(72vh, 42rem);
+   padding: 2rem 1.25rem 3rem;
+}
+
+.not-found-page__stage {
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: 1.35rem;
+   width: min(100%, 34rem);
+   text-align: center;
+}
+
+.not-found-page__ball-wrap {
+   position: relative;
+   display: grid;
+   place-items: center;
+   width: min(100%, 22rem);
+   aspect-ratio: 1;
+}
+
+.not-found-page__ball {
+   display: block;
+   width: 100%;
+   height: auto;
+   object-fit: contain;
+   filter: grayscale(1) contrast(1.12) brightness(0.92);
+}
+
+.not-found-page__message {
+   margin: 0;
+   font-size: clamp(1.15rem, 2.6vw, 1.45rem);
+   font-weight: 700;
+   line-height: 1.55;
+   color: var(--heading);
+}
+
+.not-found-page__aside {
+   display: inline;
+   font-weight: 400;
+   font-style: italic;
+   color: var(--muted);
+}
+
+.not-found-page__home-link {
+   font-style: normal;
+   font-weight: 600;
+   color: var(--accent);
+   text-decoration: none;
+   border-bottom: 1px solid color-mix(in srgb, var(--accent) 45%, transparent);
+}
+
+.not-found-page__home-link:hover {
+   color: var(--accent-bright);
+   border-bottom-color: var(--accent);
+}
+
 .score-predict-empty {
    padding: 2rem 1.25rem;
    border-radius: 14px;
@@ -2954,21 +3016,37 @@ a.inline-nav-link:hover {
    box-shadow: var(--shadow-panel-pop);
 }
 
+.score-predict-hero__art {
+   display: flex;
+   flex-direction: column;
+   align-items: center;
+   gap: 1rem;
+   margin-bottom: 1rem;
+}
+
 .score-predict-hero__flags {
    display: flex;
    align-items: center;
    justify-content: center;
    gap: 1.25rem;
-   margin-bottom: 1rem;
+}
+
+.score-predict-hero__image {
+   display: block;
+   max-width: min(100%, 18rem);
+   max-height: 8rem;
+   width: auto;
+   height: auto;
+   object-fit: contain;
 }
 
 .score-predict-hero__flag {
-   width: 4.5rem;
-   height: 3rem;
-   object-fit: cover;
-   border-radius: 6px;
-   border: 1px solid var(--border);
-   box-shadow: var(--shadow-inset-line);
+   display: block;
+   max-width: 5rem;
+   max-height: 5rem;
+   width: auto;
+   height: auto;
+   object-fit: contain;
 }
 
 .score-predict-hero__title {
