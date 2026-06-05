@@ -5,10 +5,12 @@ import {
    listPredictionContests,
    normalizeReplyToTweetId,
    predictionContestToJson,
+   updatePredictionContest,
    updatePredictionContestResult,
 } from '../../api/localDb.ts';
 import type { PredictionContestKind } from '../../api/types.ts';
 import { parseContestResult, parseDeadline } from '../client/contestParse.ts';
+import { patchFromDiscordUpdate } from './contestUpdateDiscord.ts';
 import {
    closePredictionPda,
    fetchContestPredictions,
@@ -42,6 +44,21 @@ export async function handlePredictionCreate(interaction: ChatInputCommandIntera
    });
    await interaction.reply({
       content: ephemeralJsonBlock('Contest created', predictionContestToJson(contest)),
+      ephemeral: true,
+   });
+}
+
+export async function handlePredictionUpdate(interaction: ChatInputCommandInteraction): Promise<void> {
+   const id = interaction.options.getInteger('id', true);
+   const patch = patchFromDiscordUpdate(interaction);
+   if (Object.keys(patch).length === 0) {
+      throw new Error('Provide at least one field to update');
+   }
+   const updated = updatePredictionContest(id, patch);
+   await interaction.reply({
+      content: updated
+         ? ephemeralJsonBlock(`Contest ${id} updated`, predictionContestToJson(updated))
+         : `Contest ${id} not found`,
       ephemeral: true,
    });
 }

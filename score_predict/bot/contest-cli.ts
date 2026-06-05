@@ -6,6 +6,7 @@
  *   bun run contest-cli.ts set-result --id 1 --result 2-1 --notes "Final"
  *   bun run contest-cli.ts list
  *   bun run contest-cli.ts get --id 1
+ *   bun run contest-cli.ts update --id 1 --title "New title"
  */
 
 import {
@@ -14,11 +15,13 @@ import {
    listPredictionContests,
    normalizeReplyToTweetId,
    predictionContestToJson,
+   updatePredictionContest,
    updatePredictionContestResult,
    type AddPredictionContestInput,
 } from '../../api/localDb.ts';
 import type { PredictionContestKind } from '../../api/types.ts';
 import { jsonStringify, parseContestResult, parseDeadline } from '../client/contestParse.ts';
+import { patchFromCliUpdate } from '../client/contestUpdate.ts';
 
 function opt(name: string): string | undefined {
    const i = process.argv.indexOf(name);
@@ -106,6 +109,28 @@ async function cmdList(): Promise<void> {
    console.log(jsonStringify(rows.map(predictionContestToJson)));
 }
 
+async function cmdUpdate(): Promise<void> {
+   const id = Number(opt('--id'));
+   if (!Number.isFinite(id)) {
+      console.error('Required: --id');
+      console.error(
+         'Optional: --date --deadline --kind --title --description --tweet-template --reply-to --status',
+      );
+      console.error(
+         '  --sport-id --league-id --event-id --home-flag --away-flag --image --result-notes',
+      );
+      console.error('  --clear-reply-to --clear-event (omit value flags to leave unchanged)');
+      process.exit(1);
+   }
+   const patch = patchFromCliUpdate();
+   if (Object.keys(patch).length === 0) {
+      console.error('Provide at least one field to update');
+      process.exit(1);
+   }
+   const updated = updatePredictionContest(id, patch);
+   console.log(jsonStringify(updated ? predictionContestToJson(updated) : null));
+}
+
 const sub = process.argv[2];
 if (sub === 'create') {
    await cmdCreate();
@@ -115,8 +140,10 @@ if (sub === 'create') {
    await cmdGet();
 } else if (sub === 'list') {
    await cmdList();
+} else if (sub === 'update') {
+   await cmdUpdate();
 } else {
    console.log(`Unknown command: ${sub ?? '(none)'}`);
-   console.log('Commands: create | set-result | get | list');
+   console.log('Commands: create | update | set-result | get | list');
    process.exit(1);
 }

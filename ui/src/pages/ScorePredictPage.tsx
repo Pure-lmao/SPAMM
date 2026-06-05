@@ -315,7 +315,7 @@ export function ScorePredictPage(): ReactElement {
          <section className="score-predict-page">
             <div className="score-predict-empty">
                <h1 className="score-predict-empty__title">Score Predict</h1>
-               <p>No contest is scheduled for the current US sports day.</p>
+               <p>No contest is scheduled for the current day.</p>
                <Link className="score-predict-link" to="/score-predict/history">
                   View past entries
                </Link>

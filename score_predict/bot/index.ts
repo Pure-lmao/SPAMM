@@ -16,6 +16,7 @@ import {
    handlePredictionGet,
    handlePredictionList,
    handlePredictionResult,
+   handlePredictionUpdate,
 } from './handlers.ts';
 
 const token = process.env.DISCORD_BOT_TOKEN?.trim();
@@ -44,6 +45,7 @@ const client = new Client({ intents: [GatewayIntentBits.Guilds] });
 
 const handlers: Record<string, (interaction: import('discord.js').ChatInputCommandInteraction) => Promise<void>> = {
    'prediction-create': handlePredictionCreate,
+   'prediction-update': handlePredictionUpdate,
    'prediction-get': handlePredictionGet,
    'prediction-list': handlePredictionList,
    'prediction-result': handlePredictionResult,

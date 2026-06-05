@@ -30,6 +30,60 @@ export const discordCommands = [
       .addStringOption((o) => o.setName('away_flag').setDescription('Away team flag image URL').setRequired(false))
       .addStringOption((o) => o.setName('image').setDescription('Contest hero image URL').setRequired(false)),
    new SlashCommandBuilder()
+      .setName('prediction-update')
+      .setDescription('Update contest fields in DB (only set options are changed)')
+      .addIntegerOption((o) => o.setName('id').setDescription('Contest id').setRequired(true))
+      .addStringOption((o) => o.setName('date').setDescription('YYYY-MM-DD US sports day').setRequired(false))
+      .addStringOption((o) => o.setName('deadline').setDescription('ISO datetime or unix ms').setRequired(false))
+      .addStringOption((o) =>
+         o
+            .setName('kind')
+            .setDescription('match_score or daily_total')
+            .addChoices(
+               { name: 'match_score', value: 'match_score' },
+               { name: 'daily_total', value: 'daily_total' },
+            )
+            .setRequired(false),
+      )
+      .addStringOption((o) => o.setName('title').setDescription('Contest title').setRequired(false))
+      .addStringOption((o) => o.setName('description').setDescription('Contest description').setRequired(false))
+      .addStringOption((o) =>
+         o.setName('tweet_template').setDescription('Tweet template with {prediction}, etc.').setRequired(false),
+      )
+      .addStringOption((o) =>
+         o.setName('reply_to').setDescription('Tweet id or status URL for in_reply_to').setRequired(false),
+      )
+      .addBooleanOption((o) =>
+         o.setName('clear_reply_to').setDescription('Remove reply_to_tweet_id').setRequired(false),
+      )
+      .addIntegerOption((o) => o.setName('sport_id').setDescription('Linked event sport id').setRequired(false))
+      .addIntegerOption((o) => o.setName('league_id').setDescription('Linked event league id').setRequired(false))
+      .addIntegerOption((o) => o.setName('event_id').setDescription('Linked event id').setRequired(false))
+      .addBooleanOption((o) =>
+         o.setName('clear_event').setDescription('Clear sport_id, league_id, event_id').setRequired(false),
+      )
+      .addStringOption((o) =>
+         o.setName('home_flag').setDescription('Home flag URL (none to clear)').setRequired(false),
+      )
+      .addStringOption((o) =>
+         o.setName('away_flag').setDescription('Away flag URL (none to clear)').setRequired(false),
+      )
+      .addStringOption((o) =>
+         o.setName('image').setDescription('Hero image URL (none to clear)').setRequired(false),
+      )
+      .addStringOption((o) =>
+         o
+            .setName('status')
+            .setDescription('Contest status')
+            .addChoices(
+               { name: 'open', value: 'open' },
+               { name: 'locked', value: 'locked' },
+               { name: 'graded', value: 'graded' },
+            )
+            .setRequired(false),
+      )
+      .addStringOption((o) => o.setName('result_notes').setDescription('Grading notes').setRequired(false)),
+   new SlashCommandBuilder()
       .setName('prediction-get')
       .setDescription('Get a contest by id (DB)')
       .addIntegerOption((o) => o.setName('id').setDescription('Contest id').setRequired(true)),

@@ -775,6 +775,67 @@ export function listPredictionContests(): PredictionContest[] {
    return rows.map(rowToPredictionContest);
 }
 
+export type UpdatePredictionContestPatch = Partial<{
+   contest_date: string;
+   deadline: number;
+   kind: PredictionContestKind;
+   title: string;
+   description: string;
+   tweet_template: string;
+   reply_to_tweet_id: string | null;
+   event_sport_id: number | null;
+   event_league_id: number | null;
+   event_id: number | null;
+   home_flag_url: string | null;
+   away_flag_url: string | null;
+   image_url: string | null;
+   status: PredictionContestStatus;
+   result_notes: string | null;
+}>;
+
+const PREDICTION_CONTEST_UPDATE_COLUMNS: Record<keyof UpdatePredictionContestPatch, string> = {
+   contest_date: 'contest_date',
+   deadline: 'deadline',
+   kind: 'kind',
+   title: 'title',
+   description: 'description',
+   tweet_template: 'tweet_template',
+   reply_to_tweet_id: 'reply_to_tweet_id',
+   event_sport_id: 'event_sport_id',
+   event_league_id: 'event_league_id',
+   event_id: 'event_id',
+   home_flag_url: 'home_flag_url',
+   away_flag_url: 'away_flag_url',
+   image_url: 'image_url',
+   status: 'status',
+   result_notes: 'result_notes',
+};
+
+export function updatePredictionContest(
+   id: number,
+   patch: UpdatePredictionContestPatch,
+): PredictionContest | null {
+   initPredictionContestsTable();
+   if (fetchPredictionContest(id) == null) {
+      return null;
+   }
+
+   const entries = Object.entries(patch).filter(([, value]) => value !== undefined) as [
+      keyof UpdatePredictionContestPatch,
+      UpdatePredictionContestPatch[keyof UpdatePredictionContestPatch],
+   ][];
+   if (entries.length === 0) {
+      return fetchPredictionContest(id);
+   }
+
+   const setSql = entries.map(([key]) => `${PREDICTION_CONTEST_UPDATE_COLUMNS[key]} = ?`).join(', ');
+   const values: (string | number | Uint8Array | null)[] = entries.map(([, value]) => value as string | number | null);
+   getDb()
+      .query(`UPDATE prediction_contests SET ${setSql} WHERE id = ?`)
+      .run(...values, id);
+   return fetchPredictionContest(id);
+}
+
 export function updatePredictionContestResult(
    id: number,
    resultPrediction: Uint8Array,
