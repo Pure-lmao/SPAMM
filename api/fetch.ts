@@ -331,9 +331,9 @@ async function cacheOdds() {
 async function main() {
    await setUpcomingEvents();
    await setFinishedEvents();
-   // await gradeBets();
-   // await gradeParlays();
-   // await cacheOdds();
+   await gradeBets();
+   await gradeParlays();
+   await cacheOdds();
    console.log("Initial done.");
 
    setInterval(async () => {

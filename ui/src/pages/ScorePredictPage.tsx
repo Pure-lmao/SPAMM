@@ -19,13 +19,12 @@ import { formatFilledBetOdds } from '../betting/filledOdds';
 import { formatUsdcBaseUnitsForUi } from '../betting/usdc';
 import { fetchTodayContest } from '../scorePredict/fetchContest';
 import {
-   eligibleDebugEnabled,
    resolveQualifyingOpenBet,
    fetchEventsTree,
    type QualifyingOpenBet,
 } from '../scorePredict/eligibleOpenBet';
 import { clearEntryDraft, loadEntryDraft, saveEntryDraft } from '../scorePredict/draftStorage';
-import { nextPredictionId } from '../scorePredict/nextPredictionId';
+import { deterministicPredictionId } from '../scorePredict/deterministicPredictionId';
 import {
    buildExpectedTweetText,
    buildTwitterIntentUrl,
@@ -66,7 +65,6 @@ export function ScorePredictPage(): ReactElement {
    const [homeScore, setHomeScore] = useState(0);
    const [awayScore, setAwayScore] = useState(0);
    const [dailyTotal, setDailyTotal] = useState(0);
-   const [predictionId, setPredictionId] = useState<bigint | null>(null);
    const [tweetUrl, setTweetUrl] = useState('');
    const [tweetVerified, setTweetVerified] = useState(false);
    const [verifyErr, setVerifyErr] = useState<string | null>(null);
@@ -94,6 +92,13 @@ export function ScorePredictPage(): ReactElement {
       return encodePrediction(kind, { total: dailyTotal });
    }, [contest, kind, homeScore, awayScore, dailyTotal]);
 
+   const predictionId = useMemo((): bigint | null => {
+      if (!contest || !account) {
+         return null;
+      }
+      return deterministicPredictionId(contest.id, predictionBytes, account);
+   }, [contest, account, predictionBytes]);
+
    const expectedTweet = useMemo(() => {
       if (!contest || predictionId == null) {
          return '';
@@ -117,18 +122,15 @@ export function ScorePredictPage(): ReactElement {
             if (!cancelled) {
                setContest(c);
                if (!c) {
-                  setPredictionId(null);
                   return;
                }
                const draft = loadEntryDraft(c.id, c.contest_date);
                if (draft && draft.kind === c.kind) {
-                  setPredictionId(BigInt(draft.predictionId));
                   setHomeScore(draft.homeScore);
                   setAwayScore(draft.awayScore);
                   setDailyTotal(draft.dailyTotal);
                   setTweetUrl(draft.tweetUrl);
                } else {
-                  setPredictionId(nextPredictionId());
                   setHomeScore(0);
                   setAwayScore(0);
                   setDailyTotal(0);
@@ -147,21 +149,20 @@ export function ScorePredictPage(): ReactElement {
    }, []);
 
    useEffect(() => {
-      if (!contest || predictionId == null) {
+      if (!contest) {
          return;
       }
       saveEntryDraft({
          contestId: contest.id,
          contestDate: contest.contest_date,
          wallet: account ?? null,
-         predictionId: predictionId.toString(),
          kind,
          homeScore,
          awayScore,
          dailyTotal,
          tweetUrl,
       });
-   }, [contest, predictionId, kind, homeScore, awayScore, dailyTotal, tweetUrl, account]);
+   }, [contest, kind, homeScore, awayScore, dailyTotal, tweetUrl, account]);
 
    useEffect(() => {
       if (!contest) {
@@ -180,9 +181,6 @@ export function ScorePredictPage(): ReactElement {
       let cancelled = false;
       void (async () => {
          try {
-            if (eligibleDebugEnabled()) {
-               console.log('[score-predict] qualifying fetch start', { account, contestId: contest.id });
-            }
             // 1) Linked open bet — aggregator program (same as My Bets).
             const tree = await fetchEventsTree();
             const bet = await resolveQualifyingOpenBet({
@@ -198,11 +196,6 @@ export function ScorePredictPage(): ReactElement {
 
             // 2) Already entered — score-predict program (prediction PDAs only).
             if (!isScorePredictProgramDeployed()) {
-               if (eligibleDebugEnabled()) {
-                  console.warn(
-                     '[score-predict] SCORE_PREDICT_PROGRAM_ID not deployed; skipping prediction entry check',
-                  );
-               }
                setAlreadyEntered(false);
                return;
             }

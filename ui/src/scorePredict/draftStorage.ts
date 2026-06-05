@@ -6,7 +6,6 @@ export type ScorePredictEntryDraft = {
    contestId: number;
    contestDate: string;
    wallet: string | null;
-   predictionId: string;
    kind: PredictionKind;
    homeScore: number;
    awayScore: number;
@@ -24,7 +23,6 @@ function readStore(): ScorePredictEntryDraft | null {
       if (
          typeof parsed.contestId !== 'number' ||
          typeof parsed.contestDate !== 'string' ||
-         typeof parsed.predictionId !== 'string' ||
          typeof parsed.kind !== 'string'
       ) {
          return null;

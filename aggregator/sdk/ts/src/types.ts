@@ -39,12 +39,13 @@ export const BET_ACCOUNT_LEN =
    1 +
    8 +
    8 +
+   4 +
    2 +
    EVENT_GAME_STATE_LEN +
    1 +
    5 * BET_FILLER_WIRE_LEN;
 export const PARLAY_BET_ACCOUNT_DISCRIMINATOR = 2;
-export const PARLAY_BET_ACCOUNT_LEN = 124 + PARLAY_LEG_TABLE_LEN;
+export const PARLAY_BET_ACCOUNT_LEN = 128 + PARLAY_LEG_TABLE_LEN;
 export const MM_ENCUMBRANCE_PDA_LEN = 10;
 export const MM_ACCOUNT_CONFIG_MIN_LEN = 34;
 export const MM_MARKET_DATA_PDA_MIN_LEN = 2;

@@ -36,7 +36,8 @@ export function ScorePredictHistoryPage(): ReactElement {
    const { signer, ready: signerReady } = useKitTransactionSigner();
    const [rows, setRows] = useState<EntryRow[]>([]);
    const [err, setErr] = useState<string | null>(null);
-   const [closingId, setClosingId] = useState<number | null>(null);
+   const [selectedContestIds, setSelectedContestIds] = useState<ReadonlySet<number>>(() => new Set());
+   const [closing, setClosing] = useState(false);
    const [loading, setLoading] = useState(false);
 
    const rpc = useMemo((): Rpc<SolanaRpcApi> => {
@@ -47,6 +48,7 @@ export function ScorePredictHistoryPage(): ReactElement {
    const load = useCallback(async () => {
       if (!isConnected || !account) {
          setRows([]);
+         setSelectedContestIds(new Set());
          return;
       }
       setLoading(true);
@@ -73,6 +75,15 @@ export function ScorePredictHistoryPage(): ReactElement {
          }
          merged.sort((a, b) => b.contestId - a.contestId);
          setRows(merged);
+         setSelectedContestIds((prev) => {
+            const next = new Set<number>();
+            for (const id of prev) {
+               if (merged.some((r) => r.contestId === id)) {
+                  next.add(id);
+               }
+            }
+            return next;
+         });
       } catch (e) {
          setErr(e instanceof Error ? e.message : String(e));
       } finally {
@@ -84,36 +95,53 @@ export function ScorePredictHistoryPage(): ReactElement {
       void load();
    }, [load]);
 
-   const closeEntry = useCallback(
-      async (contestId: number) => {
-         if (!account || !signer || !signerReady) {
-            return;
+   const toggleSelected = useCallback((contestId: number, checked: boolean) => {
+      setSelectedContestIds((prev) => {
+         const next = new Set(prev);
+         if (checked) {
+            next.add(contestId);
+         } else {
+            next.delete(contestId);
          }
-         setClosingId(contestId);
-         try {
-            const ix = await getClosePredictionIx(address(account), address(account), contestId);
-            const signed = await buildSignV0Transaction(rpc, {
-               feePayer: signer,
-               instructions: [ix],
-               signers: [signer],
-            });
-            const httpUrl = resolveHttpRpcUrl(import.meta.env.VITE_SOLANA_RPC_URL);
-            const subs = createSolanaRpcSubscriptions(httpToWsRpcUrl(httpUrl));
-            const sendAndConfirm = sendAndConfirmTransactionFactory({
-               rpc,
-               rpcSubscriptions: subs,
-            } as never);
-            await sendAndConfirm(signed as never, { commitment: 'confirmed' });
-            getSignatureFromTransaction(signed);
-            await load();
-         } catch (e) {
-            setErr(e instanceof Error ? e.message : String(e));
-         } finally {
-            setClosingId(null);
-         }
-      },
-      [account, signer, signerReady, rpc, load],
-   );
+         return next;
+      });
+   }, []);
+
+   const closeSelected = useCallback(async () => {
+      if (!account || !signer || !signerReady || selectedContestIds.size === 0) {
+         return;
+      }
+      setClosing(true);
+      setErr(null);
+      try {
+         const owner = address(account);
+         const contestIds = [...selectedContestIds];
+         const instructions = await Promise.all(
+            contestIds.map((contestId) => getClosePredictionIx(owner, owner, contestId)),
+         );
+         const signed = await buildSignV0Transaction(rpc, {
+            feePayer: signer,
+            instructions,
+            signers: [signer],
+         });
+         const httpUrl = resolveHttpRpcUrl(import.meta.env.VITE_SOLANA_RPC_URL);
+         const subs = createSolanaRpcSubscriptions(httpToWsRpcUrl(httpUrl));
+         const sendAndConfirm = sendAndConfirmTransactionFactory({
+            rpc,
+            rpcSubscriptions: subs,
+         } as never);
+         await sendAndConfirm(signed as never, { commitment: 'confirmed' });
+         getSignatureFromTransaction(signed);
+         setSelectedContestIds(new Set());
+         await load();
+      } catch (e) {
+         setErr(e instanceof Error ? e.message : String(e));
+      } finally {
+         setClosing(false);
+      }
+   }, [account, signer, signerReady, rpc, load, selectedContestIds]);
+
+   const canClose = isConnected && signerReady && selectedContestIds.size > 0 && !closing;
 
    return (
       <section className="score-predict-page">
@@ -128,6 +156,27 @@ export function ScorePredictHistoryPage(): ReactElement {
             <div className="score-predict-banner score-predict-banner--info">
                Connect your wallet to see your on-chain entries.
             </div>
+         )}
+
+         {isConnected && rows.length > 0 && (
+            <>
+               <p className="score-predict-history-notice">
+                  Closed prediction accounts are not eligible to win. Only close entries for contests you
+                  lost — keep open any entry that could still win.
+               </p>
+               <div className="score-predict-history-bulk">
+                  <button
+                     type="button"
+                     className="bet-modal-btn bet-modal-btn--primary"
+                     disabled={!canClose}
+                     onClick={() => void closeSelected()}
+                  >
+                     {closing
+                        ? 'Closing…'
+                        : `Close selected predictions${selectedContestIds.size > 0 ? ` (${selectedContestIds.size})` : ''}`}
+                  </button>
+               </div>
+            </>
          )}
 
          {err && <div className="score-predict-banner score-predict-banner--error">{err}</div>}
@@ -151,9 +200,19 @@ export function ScorePredictHistoryPage(): ReactElement {
                   resultLabel = formatPredictionForTweet(kind, [resultBytes[0]!, resultBytes[1]!]);
                   resultMod = 'graded';
                }
+               const checked = selectedContestIds.has(row.contestId);
                return (
                   <li key={`${row.contestId}-${row.predictionId}`} className="score-predict-history-card">
                      <div className="score-predict-history-card__head">
+                        <label className="score-predict-history-card__select">
+                           <input
+                              type="checkbox"
+                              checked={checked}
+                              disabled={closing}
+                              onChange={(e) => toggleSelected(row.contestId, e.target.checked)}
+                           />
+                           <span className="score-predict-history-card__select-label">Select to close</span>
+                        </label>
                         <h2 className="score-predict-history-card__title">
                            {row.contest?.title ?? `Contest #${row.contestId}`}
                         </h2>
@@ -175,7 +234,7 @@ export function ScorePredictHistoryPage(): ReactElement {
                            <dd>{row.contest?.contest_date ?? '—'}</dd>
                         </div>
                         <div className="score-predict-history-card__full">
-                           <dt>Post</dt>
+                           <dt>Entry post</dt>
                            <dd>
                               <a href={row.tweetLink} target="_blank" rel="noreferrer">
                                  {row.tweetLink}
@@ -189,14 +248,6 @@ export function ScorePredictHistoryPage(): ReactElement {
                            </div>
                         )}
                      </dl>
-                     <button
-                        type="button"
-                        className="bet-modal-btn bet-modal-btn--ghost score-predict-history-card__close"
-                        disabled={closingId === row.contestId}
-                        onClick={() => void closeEntry(row.contestId)}
-                     >
-                        {closingId === row.contestId ? 'Closing…' : 'Close account & reclaim rent'}
-                     </button>
                   </li>
                );
             })}

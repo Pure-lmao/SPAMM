@@ -1,0 +1,31 @@
+[package]
+name = "spamm_score_predict"
+version = "0.0.1"
+edition = "2021"
+license = "CC-BY-NC-4.0"
+description = "On-chain prediction entry PDAs for score-predict contests"
+autotests = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["bpf-entrypoint"]
+bpf-entrypoint = []
+log = []
+
+[dependencies]
+pinocchio = { version = "0.11.1", default-features = false, features = ["cpi", "copy", "account-resize"] }
+pinocchio-log = { version = "0.5.1", default-features = false, features = ["macro"] }
+pinocchio-system = "0.6.0"
+solana-address = { version = "2.4.0", features = ["curve25519"] }
+zeropod = { version = "0.3.2", features = ["solana-address"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+   'cfg(target_os, values("solana"))',
+   'cfg(target_arch, values("bpf", "sbf"))',
+] }
+
+[profile.release]
+debug = 1

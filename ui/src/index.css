@@ -2880,6 +2880,26 @@ a.inline-nav-link:hover {
    color: var(--accent);
 }
 
+.score-predict-history-notice {
+   margin: 0 0 1rem;
+   padding: 0.75rem 0.9rem;
+   border-radius: 10px;
+   border: 1px solid color-mix(in srgb, var(--accent) 25%, var(--border));
+   background: color-mix(in srgb, var(--accent) 6%, var(--surface-deep));
+   font-size: 0.85rem;
+   line-height: 1.5;
+   color: var(--muted);
+}
+
+.score-predict-history-bulk {
+   margin-bottom: 1.25rem;
+}
+
+.score-predict-history-bulk .bet-modal-btn {
+   width: 100%;
+   max-width: 22rem;
+}
+
 .score-predict-history-title {
    margin: 0;
    font-size: 1.35rem;
@@ -3297,10 +3317,33 @@ a.inline-nav-link:hover {
 
 .score-predict-history-card__head {
    display: flex;
+   flex-wrap: wrap;
    align-items: flex-start;
    justify-content: space-between;
    gap: 0.75rem;
    margin-bottom: 0.85rem;
+}
+
+.score-predict-history-card__select {
+   display: flex;
+   align-items: center;
+   gap: 0.45rem;
+   width: 100%;
+   margin: 0;
+   cursor: pointer;
+   font-size: 0.8rem;
+   color: var(--muted);
+}
+
+.score-predict-history-card__select input {
+   width: 1rem;
+   height: 1rem;
+   accent-color: var(--accent);
+   cursor: pointer;
+}
+
+.score-predict-history-card__select-label {
+   user-select: none;
 }
 
 .score-predict-history-card__title {
@@ -3366,11 +3409,6 @@ a.inline-nav-link:hover {
 
 .score-predict-history-card__full {
    grid-column: 1 / -1;
-}
-
-.score-predict-history-card__close {
-   width: 100%;
-   justify-content: center;
 }
 
 @media (max-width: 480px) {

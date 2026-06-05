@@ -1,0 +1,17 @@
+{
+   "name": "spamm-score-predict-client",
+   "version": "0.0.1",
+   "private": true,
+   "type": "module",
+   "scripts": {
+      "cli": "bun run cli.ts",
+      "check": "tsc --noEmit -p tsconfig.json"
+   },
+   "dependencies": {
+      "@solana/kit": "^6.8.0",
+      "spamm-score-predict-sdk": "file:../sdk/ts"
+   },
+   "devDependencies": {
+      "@types/bun": "latest"
+   }
+}

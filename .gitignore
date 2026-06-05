@@ -5,4 +5,3 @@ Cargo.lock
 node_modules/
 dist
 data.*
-score_predict
