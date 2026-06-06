@@ -1,9 +1,10 @@
 //! Loop over MMs, CPI `get_quote_parlay` for each, return [`ProxyQuoteData`] slice in return data.
 //!
-//! Accounts: **1 + (3 + 2 × L) × N** (`L` = `num_legs`, `N` = number of market makers).
+//! Accounts: **2 + (3 + 2 × L) × N** (`L` = `num_legs`, `N` = number of market makers).
 //!
-//! **Fixed (1)**
+//! **Fixed (2)**
 //! 0. `user` (readonly)
+//! 1. `clock_program` (readonly)
 //!
 //! **Per MM (3 + 2 × L)**
 //! 0. `mm_program` (readonly)
@@ -39,7 +40,7 @@ use crate::{
    },
 };
 
-const MM_PARLAY_PROXY_FIXED_ACCOUNTS: usize = 4;
+const MM_PARLAY_PROXY_FIXED_ACCOUNTS: usize = 3;
 
 pub const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 9;
 

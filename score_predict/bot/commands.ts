@@ -17,9 +17,6 @@ export const discordCommands = [
          o.setName('description').setDescription('Contest body text shown in UI').setRequired(true),
       )
       .addStringOption((o) =>
-         o.setName('tweet_template').setDescription('Use {prediction}, {title}, {description}').setRequired(true),
-      )
-      .addStringOption((o) =>
          o.setName('reply_to').setDescription('Tweet id or status URL for in_reply_to').setRequired(false),
       )
       .addIntegerOption((o) => o.setName('id').setDescription('Optional fixed contest id').setRequired(false))
@@ -28,7 +25,10 @@ export const discordCommands = [
       .addIntegerOption((o) => o.setName('event_id').setDescription('Linked event id').setRequired(false))
       .addStringOption((o) => o.setName('home_flag').setDescription('Home team flag image URL').setRequired(false))
       .addStringOption((o) => o.setName('away_flag').setDescription('Away team flag image URL').setRequired(false))
-      .addStringOption((o) => o.setName('image').setDescription('Contest hero image URL').setRequired(false)),
+      .addStringOption((o) => o.setName('image').setDescription('Contest hero image URL').setRequired(false))
+      .addStringOption((o) =>
+         o.setName('tweet_template').setDescription('Use {prediction}, {title}, {description}').setRequired(false)
+      ),
    new SlashCommandBuilder()
       .setName('prediction-update')
       .setDescription('Update contest fields in DB (only set options are changed)')
