@@ -7,6 +7,7 @@
 
 import { Client, GatewayIntentBits, REST, Routes } from 'discord.js';
 
+import { marketHandlers } from '../../api/bot/handlers.ts';
 import { discordCommands } from './commands.ts';
 import {
    handlePredictionClose,
@@ -52,6 +53,7 @@ const handlers: Record<string, (interaction: import('discord.js').ChatInputComma
    'prediction-fetch-user': handlePredictionFetchUser,
    'prediction-fetch-contest': handlePredictionFetchContest,
    'prediction-close': handlePredictionClose,
+   ...marketHandlers,
 };
 
 client.on('interactionCreate', async (interaction) => {

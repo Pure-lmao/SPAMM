@@ -1,6 +1,8 @@
 import { SlashCommandBuilder } from 'discord.js';
 
-export const discordCommands = [
+import { marketCommandBuilders } from '../../api/bot/commands.ts';
+
+const predictionCommandBuilders = [
    new SlashCommandBuilder()
       .setName('prediction-create')
       .setDescription('Create a prediction contest (DB)')
@@ -124,4 +126,8 @@ export const discordCommands = [
             .setDescription('Close as program admin (default true)')
             .setRequired(false),
       ),
-].map((c) => c.toJSON());
+];
+
+export const discordCommands = [...predictionCommandBuilders, ...marketCommandBuilders].map((c) =>
+   c.toJSON(),
+);

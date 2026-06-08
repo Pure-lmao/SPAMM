@@ -402,6 +402,18 @@ export function fetchMarkets(): Map<string, Market> {
    return map;
 }
 
+export function fetchUpcomingEvents(): Event[] {
+   const database = getDb();
+   return database.query<Event, string[]>(
+      "SELECT * FROM events WHERE start_time > ? ORDER BY start_time ASC"
+   ).all(Date.now().toString());
+}
+
+export function fetchEventsByEventId(eventId: number): Event[] {
+   const database = getDb();
+   return database.query<Event, string[]>("SELECT * FROM events WHERE id = ?").all(eventId.toString());
+}
+
 export function fetchUpcomingMarkets(): Map<string, Market> {
    const database = getDb();
    const events = database.query<Event, [string]>("SELECT DISTINCT id FROM events WHERE start_time > ?").all(Date.now().toString());
@@ -414,7 +426,7 @@ export function fetchUpcomingMarkets(): Map<string, Market> {
    return map;
 }
 
-function fetchMarket(marketId: number, eventId: number, leagueId: number, sportId: number): Market | null {
+export function fetchMarket(marketId: number, eventId: number, leagueId: number, sportId: number): Market | null {
    const database = getDb();
    const row = database.query<Market, string[]>(
       "SELECT * FROM markets WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ?"
