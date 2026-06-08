@@ -155,6 +155,19 @@ async function setUpcomingEvents() {
                      line_value: null,
                   });
                }
+               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-4`)) {
+                  addMarket({
+                     id: 4,
+                     event_id: dbEvent.id,
+                     league_id: league.id,
+                     sport_id: sport.id,
+                     last_odds: safeJSONStringify([0,0]),
+                     last_update,
+                     mkt_string: "BTTS",
+                     period_id: 1,
+                     line_value: null,
+                  });
+               }
             } else {
                if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-0`)) {
                   addMarket({

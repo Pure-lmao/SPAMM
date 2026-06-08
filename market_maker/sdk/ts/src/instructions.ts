@@ -113,6 +113,16 @@ export async function getInitProgramIx(feepayer: Address, mmProgram: Address): P
    };
 }
 
+export async function getWithdrawFromTokenAccountIx(admin: Address, mmProgram: Address, destinationAta: Address): Promise<Instruction> {
+   const [configPda] = await getMmConfigPda(mmProgram);
+   const tokenAccount = await getAta(configPda);
+   return {
+      programAddress: mmProgram,
+      data: new Uint8Array([250]),
+      accounts: [ws(admin), ro(configPda), rw(tokenAccount), ro(MINT_ID), ro(SPL_TOKEN_PROGRAM_ID), rw(destinationAta)],
+   };
+}
+
 /**
  * **`update_oracle_body`** — update the oracle body for a market.
  *
