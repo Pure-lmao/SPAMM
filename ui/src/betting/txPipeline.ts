@@ -38,7 +38,8 @@ const PUBLIC_HTTP_RPC: Record<string, string> = {
 export function resolveHttpRpcUrl(raw: string | undefined | null): string {
    const u = (raw ?? "").trim();
    if (u === "") {
-      return PUBLIC_HTTP_RPC.devnet;
+      // MAINNET: default when VITE_SOLANA_RPC_URL is unset — override via env or pass an explicit URL.
+      return PUBLIC_HTTP_RPC.mainnet;
    }
    if (u.startsWith("https://") || u.startsWith("http://")) {
       return u;
@@ -47,7 +48,8 @@ export function resolveHttpRpcUrl(raw: string | undefined | null): string {
    if (key in PUBLIC_HTTP_RPC) {
       return PUBLIC_HTTP_RPC[key]!;
    }
-   return PUBLIC_HTTP_RPC.devnet;
+   // MAINNET: unknown cluster moniker — falls back to public mainnet RPC.
+   return PUBLIC_HTTP_RPC.mainnet;
 }
 
 export function httpToWsRpcUrl(httpUrl: string): string {

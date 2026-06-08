@@ -159,6 +159,8 @@ export async function getInitProgramIx(admin: Address, recentSlot: bigint): Prom
       programAddress: ADDRESS_LOOKUP_TABLE_PROGRAM_ID,
       seeds: [addressEncoder.encode(configPda), u64Encoder.encode(recentSlot)],
    });
+   console.log("recentSlot", recentSlot);
+   console.log("lookupTablePda", lookupTablePda);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [ws(admin), rw(configPda), rw(mmListPda), 

@@ -35,6 +35,7 @@ export async function submitCreatePrediction(params: {
       instructions: [ix],
       signers: [params.walletSigner],
    });
+   // MAINNET: VITE_SOLANA_RPC_URL — see ui/.env.production
    const httpUrl = resolveHttpRpcUrl(import.meta.env.VITE_SOLANA_RPC_URL);
    const subs = createSolanaRpcSubscriptions(httpToWsRpcUrl(httpUrl));
    const sendAndConfirm = sendAndConfirmTransactionFactory({

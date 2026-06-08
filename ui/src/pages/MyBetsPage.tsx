@@ -142,7 +142,7 @@ function truncateAddressMiddle(addr: string, head = 4, tail = 4): string {
 }
 
 function solscanAddressUrl(address: string): string {
-   return `https://solscan.io/account/${encodeURIComponent(address)}?cluster=devnet`;
+   return `https://solscan.io/account/${encodeURIComponent(address)}`;
 }
 
 function BetBanner({
@@ -313,6 +313,7 @@ export function MyBetsPage(): ReactElement {
    const { cluster } = useCluster();
 
    const clusterRpcUrl = useMemo(() => {
+      // MAINNET: VITE_SOLANA_RPC_URL — see ui/.env.production
       const env = typeof import.meta.env.VITE_SOLANA_RPC_URL === "string" ? import.meta.env.VITE_SOLANA_RPC_URL.trim() : "";
       const fromCluster = cluster?.url?.trim() ?? "";
       const raw = fromCluster !== "" ? fromCluster : env;

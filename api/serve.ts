@@ -122,14 +122,14 @@ export class ApiServer {
       return Response.json({ error: "Missing query params. Use all=true or sport=" }, { status: 400 });
    }
 
-   private async handleGetSolAirdrop(params: URLSearchParams): Promise<Response> {
-      const user = params.get("user");
-      if (!user) {
-         return Response.json({ error: "Missing query params. Use user=" }, { status: 400 });
-      }
-      const result = await airdropUser(user);
-      return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
-   }
+   // private async handleGetSolAirdrop(params: URLSearchParams): Promise<Response> {
+   //    const user = params.get("user");
+   //    if (!user) {
+   //       return Response.json({ error: "Missing query params. Use user=" }, { status: 400 });
+   //    }
+   //    const result = await airdropUser(user);
+   //    return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
+   // }
 
    private async handleGetBetHistory(params: URLSearchParams): Promise<Response> {
       const user = params.get("user");
@@ -195,9 +195,9 @@ export class ApiServer {
       if (url.pathname === "/api/leagues") {
          return this.handleGetLeagues(params).then((r) => withCors(req, r));
       }
-      if (url.pathname === "/api/airdrop/sol") {
-         return this.handleGetSolAirdrop(params).then((r) => withCors(req, r));
-      }
+      // if (url.pathname === "/api/airdrop/sol") {
+      //    return this.handleGetSolAirdrop(params).then((r) => withCors(req, r));
+      // }
       if (url.pathname === "/api/betHistory") {
          return this.handleGetBetHistory(params).then((r) => withCors(req, r));
       }

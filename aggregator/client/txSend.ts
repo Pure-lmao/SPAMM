@@ -37,13 +37,13 @@ import { LOOKUP_TABLE_ID } from 'spamm-aggregator-sdk';
 
 /** HTTP RPC URL (env `SOLANA_RPC_URL` or devnet default). */
 export function resolveHttpRpcUrl(override?: string): string {
-   return override ?? 'https://api.devnet.solana.com';
+   return override ?? "https://"+process.env.CHAINSTACK_URL;
 }
 
 /** WebSocket URL for subscriptions (env `SOLANA_WS_URL`, or derived from HTTP). */
 export function resolveWsRpcUrl(httpUrl: string, override?: string): string {
-   if (override ?? process.env.SOLANA_WS_URL) {
-      return (override ?? process.env.SOLANA_WS_URL) as string;
+   if (override ?? process.env.CHAINSTACK_URL) {
+      return (override ?? "wss://"+process.env.CHAINSTACK_URL) as string;
    }
    if (httpUrl.startsWith('https://')) {
       return `wss://${httpUrl.slice('https://'.length)}`;

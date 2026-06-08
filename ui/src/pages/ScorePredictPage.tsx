@@ -75,6 +75,7 @@ export function ScorePredictPage(): ReactElement {
    const [copyTweetLabel, setCopyTweetLabel] = useState<'Copy' | 'Copied'>('Copy');
 
    const rpc = useMemo((): Rpc<SolanaRpcApi> => {
+      // MAINNET: VITE_SOLANA_RPC_URL — see ui/.env.production
       const url = resolveHttpRpcUrl(import.meta.env.VITE_SOLANA_RPC_URL ?? cluster?.url);
       return createSolanaRpc(url);
    }, [cluster?.url]);

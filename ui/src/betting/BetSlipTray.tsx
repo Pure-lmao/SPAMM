@@ -74,6 +74,7 @@ export function BetSlipTray(): ReactElement | null {
    const connectors = useWalletConnectors();
 
    const clusterRpcUrl = useMemo(() => {
+      // MAINNET: VITE_SOLANA_RPC_URL — see ui/.env.production
       const env = typeof import.meta.env.VITE_SOLANA_RPC_URL === "string" ? import.meta.env.VITE_SOLANA_RPC_URL.trim() : "";
       const fromCluster = cluster?.url?.trim() ?? "";
       const raw = fromCluster !== "" ? fromCluster : env;

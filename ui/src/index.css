@@ -1677,22 +1677,12 @@ h1 {
 
 .usdc-balance-panel__balance-grid {
    display: grid;
-   grid-template-columns: auto minmax(0, 1fr) minmax(3.25rem, max-content);
+   grid-template-columns: minmax(0, 1fr) minmax(3.25rem, max-content);
    column-gap: 0.45rem;
    row-gap: 0.28rem;
    width: 100%;
    font-size: 0.68rem;
    align-items: center;
-}
-
-.usdc-balance-panel__lead-slot {
-   justify-self: start;
-   min-width: 0;
-   min-height: 1em;
-}
-
-.usdc-balance-panel__balance-grid > .usdc-balance-panel__airdrop {
-   justify-self: start;
 }
 
 .usdc-balance-panel__amount-cell {
@@ -1734,38 +1724,6 @@ h1 {
 .usdc-balance-panel__amount-cell .usdc-balance-panel__err {
    font-size: inherit;
    font-weight: 700;
-}
-
-.usdc-balance-panel__airdrop {
-   font: inherit;
-   font-size: 0.72rem;
-   font-weight: 600;
-   padding: 0.3rem 0.55rem;
-   border-radius: 6px;
-   border: 1px solid var(--border);
-   background: var(--panel);
-   color: var(--text);
-   cursor: pointer;
-   white-space: nowrap;
-}
-
-.usdc-balance-panel__airdrop:hover:not(:disabled) {
-   border-color: var(--accent);
-   color: var(--accent);
-}
-
-.usdc-balance-panel__airdrop:disabled {
-   opacity: 0.55;
-   cursor: wait;
-}
-
-.usdc-balance-panel__airdrop-err {
-   font-size: 0.68rem;
-   color: var(--danger);
-   max-width: 12rem;
-   text-align: right;
-   overflow: hidden;
-   text-overflow: ellipsis;
 }
 
 .app-top-nav {
@@ -1964,11 +1922,6 @@ h1 {
    .app-header__wallet-panel .usdc-balance-panel__suffix,
    .app-header__wallet-panel .usdc-balance-panel__amount-dim {
       font-size: 0.68rem;
-   }
-
-   .app-header__wallet-panel .usdc-balance-panel__airdrop {
-      font-size: 0.72rem;
-      padding: 0.3rem 0.5rem;
    }
 
    .sport-title {
@@ -2525,36 +2478,6 @@ a.inline-nav-link:hover {
    font-size: 0.8rem;
    color: var(--muted);
    text-align: right;
-}
-
-.wallet-bar__menu-item--ephemeral {
-   display: flex;
-   flex-direction: column;
-   align-items: flex-end;
-   gap: 0.15rem;
-   padding-top: 0.45rem;
-   padding-bottom: 0.45rem;
-}
-
-.wallet-bar__menu-item--ephemeral .wallet-bar__menu-item__title {
-   font-size: 0.85rem;
-}
-
-.wallet-bar__menu-item--ephemeral:hover:not(:disabled) .wallet-bar__menu-subtitle {
-   color: var(--text);
-   opacity: 1;
-}
-
-.wallet-bar__menu-subtitle {
-   display: block;
-   margin: 0;
-   padding: 0;
-   font-size: 0.68rem;
-   line-height: 1.25;
-   font-weight: 400;
-   color: var(--muted);
-   text-align: right;
-   opacity: 0.85;
 }
 
 .wallet-bar__err {

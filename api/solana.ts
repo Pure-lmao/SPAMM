@@ -10,7 +10,7 @@ import { round } from "utils";
 import { ADMIN_SIGNER } from "../aggregator/client/admin";
 
 const SYSTEM_PROGRAM_ID: Address = address("11111111111111111111111111111111");
-const clients = createRpcClients({ httpUrl: process.env.SOLANA_RPC_URL });
+const clients = createRpcClients({ httpUrl: "https://"+process.env.CHAINSTACK_URL });
 
 /** System program: `Transfer` (instruction index 2) + `lamports` u64 LE. */
 function buildSystemTransferSolInstruction(from: Address, to: Address, lamports: bigint): Instruction {

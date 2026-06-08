@@ -1,7 +1,6 @@
-import { useLayoutEffect, useMemo, type ReactNode } from "react";
+import { useMemo, type ReactNode } from "react";
 import { AppProvider } from "@solana/connector/react";
 import { getDefaultConfig, getDefaultMobileConfig } from "@solana/connector/headless";
-import { registerSpammEphemeralDevnetWallet } from "../wallet/ephemeralDevnetWallet";
 
 function appOrigin(): string {
    if (typeof window !== "undefined" && window.location?.origin) {
@@ -11,15 +10,14 @@ function appOrigin(): string {
 }
 
 export function SolanaProviders({ children }: { children: ReactNode }) {
-   useLayoutEffect(() => registerSpammEphemeralDevnetWallet(), []);
-
    const connectorConfig = useMemo(() => {
+      // MAINNET: set VITE_SOLANA_RPC_URL in ui/.env (dev) or ui/.env.production (deploy).
       const custom = import.meta.env.VITE_SOLANA_RPC_URL?.trim();
       const clusters = custom
          ? [
               {
-                 id: "solana:devnet" as const,
-                 label: "Devnet (custom RPC)",
+                 id: "solana:mainnet" as const,
+                 label: "Mainnet",
                  url: custom,
               },
            ]
@@ -30,7 +28,8 @@ export function SolanaProviders({ children }: { children: ReactNode }) {
          appUrl: appOrigin(),
          autoConnect: true,
          enableMobile: true,
-         network: "devnet",
+         // MAINNET: connector default cluster (falls back to public mainnet RPC if VITE_SOLANA_RPC_URL is unset).
+         network: "mainnet",
          clusters,
       });
    }, []);
