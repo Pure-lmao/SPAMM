@@ -7,10 +7,7 @@ type InviteFriendsModalProps = Readonly<{
 }>;
 
 function buildInviteUrl(refCode: string): string {
-   const origin = typeof window !== "undefined" ? window.location.origin : "";
-   const path = typeof window !== "undefined" ? window.location.pathname : "/";
-   const base = `${origin}${path === "/" ? "/" : path}`;
-   const url = new URL(base, origin || "http://localhost");
+   const url = new URL("https://automaticsportsmarkets.com");
    url.searchParams.set("ref", refCode);
    return url.toString();
 }
