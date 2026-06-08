@@ -1,6 +1,6 @@
 import type { UiMarket } from "./types";
 
-export type EventMarketSectionKind = "money" | "tq" | "spread" | "asian" | "total" | "extra";
+export type EventMarketSectionKind = "money" | "tq" | "spread" | "asian" | "total" | "extra" | "btts";
 
 /** Section heading: wire `id` 1 with 1X2 → Full Time Result; `id` 0 with ML → Moneyline (see `fetch.ts` seed ids). */
 export function moneylineSectionTitle(rows: UiMarket[]): string {

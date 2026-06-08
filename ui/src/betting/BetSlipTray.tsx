@@ -21,12 +21,10 @@ import {
 import { useBetSlip } from "./BetSlipContext";
 import { nextBetId } from "./nextBetId";
 import { buildAndSignFillBetTx, buildAndSignFillParlayTx, runMmParlayQuoteFlow, runMmQuoteFlow } from "./quoteAndFill";
-import { apiSportToSdk, buildMarketId } from "./chainIds";
+import { apiSportToSdk, buildMarketId, SIM_FEE_PAYER_ADDRESS } from "./chainIds";
 import { pickBetSide } from "./outcomeSide";
 import { httpToWsRpcUrl, resolveHttpRpcUrl } from "./txPipeline";
 import { formatUsdcBaseUnitsForUi, parseUsdcAmountUiToBaseUnits } from "./usdc";
-
-const SIM_VIEWER_ADDRESS = address("BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW");
 
 type SendPhase = "idle" | "signing" | "confirming" | "done";
 
@@ -130,7 +128,7 @@ export function BetSlipTray(): ReactElement | null {
       setQuoteStatus("loading");
       setQuoteErr(null);
       setQuoteMmErrors([]);
-      const userAddress = isConnected && account != null ? address(account) : SIM_VIEWER_ADDRESS;
+      const userAddress = isConnected && account != null ? address(account) : SIM_FEE_PAYER_ADDRESS;
 
       try {
          if (selections.length === 1) {

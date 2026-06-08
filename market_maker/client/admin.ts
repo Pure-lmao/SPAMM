@@ -1,4 +1,4 @@
-import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda } from 'spamm-market-maker-sdk';
+import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda, getWithdrawFromTokenAccountIx } from 'spamm-market-maker-sdk';
 import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from 'utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
@@ -20,6 +20,14 @@ async function initProgram() {
    console.log(txResult);
 }
 // initProgram().catch(console.error);
+
+async function withdrawFromTokenAccount() {
+   const ix = await getWithdrawFromTokenAccountIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
+      "5ahzN9xmBBEyFfMxEUw4X6X6FYGDPfQPq8BSqCSKcULm" as Address);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// withdrawFromTokenAccount().catch(console.error);
 
 async function registerMM() {
    const ix = await getRegisterMmIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);

@@ -1,4 +1,8 @@
+import { address } from "@solana/kit";
 import { Sport, getEventGameState } from "spamm-aggregator-sdk";
+
+/** Funded pubkey — required as tx fee payer for read-only ix simulations. */
+export const SIM_FEE_PAYER_ADDRESS = address("BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW");
 
 export const EVENT_GAME_STATE_PG = getEventGameState("PG", 0, 0, 0, 0);
 

@@ -219,6 +219,7 @@ export function groupMarketsForEventPage(markets: UiMarket[]): EventMarketSectio
    const sorted = [...markets].sort(sortById);
    const money = sorted.filter(isMoneyCore);
    const tq = sorted.filter((m) => isSoccerToQualify(m, m.sport_id));
+   const btts = sorted.filter((m) => m.mkt_string === "BTTS");
    const ah = sorted.filter((m) => m.mkt_string.startsWith("AH "));
    const spreadRows = ah.filter((m) => handicapTableKind(m) === "spread").sort(sortById);
    const asianRows = ah.filter((m) => handicapTableKind(m) === "asian").sort(sortById);
@@ -227,6 +228,7 @@ export function groupMarketsForEventPage(markets: UiMarket[]): EventMarketSectio
       (m) =>
          !isMoneyCore(m) &&
          !isSoccerToQualify(m, m.sport_id) &&
+         m.mkt_string !== "BTTS" &&
          !m.mkt_string.startsWith("AH ") &&
          !m.mkt_string.startsWith("OU ")
    );
@@ -254,6 +256,9 @@ export function groupMarketsForEventPage(markets: UiMarket[]): EventMarketSectio
    }
    if (tq.length) {
       out.push({ kind: "tq", title: "To Qualify", rows: tq });
+   }
+   if (btts.length) {
+      out.push({ kind: "btts", title: "Both Teams To Score", rows: btts });
    }
    if (spreadRows.length) {
       out.push({ kind: "spread", title: "Spread", rows: spreadRows });

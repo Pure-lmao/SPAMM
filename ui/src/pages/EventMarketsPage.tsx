@@ -1,9 +1,13 @@
-import { useEffect, useState, Fragment, type ReactElement } from "react";
+import { useEffect, useMemo, useState, Fragment, type ReactElement } from "react";
+import { createSolanaRpc, type Rpc, type SolanaRpcApi } from "@solana/kit";
+import { useCluster } from "@solana/connector/react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { buildMarketLabel } from "../betting/marketLabel";
+import { refreshEventOddsFromProxy } from "../betting/marketQuotesProxy";
 import { pickBetSide } from "../betting/outcomeSide";
 import type { MarketRow } from "../betting/types";
 import { useBetSlip } from "../betting/BetSlipContext";
+import { resolveHttpRpcUrl } from "../betting/txPipeline";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
 import { fetchOneEvent } from "../markets/fetchEvent";
 import { marketPrimaryLabel, periodCaption, shouldShowPeriodBadge } from "../markets/eventMarketsDisplay";
@@ -41,8 +45,18 @@ export function EventMarketsPage(): ReactElement {
    const { state } = useLocation();
    const leagueName = (state as NavState | null)?.leagueName?.trim() ?? "";
    const { toggleSelection, isSelected } = useBetSlip();
+   const { cluster } = useCluster();
    const [ev, setEv] = useState<EventPayload | null>(null);
    const [err, setErr] = useState<string | null>(null);
+
+   const clusterRpcUrl = useMemo(() => {
+      const env = typeof import.meta.env.VITE_SOLANA_RPC_URL === "string" ? import.meta.env.VITE_SOLANA_RPC_URL.trim() : "";
+      const fromCluster = cluster?.url?.trim() ?? "";
+      const raw = fromCluster !== "" ? fromCluster : env;
+      return resolveHttpRpcUrl(raw !== "" ? raw : null);
+   }, [cluster?.url]);
+
+   const rpc = useMemo(() => createSolanaRpc(clusterRpcUrl) as Rpc<SolanaRpcApi>, [clusterRpcUrl]);
 
    useEffect(() => {
       const s = Number(sportId);
@@ -53,23 +67,29 @@ export function EventMarketsPage(): ReactElement {
          return;
       }
       let cancelled = false;
-      fetchOneEvent(s, l, e)
-         .then((row) => {
-            if (!cancelled) {
-               setEv(row);
-               setErr(null);
+      (async () => {
+         try {
+            const row = await fetchOneEvent(s, l, e);
+            if (cancelled) {
+               return;
             }
-         })
-         .catch((x: unknown) => {
+            setEv(row);
+            setErr(null);
+            const withLiveOdds = await refreshEventOddsFromProxy(rpc, row);
+            if (!cancelled) {
+               setEv(withLiveOdds);
+            }
+         } catch (x: unknown) {
             if (!cancelled) {
                setErr(x instanceof Error ? x.message : String(x));
                setEv(null);
             }
-         });
+         }
+      })();
       return () => {
          cancelled = true;
       };
-   }, [sportId, leagueId, eventId]);
+   }, [sportId, leagueId, eventId, rpc]);
 
    if (err != null) {
       return (
@@ -356,6 +376,48 @@ export function EventMarketsPage(): ReactElement {
                                           </button>
                                        )}
                                     </td>
+                                 </tr>
+                              );
+                           })}
+                        </tbody>
+                        </table>
+                     )}
+
+                     {g.kind === "btts" && (
+                        <table className="event-markets-table">
+                        <caption className="event-market-section-caption">{g.title}</caption>
+                        <thead>
+                           <tr>
+                              <th>{oddsTableLabels.yes}</th>
+                              <th>{oddsTableLabels.no}</th>
+                           </tr>
+                        </thead>
+                        <tbody>
+                           {g.rows.map((m) => {
+                              const values = parseOdds(m.last_odds);
+                              const column = inferBetColumn(m.mkt_string);
+                              return (
+                                 <tr key={`${m.id}-${m.mkt_string}`}>
+                                    {[0, 1].map((i) => {
+                                       const v = values[i] ?? 0;
+                                       return (
+                                          <td key={i} className="event-markets-td-odds">
+                                             {v === 0 ? (
+                                                <button type="button" className="odd-btn odd-btn--empty" disabled>
+                                                   —
+                                                </button>
+                                             ) : (
+                                                <button
+                                                   type="button"
+                                                   className={oddBtnClass(m, column, i)}
+                                                   onClick={() => toggleSheet(m, column, i, v)}
+                                                >
+                                                   <span className="odds-value">{fmtOdd(v)}</span>
+                                                </button>
+                                             )}
+                                          </td>
+                                       );
+                                    })}
                                  </tr>
                               );
                            })}

@@ -13,4 +13,6 @@ export const oddsTableLabels = {
    mainMl: "ML",
    spread: "Spread",
    total: "Total",
+   yes: "Yes",
+   no: "No",
 } as const;

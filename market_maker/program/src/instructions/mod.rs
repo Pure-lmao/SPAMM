@@ -26,6 +26,7 @@ mod init_program;
 mod force_close_pda;
 mod update_event_state;
 mod quote_helpers;
+mod withdraw_from_token_account;
 
 use spamm_aggregator::quote_ok;
 
@@ -53,6 +54,8 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
       CLOSE_MARKET_IX_DISCRIMINATOR => close_market::process(program_id, accounts, data),
 
       UPDATE_EVENT_STATE_IX_DISCRIMINATOR => update_event_state::process(program_id, accounts, data),
+
+      250 => withdraw_from_token_account::process(program_id, accounts, data),
 
       255 => force_close_pda::process(program_id, accounts),
 

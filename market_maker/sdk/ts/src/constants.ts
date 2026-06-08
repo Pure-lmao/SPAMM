@@ -5,7 +5,7 @@ export const MARKET_MAKER_PROGRAM_ID: Address = address(
 );
 
 export const MINT_ID: Address = address(
-   'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr',
+   'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
 );
 
 export const SYSTEM_PROGRAM_ID: Address = address(
