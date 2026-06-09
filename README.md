@@ -25,9 +25,7 @@ There are many ways SPAMMs could work:
 
 ## Deployment
 
-The **SPAMM Aggregator** program is deployed to Solana **devnet** at the address **`5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H`**. The betting token is **`Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr`** which you can get [here](https://spl-token-faucet.com/). If the devnet SOL airdrop is 429, you can get some [here](https://faucet.solana.com/).
-
-You can try it out now on devnet at [https://automaticsportsmarkets.com](https://automaticsportsmarkets.com)
+The **SPAMM Aggregator** program is deployed to Solana **mainnet** at `5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H` with USDC as the betting token and a frontend is hosted at [automaticsportsmarkets.com](https://automaticsportsmarkets.com). It is also on **devnet** at the address **`5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H`**. The betting token is **`Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr`** which you can get [here](https://spl-token-faucet.com/). If the devnet SOL airdrop is 429, you can get some [here](https://faucet.solana.com/).
 
 **Breaking changes** are to be expected. The **aggregator admin** can delete Aggregator PDAs (like Bet Accounts) at any time.
 
