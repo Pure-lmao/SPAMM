@@ -4,7 +4,7 @@ import { address, type Address } from '@solana/kit';
 export const SCORE_PREDICT_PROGRAM_ID_PLACEHOLDER =
    '11111111111111111111111111111111' as const;
 
-export const SCORE_PREDICT_PROGRAM_ID: Address = address("2auNkPPMyLu84bSqvNshqz2P2PtwYDa2vd4cCUEqx6zs");
+export const SCORE_PREDICT_PROGRAM_ID: Address = address("WcPREDR1bNAkqn61cvoFLLMf3HdXiRmvMM86PTAvmsW");
 
 /** False while {@link SCORE_PREDICT_PROGRAM_ID} is still the deploy placeholder. */
 export function isScorePredictProgramDeployed(): boolean {
@@ -13,7 +13,7 @@ export function isScorePredictProgramDeployed(): boolean {
 
 /** Placeholder admin — must match on-chain `ADMIN` after deploy. */
 export const SCORE_PREDICT_ADMIN: Address = address(
-   '3z6QBMEUjJubCwbKUsMKFnKnf1twyc5bZ9gaWHNAn1nP',
+   '2b54nXub6qSwpKc5wHM2jjen5mxi22EiQg6yTB2JwGu6',
 );
 
 export const SYSTEM_PROGRAM_ID: Address = address(

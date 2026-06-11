@@ -32,6 +32,7 @@ import {
 } from '../scorePredict/tweetIntent';
 import { verifyTweetMatchesExpected } from '../scorePredict/verifyTweet';
 import { submitCreatePrediction } from '../scorePredict/createPredictionTx';
+import { parseEventTitleTeams } from '../scorePredict/parseEventTitleTeams';
 import type { ApiPredictionContest } from '../scorePredict/types';
 
 function msUntil(deadline: number): string {
@@ -113,6 +114,11 @@ export function ScorePredictPage(): ReactElement {
    const displayScore = useMemo(
       () => scoreLabel(kind, homeScore, awayScore, dailyTotal),
       [kind, homeScore, awayScore, dailyTotal],
+   );
+
+   const teamLabels = useMemo(
+      () => (kind === 'match_score' && contest ? parseEventTitleTeams(contest.title) : null),
+      [kind, contest],
    );
 
    useEffect(() => {
@@ -398,7 +404,7 @@ export function ScorePredictPage(): ReactElement {
                      <div className="score-predict-scoreboard">
                         <div className="score-predict-score-field">
                            <label className="bet-modal-field-label" htmlFor="sp-home">
-                              Home
+                              {teamLabels?.home ?? 'Home'}
                            </label>
                            <input
                               id="sp-home"
@@ -415,7 +421,7 @@ export function ScorePredictPage(): ReactElement {
                         </span>
                         <div className="score-predict-score-field">
                            <label className="bet-modal-field-label" htmlFor="sp-away">
-                              Away
+                              {teamLabels?.away ?? 'Away'}
                            </label>
                            <input
                               id="sp-away"

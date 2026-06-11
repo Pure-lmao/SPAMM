@@ -75,7 +75,7 @@ export async function runMmQuoteFlow(params: {
          params.userAddress,
          mmPrograms,
       );
-      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress, false);
+      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress, true);
       if (!returnData || returnData.length === 0) {
          return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors };
       }
@@ -125,7 +125,7 @@ export async function buildAndSignFillBetTx(params: {
       feePayer: params.walletSigner,
       instructions: [ix],
       signers: [params.walletSigner],
-      useALT: false,
+      useALT: true,
    });
 }
 
@@ -190,6 +190,6 @@ export async function buildAndSignFillParlayTx(params: {
       feePayer: params.walletSigner,
       instructions: [ix],
       signers: [params.walletSigner],
-      useALT: false,
+      useALT: true,
    });
 }
