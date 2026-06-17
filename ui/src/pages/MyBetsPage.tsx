@@ -487,9 +487,10 @@ export function MyBetsPage(): ReactElement {
          if (unsigned.length === 0) {
             return;
          }
-         const signedBatch = await walletSigner.modifyAndSignTransactions(unsigned);
-         for (let chunkIdx = 0; chunkIdx < signedBatch.length; chunkIdx++) {
-            const signed = signedBatch[chunkIdx]!;
+         for (let chunkIdx = 0; chunkIdx < unsigned.length; chunkIdx++) {
+            const [signed] = await walletSigner.modifyAndSignTransactions([
+               unsigned[chunkIdx]!,
+            ]);
             assertIsTransactionWithBlockhashLifetime(signed);
             await sendAndConfirm(signed as never, { commitment: "confirmed" });
             const from = chunkIdx * MAX_SETTLE_IX_PER_TX;
