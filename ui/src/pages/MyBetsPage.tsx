@@ -1,6 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } from "react";
 import {
-   assertIsTransactionWithBlockhashLifetime,
    createSolanaRpc,
    createSolanaRpcSubscriptions,
    sendAndConfirmTransactionFactory,
@@ -10,7 +9,7 @@ import {
 } from "@solana/kit";
 import { useCluster, useKitTransactionSigner, useWallet } from "@solana/connector/react";
 import { BetResult, getSettleBetIx, getSettleParlayIx, ODDS_SCALE, type BetAccountData } from "spamm-aggregator-sdk";
-import { compileUnsignedV0TransactionChunks, httpToWsRpcUrl, resolveHttpRpcUrl } from "../betting/txPipeline";
+import { buildSignV0Transaction, httpToWsRpcUrl, resolveHttpRpcUrl } from "../betting/txPipeline";
 import { formatUsdcBaseUnitsForUi } from "../betting/usdc";
 import {
    fetchClosedBetHistory,
@@ -479,19 +478,14 @@ export function MyBetsPage(): ReactElement {
          for (let i = 0; i < instructionList.length; i += MAX_SETTLE_IX_PER_TX) {
             instructionChunks.push(instructionList.slice(i, i + MAX_SETTLE_IX_PER_TX));
          }
-         const unsigned = await compileUnsignedV0TransactionChunks(rpc, {
-            feePayer: walletSigner,
-            instructionChunks,
-            useALT: true,
-         });
-         if (unsigned.length === 0) {
-            return;
-         }
-         for (let chunkIdx = 0; chunkIdx < unsigned.length; chunkIdx++) {
-            const [signed] = await walletSigner.modifyAndSignTransactions([
-               unsigned[chunkIdx]!,
-            ]);
-            assertIsTransactionWithBlockhashLifetime(signed);
+         for (let chunkIdx = 0; chunkIdx < instructionChunks.length; chunkIdx++) {
+            const chunk = instructionChunks[chunkIdx]!;
+            const signed = await buildSignV0Transaction(rpc, {
+               feePayer: walletSigner,
+               instructions: chunk,
+               signers: [walletSigner],
+               useALT: true,
+            });
             await sendAndConfirm(signed as never, { commitment: "confirmed" });
             const from = chunkIdx * MAX_SETTLE_IX_PER_TX;
             const settledAddresses = new Set(
