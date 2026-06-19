@@ -54,38 +54,44 @@ const marketIdEncoder = getMarketIdEncoder();
 const MAX_GET_PROGRAM_ACCOUNTS_FILTERS = 4;
 
 /**
- * Byte offsets for on-chain `BetAccountDataZc` (`account_bet.rs` `to_zc`).
- * `1 + 1 + 32 + 32 + 8 + 23 + 1 + 8 + 8 + 2 + 8 + 1 = 125` bytes before fillers; `BET_RESULT_OFFSET` in Rust matches `result` below.
+ * Byte offsets for on-chain `BetAccountDataZc` (`account_bet.rs` `to_zc`, zeropod alignment-1 packed).
+ * `1 + 1 + 32 + 32 + 8 + 23 + 1 + 8 + 8 + 4 + 2 + 8 + 1 = 129` bytes before fillers;
+ * `result` (128) matches Rust `BET_RESULT_OFFSET`.
  */
 export const BET_ACCOUNT_WIRE_OFFSETS = {
-   discriminator: 0,
-   bump: 1,
-   owner: 2,
-   feepayer: 34,
-   betId: 66,
-   marketId: 74,
-   side: 97,
-   amount: 98,
-   payout: 106,
-   eventStateSequence: 114,
-   eventGameState: 116,
-   result: 124,
-   filler0: 125,
+   discriminator: 0, // u8, 1 byte
+   bump: 1, // u8, 1 byte
+   owner: 2, // Pubkey, 32 bytes
+   feepayer: 34, // Pubkey, 32 bytes
+   betId: 66, // u64, 8 bytes
+   marketId: 74, // MarketId, 23 bytes
+   side: 97, // u8, 1 byte
+   amount: 98, // u64, 8 bytes
+   payout: 106, // u64, 8 bytes
+   timestamp: 114, // u32, 4 bytes
+   eventStateSequence: 118, // u16, 2 bytes
+   eventGameState: 120, // EventGameState, 8 bytes
+   result: 128, // u8, 1 byte
+   filler0: 129, // BetFiller
 } as const;
 
-/** Byte offsets for on-chain `ParlayBetAccountData` (`account_parlay_bet.rs`). */
+/**
+ * Byte offsets for on-chain `ParlayBetAccountData` (`account_parlay_bet.rs`, zeropod alignment-1 packed).
+ * `result` (126) matches Rust `PARLAY_BET_RESULT_OFFSET`.
+ */
 export const PARLAY_BET_ACCOUNT_WIRE_OFFSETS = {
-   discriminator: 0,
-   bump: 1,
-   owner: 2,
-   feepayer: 34,
-   betId: 66,
-   amount: 74,
-   payout: 82,
-   fillerAddress: 90,
-   result: 122,
-   numLegs: 123,
-   legs: 124,
+   discriminator: 0, // u8, 1 byte
+   bump: 1, // u8, 1 byte
+   owner: 2, // Pubkey, 32 bytes
+   feepayer: 34, // Pubkey, 32 bytes
+   betId: 66, // u64, 8 bytes
+   amount: 74, // u64, 8 bytes
+   payout: 82, // u64, 8 bytes
+   timestamp: 90, // u32, 4 bytes
+   fillerAddress: 94, // Pubkey, 32 bytes
+   result: 126, // u8, 1 byte
+   numLegs: 127, // u8, 1 byte
+   legs: 128, // ParlayLegTable
 } as const;
 
 export type ProgramAccountRaw = Readonly<{
