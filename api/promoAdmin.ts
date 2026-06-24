@@ -153,15 +153,6 @@ export function settlePromotionalMarketAdmin(
    return updated;
 }
 
-function promoMatchesBet(promo: PromotionalMarket, sport: number, league: number, eventId: number, period: number, mkt: number): boolean {
-   return (
-      mkt === PROMO_MKT_ID &&
-      sport === promo.sport_id &&
-      league === promo.league_id &&
-      eventId === promo.event_id &&
-      period === promo.period_id
-   );
-}
 
 /** Grade pending single bets for one settled promo. Not part of normal `gradeBets()`. */
 export async function gradePromoBets(promoId: number): Promise<number> {

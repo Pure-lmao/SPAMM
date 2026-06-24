@@ -21,6 +21,7 @@ import {
    promotionalMarketToJson,
 } from "../localDb";
 import { addEventLineMarket, listUpcomingEvents, type MarketLineKind } from "../marketAdmin";
+import { gradePromoBets, settlePromotionalMarketAdmin } from "../promoAdmin";
 import { safeJSONStringify } from "../utils";
 
 const EVENT_LIST_LIMIT = 40;
@@ -188,9 +189,7 @@ async function cmdSettle(): Promise<void> {
    if (id == null || (result !== "yes" && result !== "no")) {
       throw new Error("Required: --id --result yes|no");
    }
-   const { settlePromotionalMarketAdmin } = await import("../promoAdmin");
    const promo = settlePromotionalMarketAdmin(id, result === "yes", opt("--notes") ?? null);
-   const { gradePromoBets } = await import("../promoAdmin");
    const graded = await gradePromoBets(id);
    printJson({
       promo: promotionalMarketToJson(promo),
