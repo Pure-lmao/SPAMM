@@ -8,7 +8,7 @@ import {
    type SolanaRpcApi,
 } from "@solana/kit";
 import { useCluster, useKitTransactionSigner, useWallet } from "@solana/connector/react";
-import { BetResult, getSettleBetIx, getSettleParlayIx, ODDS_SCALE, type BetAccountData } from "spamm-aggregator-sdk";
+import { BetResult, getSettleBetIx, getSettleParlayIx, ODDS_SCALE, type BetAccountData, type MarketId } from "spamm-aggregator-sdk";
 import { buildSignV0Transaction, httpToWsRpcUrl, resolveHttpRpcUrl } from "../betting/txPipeline";
 import { formatUsdcBaseUnitsForUi } from "../betting/usdc";
 import {
@@ -19,8 +19,16 @@ import {
    type WalletParlayLeg,
 } from "../markets/fetchBetHistory";
 import { fetchOneEvent } from "../markets/fetchEvent";
-import { betMarketDisplayLines, eventLookupKey } from "../markets/myBetsMarketDisplay";
-import type { UiGroupedEvent } from "../markets/types";
+import { fetchPromosForBetLookup } from "../markets/fetchPromos";
+import {
+   betMarketDisplayLines,
+   eventLookupKey,
+   indexPromotionalMarkets,
+   isPromoMarketChain,
+   promoMarketLookupKey,
+   type BetMarketDisplayLines,
+} from "../markets/myBetsMarketDisplay";
+import type { UiGroupedEvent, UiPromotionalMarket } from "../markets/types";
 
 type LoadState = "idle" | "loading" | "ok" | "err";
 
@@ -211,27 +219,56 @@ function BetStakeGrid({
    );
 }
 
+function walletBetMarketIds(row: WalletBetRow): readonly MarketId[] {
+   if (row.kind === "single") {
+      return [row.data.marketId];
+   }
+   return row.legs.map((leg) => leg.marketId);
+}
+
+function BetMarketBody({ lines }: { lines: BetMarketDisplayLines }): ReactElement {
+   return (
+      <>
+         <p className="my-bets-card__event-line">
+            <span className="my-bets-card__event-title">{lines.eventTitle}</span>
+            {lines.liveSuffix !== "" && <span className="my-bets-card__live-mark">{lines.liveSuffix}</span>}
+         </p>
+         {lines.promoTitle != null ? (
+            <div className="my-bets-card__promo">
+               <p className="my-bets-card__promo-title">{lines.promoTitle}</p>
+               {lines.promoDescription != null && (
+                  <p className="my-bets-card__promo-description">{lines.promoDescription}</p>
+               )}
+               <p className="my-bets-card__market-detail my-bets-card__market-detail--pick">{lines.pick}</p>
+            </div>
+         ) : (
+            <p className="my-bets-card__market-detail">{lines.detailLine}</p>
+         )}
+      </>
+   );
+}
+
 function BetCard({
    betPda,
    b,
    eventsByKey,
+   promosByMarketKey,
 }: {
    betPda: string;
    b: BetAccountData;
    eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement {
    const ek = eventLookupKey(b.marketId);
-   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side);
+   const promoKey = isPromoMarketChain(b.marketId) ? promoMarketLookupKey(b.marketId) : null;
+   const promo = promoKey != null ? (promosByMarketKey.get(promoKey) ?? null) : null;
+   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side, promo);
 
    return (
       <li className="my-bets-card">
          <BetBanner betPda={betPda} betId={b.betId} result={b.result} />
          <div className="my-bets-card__body">
-            <p className="my-bets-card__event-line">
-               <span className="my-bets-card__event-title">{lines.eventTitle}</span>
-               {lines.liveSuffix !== "" && <span className="my-bets-card__live-mark">{lines.liveSuffix}</span>}
-            </p>
-            <p className="my-bets-card__market-detail">{lines.detailLine}</p>
+            <BetMarketBody lines={lines} />
             <BetStakeGrid amount={b.amount} payout={b.payout} result={b.result} />
          </div>
       </li>
@@ -242,24 +279,24 @@ function ParlayLegRow({
    leg,
    legIndex,
    eventsByKey,
+   promosByMarketKey,
 }: {
    leg: WalletParlayLeg;
    legIndex: number;
    eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement {
    const ek = eventLookupKey(leg.marketId);
-   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, leg.marketId, leg.side);
+   const promoKey = isPromoMarketChain(leg.marketId) ? promoMarketLookupKey(leg.marketId) : null;
+   const promo = promoKey != null ? (promosByMarketKey.get(promoKey) ?? null) : null;
+   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, leg.marketId, leg.side, promo);
    return (
       <li className="my-bets-card__parlay-leg">
          <span className="my-bets-card__parlay-leg-num" aria-hidden>
             {legIndex + 1}
          </span>
          <div className="my-bets-card__parlay-leg-text">
-            <p className="my-bets-card__event-line">
-               <span className="my-bets-card__event-title">{lines.eventTitle}</span>
-               {lines.liveSuffix !== "" && <span className="my-bets-card__live-mark">{lines.liveSuffix}</span>}
-            </p>
-            <p className="my-bets-card__market-detail">{lines.detailLine}</p>
+            <BetMarketBody lines={lines} />
          </div>
       </li>
    );
@@ -269,10 +306,12 @@ function ParlayBetCard({
    betPda,
    row,
    eventsByKey,
+   promosByMarketKey,
 }: {
    betPda: string;
    row: Extract<WalletBetRow, { kind: "parlay" }>;
    eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement {
    const legCount = row.legs.length;
    return (
@@ -284,7 +323,13 @@ function ParlayBetCard({
             </p>
             <ol className="my-bets-card__parlay-legs">
                {row.legs.map((leg, i) => (
-                  <ParlayLegRow key={`${betPda}-${i}`} leg={leg} legIndex={i} eventsByKey={eventsByKey} />
+                  <ParlayLegRow
+                     key={`${betPda}-${i}`}
+                     leg={leg}
+                     legIndex={i}
+                     eventsByKey={eventsByKey}
+                     promosByMarketKey={promosByMarketKey}
+                  />
                ))}
             </ol>
             <BetStakeGrid amount={row.amount} payout={row.payout} result={row.result} />
@@ -296,14 +341,18 @@ function ParlayBetCard({
 function WalletBetCard({
    row,
    eventsByKey,
+   promosByMarketKey,
 }: {
    row: WalletBetRow;
    eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement {
    if (row.kind === "parlay") {
-      return <ParlayBetCard betPda={row.address} row={row} eventsByKey={eventsByKey} />;
+      return (
+         <ParlayBetCard betPda={row.address} row={row} eventsByKey={eventsByKey} promosByMarketKey={promosByMarketKey} />
+      );
    }
-   return <BetCard betPda={row.address} b={row.data} eventsByKey={eventsByKey} />;
+   return <BetCard betPda={row.address} b={row.data} eventsByKey={eventsByKey} promosByMarketKey={promosByMarketKey} />;
 }
 
 export function MyBetsPage(): ReactElement {
@@ -333,6 +382,9 @@ export function MyBetsPage(): ReactElement {
    const [closedRows, setClosedRows] = useState<readonly WalletBetRow[]>([]);
    const [betTab, setBetTab] = useState<MyBetsTab>("open");
    const [eventsByKey, setEventsByKey] = useState<ReadonlyMap<string, UiGroupedEvent | null>>(() => new Map());
+   const [promosByMarketKey, setPromosByMarketKey] = useState<ReadonlyMap<string, UiPromotionalMarket>>(
+      () => new Map(),
+   );
    const [claimBusy, setClaimBusy] = useState(false);
    const [claimErr, setClaimErr] = useState<string | null>(null);
    const claimLockRef = useRef(false);
@@ -371,6 +423,17 @@ export function MyBetsPage(): ReactElement {
       return keys;
    }, [betTab, closedRows, rows]);
 
+   const hasPromoBets = useMemo(() => {
+      for (const row of [...rows, ...closedRows]) {
+         for (const marketId of walletBetMarketIds(row)) {
+            if (isPromoMarketChain(marketId)) {
+               return true;
+            }
+         }
+      }
+      return false;
+   }, [closedRows, rows]);
+
    useEffect(() => {
       if (eventKeys.size === 0) {
          setEventsByKey(new Map());
@@ -396,6 +459,29 @@ export function MyBetsPage(): ReactElement {
          cancelled = true;
       };
    }, [eventKeys]);
+
+   useEffect(() => {
+      if (!hasPromoBets) {
+         setPromosByMarketKey(new Map());
+         return;
+      }
+      let cancelled = false;
+      void (async () => {
+         try {
+            const promos = await fetchPromosForBetLookup();
+            if (!cancelled) {
+               setPromosByMarketKey(indexPromotionalMarkets(promos));
+            }
+         } catch {
+            if (!cancelled) {
+               setPromosByMarketKey(new Map());
+            }
+         }
+      })();
+      return () => {
+         cancelled = true;
+      };
+   }, [hasPromoBets]);
 
    const loadOpen = useCallback(async () => {
       if (!isConnected || !account) {
@@ -583,7 +669,7 @@ export function MyBetsPage(): ReactElement {
             {betTab === "open" && openCount > 0 && (
                <ul className="my-bets-list">
                   {rows.map((row) => (
-                     <WalletBetCard key={row.address} row={row} eventsByKey={eventsByKey} />
+                     <WalletBetCard key={row.address} row={row} eventsByKey={eventsByKey} promosByMarketKey={promosByMarketKey} />
                   ))}
                </ul>
             )}
@@ -591,7 +677,7 @@ export function MyBetsPage(): ReactElement {
             {betTab === "closed" && closedCount > 0 && (
                <ul className="my-bets-list">
                   {closedRows.map((row) => (
-                     <WalletBetCard key={row.address} row={row} eventsByKey={eventsByKey} />
+                     <WalletBetCard key={row.address} row={row} eventsByKey={eventsByKey} promosByMarketKey={promosByMarketKey} />
                   ))}
                </ul>
             )}

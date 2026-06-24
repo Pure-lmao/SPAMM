@@ -4,7 +4,9 @@
   "type": "module",
   "scripts": {
     "start": "bun run index.ts",
-    "discord": "bun run bot/index.ts"
+    "api": "bun run index.ts",
+    "discord": "bun run bot/index.ts",
+    "promo": "bun run scripts/promo-cli.ts"
   },
   "dependencies": {
     "discord.js": "^14.18.0",

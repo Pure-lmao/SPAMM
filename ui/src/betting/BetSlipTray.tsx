@@ -16,6 +16,8 @@ import {
    oddsDecimalLabel,
    parlayLegFromSelection,
    parseMinOddsScaled,
+   quoteErrorMessageForUi,
+   quoteErrorsSummaryForUi,
    solscanTxUrl,
 } from "./betSlipUtils";
 import { useBetSlip } from "./BetSlipContext";
@@ -25,6 +27,7 @@ import { apiSportToSdk, buildMarketId, SIM_FEE_PAYER_ADDRESS } from "./chainIds"
 import { pickBetSide } from "./outcomeSide";
 import { httpToWsRpcUrl, resolveHttpRpcUrl } from "./txPipeline";
 import { formatUsdcBaseUnitsForUi, parseUsdcAmountUiToBaseUnits } from "./usdc";
+import { AppBrand } from "../layout/AppBrand";
 
 type SendPhase = "idle" | "signing" | "confirming" | "done";
 
@@ -139,11 +142,12 @@ export function BetSlipTray(): ReactElement | null {
             const q = await runMmQuoteFlow({ rpc, userAddress, marketId, side, amount: amt });
             if (q.topMms.length === 0) {
                setQuoteStatus("err");
-               const hint =
-                  q.errors.length > 0
-                     ? q.errors.slice(0, 3).join(" · ")
-                     : "No MM returned a quote (wrong cluster, missing market, or amount too large).";
-               setQuoteErr(hint);
+               setQuoteErr(
+                  quoteErrorsSummaryForUi(
+                     q.errors,
+                     "No MM returned a quote (wrong cluster, missing market, or amount too large).",
+                  ),
+               );
                setQuoteRows([]);
                setQuoteMmErrors(q.errors);
                setMinOdds("");
@@ -160,11 +164,9 @@ export function BetSlipTray(): ReactElement | null {
             const q = await runMmParlayQuoteFlow({ rpc, userAddress, legs, amount: amt });
             if (q.bestMm === null) {
                setQuoteStatus("err");
-               const hint =
-                  q.errors.length > 0
-                     ? q.errors.slice(0, 3).join(" · ")
-                     : "No MM returned a parlay quote for these legs.";
-               setQuoteErr(hint);
+               setQuoteErr(
+                  quoteErrorsSummaryForUi(q.errors, "No MM returned a parlay quote for these legs."),
+               );
                setQuoteRows([]);
                setQuoteMmErrors(q.errors);
                setBestParlayMm(null);
@@ -180,7 +182,7 @@ export function BetSlipTray(): ReactElement | null {
          }
       } catch (e) {
          setQuoteStatus("err");
-         setQuoteErr(e instanceof Error ? e.message : String(e));
+         setQuoteErr(quoteErrorMessageForUi(e instanceof Error ? e.message : String(e)));
          setQuoteRows([]);
          setQuoteMmErrors([]);
          setBestParlayMm(null);
@@ -543,32 +545,36 @@ export function BetSlipTray(): ReactElement | null {
                      </button>
                   )}
 
-                  <div className="bet-slip-tray__fields">
-                  <label className="bet-modal-field">
-                     <span className="bet-modal-field-label">Amount (USDC)</span>
-                     <input
-                        className="bet-modal-input"
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={amount}
-                        onChange={(e) => setAmount(e.target.value)}
-                        placeholder="e.g. 10"
-                     />
-                  </label>
-                  <label className="bet-modal-field">
-                     <span className="bet-modal-field-label">Min. odds (decimal)</span>
-                     <input
-                        className="bet-modal-input"
-                        type="text"
-                        inputMode="decimal"
-                        autoComplete="off"
-                        value={minOdds}
-                        onChange={(e) => setMinOdds(e.target.value)}
-                        placeholder="Fetching quotes…"
-                     />
-                  </label>
-                  </div>
+                  {sendPhase === "done" ? (
+                     <AppBrand asLink={false} className="bet-slip-tray__brand" />
+                  ) : (
+                     <div className="bet-slip-tray__fields">
+                        <label className="bet-modal-field">
+                           <span className="bet-modal-field-label">Amount (USDC)</span>
+                           <input
+                              className="bet-modal-input"
+                              type="text"
+                              inputMode="decimal"
+                              autoComplete="off"
+                              value={amount}
+                              onChange={(e) => setAmount(e.target.value)}
+                              placeholder="e.g. 10"
+                           />
+                        </label>
+                        <label className="bet-modal-field">
+                           <span className="bet-modal-field-label">Min. odds (decimal)</span>
+                           <input
+                              className="bet-modal-input"
+                              type="text"
+                              inputMode="decimal"
+                              autoComplete="off"
+                              value={minOdds}
+                              onChange={(e) => setMinOdds(e.target.value)}
+                              placeholder="Fetching quotes…"
+                           />
+                        </label>
+                     </div>
+                  )}
                </div>
 
                {sendErr != null && <p className="bet-modal-err">{sendErr}</p>}
@@ -643,7 +649,8 @@ export function BetSlipTray(): ReactElement | null {
                   )}
                   {quoteStatus === "ok" && quoteMmErrors.length > 0 && (
                      <p className="bet-modal-muted bet-slip-tray__mm-errors">
-                        Some MMs did not quote: {quoteMmErrors.slice(0, 2).join(" · ")}
+                        Some MMs did not quote:{" "}
+                        {quoteMmErrors.map(quoteErrorMessageForUi).slice(0, 2).join(" · ")}
                         {quoteMmErrors.length > 2 ? " …" : ""}
                      </p>
                   )}

@@ -281,6 +281,9 @@ export function numSidesForMkt(mkt: number): number | undefined {
    if (mkt === 7) {
       return 9;
    }
+   if (mkt === 9) {
+      return 1;
+   }
    if (mkt >= 10 && mkt <= 50) {
       return 2;
    }

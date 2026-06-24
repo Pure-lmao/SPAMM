@@ -10,6 +10,8 @@ import { useBetSlip } from "../betting/BetSlipContext";
 import { resolveHttpRpcUrl } from "../betting/txPipeline";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
 import { fetchOneEvent } from "../markets/fetchEvent";
+import { fetchPromosForEvent } from "../markets/fetchPromos";
+import { PromoMarketsSection } from "../markets/PromoMarketsSection";
 import { marketPrimaryLabel, periodCaption, shouldShowPeriodBadge } from "../markets/eventMarketsDisplay";
 import { oddsTableLabels } from "../markets/oddsTableLabels";
 import {
@@ -21,7 +23,7 @@ import {
 } from "../markets/oddsFormat";
 import { lineRawForSpreadOrTotal, spreadLineDisplayForOutcome } from "../markets/lineFromMarket";
 import { groupMarketsForEventPage, inferBetColumn } from "../markets/selectors";
-import type { UiGroupedEvent, UiMarket } from "../markets/types";
+import type { UiGroupedEvent, UiMarket, UiPromotionalMarket } from "../markets/types";
 
 type EventPayload = UiGroupedEvent;
 
@@ -47,6 +49,7 @@ export function EventMarketsPage(): ReactElement {
    const { toggleSelection, isSelected } = useBetSlip();
    const { cluster } = useCluster();
    const [ev, setEv] = useState<EventPayload | null>(null);
+   const [promos, setPromos] = useState<UiPromotionalMarket[]>([]);
    const [err, setErr] = useState<string | null>(null);
 
    const clusterRpcUrl = useMemo(() => {
@@ -75,9 +78,13 @@ export function EventMarketsPage(): ReactElement {
             }
             setEv(row);
             setErr(null);
-            const withLiveOdds = await refreshEventOddsFromProxy(rpc, row);
+            const [withLiveOdds, eventPromos] = await Promise.all([
+               refreshEventOddsFromProxy(rpc, row),
+               fetchPromosForEvent(s, l, e).catch(() => [] as UiPromotionalMarket[]),
+            ]);
             if (!cancelled) {
                setEv(withLiveOdds);
+               setPromos(eventPromos);
             }
          } catch (x: unknown) {
             if (!cancelled) {
@@ -111,7 +118,7 @@ export function EventMarketsPage(): ReactElement {
    }
 
    const mkts = ev.markets ?? [];
-   const groups = groupMarketsForEventPage(mkts);
+   const groups = groupMarketsForEventPage(mkts).filter((g) => g.kind !== "promo");
    const sid = ev.sport_id;
    const homeHead = ev.home_name.trim() !== "" ? ev.home_name.trim() : oddsTableLabels.home;
    const awayHead = ev.away_name.trim() !== "" ? ev.away_name.trim() : oddsTableLabels.away;
@@ -163,6 +170,11 @@ export function EventMarketsPage(): ReactElement {
                   <time dateTime={new Date(ev.start_time).toISOString()}>{formatStart(ev.start_time)}</time>
                </p>
             </header>
+
+            <PromoMarketsSection
+               promos={promos}
+               eventFilter={{ sportId: sid, leagueId: ev.league_id, eventId: ev.id }}
+            />
 
             <div className="event-page-sections">
                {groups.map((g, gi) => (

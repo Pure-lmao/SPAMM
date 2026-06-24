@@ -12,6 +12,9 @@ import type {
    PredictionContestToday,
    PredictionContestKind,
    PredictionContestStatus,
+   PromotionalMarket,
+   PromotionalMarketStatus,
+   PromoRelatedEvent,
 } from "./types";
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -137,6 +140,7 @@ export function fetchSports(ids: number[] = []): Map<number, Sport> {
    return map;
 }
 
+// console.log(fetchLeagues())
 export function fetchLeagues(ids: number[] = []): Map<string, League> {
    const database = getDb();
    const rows = database.query<League, string[]>(
@@ -528,6 +532,13 @@ export function updateMarket(marketId: number, eventId: number, leagueId: number
    database.query(
       "UPDATE markets SET last_odds = ?, last_update = ? WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ?"
    ).run(odds, timestamp, marketId, eventId, leagueId, sportId);
+   if (marketId === PROMO_MKT_ID) {
+      initPromotionalMarketsTable();
+      database.query(
+         `UPDATE promotional_markets SET last_odds = ?, last_update = ?
+          WHERE sport_id = ? AND league_id = ? AND event_id = ? AND status = 'open'`,
+      ).run(odds, timestamp, sportId, leagueId, eventId);
+   }
 }
 
 export function getLeagues(): { api_id: string; sport_id: number; id: number }[] {
@@ -565,7 +576,13 @@ export function getEventsByApiId(): Map<string, Event> {
 // deleteEvent("45df97b54d688962ca73235c4837a580")
 function deleteEvent(eventId: string): void {
    const database = getDb();
-   database.query("DELETE FROM events WHERE api_event_id = ?").run(eventId);
+   database.query("DELETE FROM events WHERE league_id != 21900").run(eventId);
+}
+
+// deleteLeague(11827)
+function deleteLeague(leagueId: number): void {
+   const database = getDb();
+   database.query("DELETE FROM leagues WHERE id = ?").run(leagueId);
 }
 
 // ---- Prediction contests (score predict) ----
@@ -884,4 +901,268 @@ export function predictionContestToJson(contest: PredictionContest): Record<stri
             ? null
             : Array.from(contest.result_prediction),
    };
+}
+
+// ---- Promotional markets ----
+
+export const PROMO_MKT_ID = 9;
+export const PROMO_MKT_STRING = "PROMO";
+
+type PromotionalMarketRow = {
+   id: number;
+   title: string;
+   description: string;
+   sport_id: number;
+   league_id: number;
+   event_id: number;
+   period_id: number;
+   yes_label: string;
+   last_odds: string;
+   last_update: number;
+   status: string;
+   winning_side: number | null;
+   related_events: string | null;
+   closes_at: number | null;
+   created_at: number;
+   settled_at: number | null;
+   settled_notes: string | null;
+};
+
+export function initPromotionalMarketsTable(): void {
+   const database = getDb();
+   database.run(`
+      CREATE TABLE IF NOT EXISTS promotional_markets (
+         id INTEGER PRIMARY KEY AUTOINCREMENT,
+         title TEXT NOT NULL,
+         description TEXT NOT NULL DEFAULT '',
+         sport_id INTEGER NOT NULL,
+         league_id INTEGER NOT NULL,
+         event_id INTEGER NOT NULL,
+         period_id INTEGER NOT NULL,
+         yes_label TEXT NOT NULL DEFAULT 'Yes',
+         last_odds TEXT NOT NULL,
+         last_update INTEGER NOT NULL,
+         status TEXT NOT NULL DEFAULT 'open',
+         winning_side INTEGER,
+         related_events TEXT,
+         closes_at INTEGER,
+         created_at INTEGER NOT NULL,
+         settled_at INTEGER,
+         settled_notes TEXT
+      )
+   `);
+}
+
+function parseRelatedEventsJson(raw: string | null): PromoRelatedEvent[] {
+   if (!raw) {
+      return [];
+   }
+   const parsed = JSON.parse(raw) as PromoRelatedEvent[];
+   return Array.isArray(parsed) ? parsed : [];
+}
+
+function rowToPromotionalMarket(row: PromotionalMarketRow): PromotionalMarket {
+   return {
+      id: row.id,
+      title: row.title,
+      description: row.description,
+      sport_id: row.sport_id,
+      league_id: row.league_id,
+      event_id: row.event_id,
+      period_id: row.period_id,
+      yes_label: row.yes_label,
+      last_odds: row.last_odds,
+      last_update: row.last_update,
+      status: row.status as PromotionalMarketStatus,
+      winning_side: row.winning_side,
+      related_events: parseRelatedEventsJson(row.related_events),
+      closes_at: row.closes_at,
+      created_at: row.created_at,
+      settled_at: row.settled_at,
+      settled_notes: row.settled_notes,
+   };
+}
+
+export type AddPromotionalMarketInput = Omit<
+   PromotionalMarket,
+   'id' | 'last_update' | 'status' | 'winning_side' | 'settled_at' | 'settled_notes'
+>;
+
+export function addPromotionalMarket(input: AddPromotionalMarketInput): PromotionalMarket {
+   initPromotionalMarketsTable();
+   const database = getDb();
+   const now = Date.now();
+   database
+      .query(
+         `INSERT INTO promotional_markets (
+            title, description, sport_id, league_id, event_id, period_id,
+            yes_label, last_odds, last_update, status, related_events, closes_at, created_at
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
+      )
+      .run(
+         input.title,
+         input.description,
+         input.sport_id,
+         input.league_id,
+         input.event_id,
+         input.period_id,
+         input.yes_label,
+         input.last_odds,
+         now,
+         input.related_events.length > 0 ? JSON.stringify(input.related_events) : null,
+         input.closes_at,
+         input.created_at,
+      );
+   const id = Number(database.query<{ id: number }, []>("SELECT last_insert_rowid() AS id").get()!.id);
+   return fetchPromotionalMarket(id)!;
+}
+
+export function fetchPromotionalMarket(id: number): PromotionalMarket | null {
+   initPromotionalMarketsTable();
+   const database = getDb();
+   const row = database
+      .query<PromotionalMarketRow, [string]>(`SELECT * FROM promotional_markets WHERE id = ?`)
+      .get(id.toString());
+   return row ? rowToPromotionalMarket(row) : null;
+}
+
+export function listPromotionalMarkets(): PromotionalMarket[] {
+   initPromotionalMarketsTable();
+   const database = getDb();
+   return database
+      .query<PromotionalMarketRow, []>(`SELECT * FROM promotional_markets ORDER BY id DESC`)
+      .all()
+      .map(rowToPromotionalMarket);
+}
+
+export function fetchActivePromotionalMarkets(nowMs: number = Date.now()): PromotionalMarket[] {
+   initPromotionalMarketsTable();
+   const database = getDb();
+   return database
+      .query<PromotionalMarketRow, [string]>(
+         `SELECT * FROM promotional_markets
+          WHERE status = 'open' AND (closes_at IS NULL OR closes_at > ?)
+          ORDER BY created_at DESC`,
+      )
+      .all(nowMs.toString())
+      .map(rowToPromotionalMarket);
+}
+
+export function fetchPromotionalMarketsForEvent(
+   sportId: number,
+   leagueId: number,
+   eventId: number,
+): PromotionalMarket[] {
+   initPromotionalMarketsTable();
+   const database = getDb();
+   return database
+      .query<PromotionalMarketRow, string[]>(
+         `SELECT * FROM promotional_markets
+          WHERE status = 'open'
+            AND (
+               (sport_id = ? AND league_id = ? AND event_id = ?)
+               OR (
+                  related_events IS NOT NULL
+                  AND EXISTS (
+                     SELECT 1 FROM json_each(related_events) AS re
+                     WHERE json_extract(re.value, '$.sport_id') = CAST(? AS INTEGER)
+                       AND json_extract(re.value, '$.league_id') = CAST(? AS INTEGER)
+                       AND json_extract(re.value, '$.event_id') = CAST(? AS INTEGER)
+                  )
+               )
+            )
+          ORDER BY created_at DESC`,
+      )
+      .all(
+         sportId.toString(),
+         leagueId.toString(),
+         eventId.toString(),
+         sportId.toString(),
+         leagueId.toString(),
+         eventId.toString(),
+      )
+      .map(rowToPromotionalMarket);
+}
+
+/** All promos tied to an event (open or settled) — for bet history display. */
+export function fetchPromotionalMarketsForEventLookup(
+   sportId: number,
+   leagueId: number,
+   eventId: number,
+): PromotionalMarket[] {
+   initPromotionalMarketsTable();
+   const database = getDb();
+   return database
+      .query<PromotionalMarketRow, string[]>(
+         `SELECT * FROM promotional_markets
+          WHERE (
+               (sport_id = ? AND league_id = ? AND event_id = ?)
+               OR (
+                  related_events IS NOT NULL
+                  AND EXISTS (
+                     SELECT 1 FROM json_each(related_events) AS re
+                     WHERE json_extract(re.value, '$.sport_id') = CAST(? AS INTEGER)
+                       AND json_extract(re.value, '$.league_id') = CAST(? AS INTEGER)
+                       AND json_extract(re.value, '$.event_id') = CAST(? AS INTEGER)
+                  )
+               )
+            )
+          ORDER BY created_at DESC`,
+      )
+      .all(
+         sportId.toString(),
+         leagueId.toString(),
+         eventId.toString(),
+         sportId.toString(),
+         leagueId.toString(),
+         eventId.toString(),
+      )
+      .map(rowToPromotionalMarket);
+}
+
+export function settlePromotionalMarket(
+   id: number,
+   winningSide: number,
+   notes: string | null,
+): PromotionalMarket | null {
+   initPromotionalMarketsTable();
+   const database = getDb();
+   const now = Date.now();
+   const settledOdds =
+      winningSide === 0 ? JSON.stringify([100_000, 0]) : JSON.stringify([0, 100_000]);
+   database
+      .query(
+         `UPDATE promotional_markets SET
+            status = 'settled', winning_side = ?, settled_at = ?, settled_notes = ?,
+            last_odds = ?, last_update = ?
+          WHERE id = ?`,
+      )
+      .run(winningSide, now, notes, settledOdds, now, id);
+   const promo = fetchPromotionalMarket(id);
+   if (!promo) {
+      return null;
+   }
+   addMarket({
+      id: PROMO_MKT_ID,
+      event_id: promo.event_id,
+      league_id: promo.league_id,
+      sport_id: promo.sport_id,
+      period_id: promo.period_id,
+      line_value: null,
+      last_odds: settledOdds,
+      last_update: now,
+      mkt_string: PROMO_MKT_STRING,
+   });
+   return promo;
+}
+
+export function promotionalMarketToJson(promo: PromotionalMarket): Record<string, unknown> {
+   return { ...promo, mkt_id: PROMO_MKT_ID };
+}
+
+// deletePromotionalMarket("Home", 760463)
+function deletePromotionalMarket(title: string, eventId: number): void {
+   const database = getDb();
+   database.query("DELETE FROM markets WHERE id = ? AND event_id = ?").run(PROMO_MKT_ID, eventId);
+   // database.query("DELETE FROM promotional_markets WHERE title = ?").run(title);
 }

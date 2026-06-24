@@ -11,6 +11,12 @@ import {
    fetchPredictionContestToday,
    fetchPredictionContestsHistory,
    predictionContestToJson,
+   fetchActivePromotionalMarkets,
+   fetchPromotionalMarketsForEvent,
+   fetchPromotionalMarketsForEventLookup,
+   fetchPromotionalMarket,
+   listPromotionalMarkets,
+   promotionalMarketToJson,
 } from "./localDb";
 import { safeJSONStringify } from "./utils";
 import { getClosedBetRecordsByUser } from "quickIndexer";
@@ -73,6 +79,9 @@ function withCors(req: Request, res: Response): Response {
  * - /api/predictions/today
  * - /api/predictions/contest?id=
  * - /api/predictions/history?limit=
+ * - /api/promos?active=true
+ * - /api/promos?sport={sportId}&league={leagueId}&event={eventId}
+ * - /api/promos?id={promoId}
  */
 export class ApiServer {
    private async handleGetEvents(params: URLSearchParams): Promise<Response> {
@@ -177,6 +186,45 @@ export class ApiServer {
       });
    }
 
+   private async handleGetPromos(params: URLSearchParams): Promise<Response> {
+      const idRaw = params.get("id");
+      if (idRaw != null) {
+         const promo = fetchPromotionalMarket(Number(idRaw));
+         if (!promo) {
+            return Response.json({ error: "Promotional market not found" }, { status: 404 });
+         }
+         return new Response(safeJSONStringify(promotionalMarketToJson(promo)), {
+            headers: { "Content-Type": "application/json" },
+         });
+      }
+
+      const sport = params.get("sport");
+      const league = params.get("league");
+      const event = params.get("event");
+      if (sport != null && league != null && event != null) {
+         const fetchPromos =
+            params.get("lookup") === "true"
+               ? fetchPromotionalMarketsForEventLookup
+               : fetchPromotionalMarketsForEvent;
+         const rows = fetchPromos(Number(sport), Number(league), Number(event));
+         return new Response(safeJSONStringify(rows.map(promotionalMarketToJson)), {
+            headers: { "Content-Type": "application/json" },
+         });
+      }
+
+      if (params.get("active") === "true") {
+         const rows = fetchActivePromotionalMarkets();
+         return new Response(safeJSONStringify(rows.map(promotionalMarketToJson)), {
+            headers: { "Content-Type": "application/json" },
+         });
+      }
+
+      const rows = listPromotionalMarkets().slice(0, 50);
+      return new Response(safeJSONStringify(rows.map(promotionalMarketToJson)), {
+         headers: { "Content-Type": "application/json" },
+      });
+   }
+
    fetch(req: Request): Response | Promise<Response> {
       const url = new URL(req.url);
 
@@ -209,6 +257,9 @@ export class ApiServer {
       }
       if (url.pathname === "/api/predictions/history") {
          return this.handleGetPredictionsHistory(params).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/promos") {
+         return this.handleGetPromos(params).then((r) => withCors(req, r));
       }
 
       return withCors(req, new Response("Not Found", { status: 404 }));

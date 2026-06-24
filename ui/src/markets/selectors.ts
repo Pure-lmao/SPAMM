@@ -1,6 +1,7 @@
 import type { BetColumn } from "../betting/types";
 import {
    handicapTableKind,
+   isPromoMarket,
    isSoccerToQualify,
    moneylineSectionTitle,
    totalsSectionTitle,
@@ -199,6 +200,9 @@ export function filterGroupedSportsForHome(tree: readonly UiGroupedSport[]): UiG
 }
 
 export function inferBetColumn(mktString: string): BetColumn {
+   if (mktString === "PROMO") {
+      return "main";
+   }
    if (mktString === "1X2" || mktString === "ML") {
       return "main";
    }
@@ -224,11 +228,13 @@ export function groupMarketsForEventPage(markets: UiMarket[]): EventMarketSectio
    const spreadRows = ah.filter((m) => handicapTableKind(m) === "spread").sort(sortById);
    const asianRows = ah.filter((m) => handicapTableKind(m) === "asian").sort(sortById);
    const totals = sorted.filter((m) => m.mkt_string.startsWith("OU ")).sort(sortById);
+   const promo = sorted.filter((m) => isPromoMarket(m));
    const rest = sorted.filter(
       (m) =>
          !isMoneyCore(m) &&
          !isSoccerToQualify(m, m.sport_id) &&
          m.mkt_string !== "BTTS" &&
+         !isPromoMarket(m) &&
          !m.mkt_string.startsWith("AH ") &&
          !m.mkt_string.startsWith("OU ")
    );
@@ -251,6 +257,9 @@ export function groupMarketsForEventPage(markets: UiMarket[]): EventMarketSectio
       }));
 
    const out: EventMarketSection[] = [];
+   if (promo.length) {
+      out.push({ kind: "promo", title: "Promotions", rows: promo });
+   }
    if (money.length) {
       out.push({ kind: "money", title: moneylineSectionTitle(money), rows: money });
    }

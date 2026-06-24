@@ -1,6 +1,13 @@
 import type { UiMarket } from "./types";
 
-export type EventMarketSectionKind = "money" | "tq" | "spread" | "asian" | "total" | "extra" | "btts";
+export type EventMarketSectionKind = "money" | "tq" | "spread" | "asian" | "total" | "extra" | "btts" | "promo";
+
+export const PROMO_MKT_ID = 9;
+export const PROMO_MKT_STRING = "PROMO";
+
+export function isPromoMarket(m: UiMarket): boolean {
+   return m.mkt_string === PROMO_MKT_STRING || m.id === PROMO_MKT_ID;
+}
 
 /** Section heading: wire `id` 1 with 1X2 → Full Time Result; `id` 0 with ML → Moneyline (see `fetch.ts` seed ids). */
 export function moneylineSectionTitle(rows: UiMarket[]): string {

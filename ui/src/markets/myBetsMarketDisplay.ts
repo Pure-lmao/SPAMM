@@ -6,15 +6,43 @@ import {
    handicapTableKind,
    marketPrimaryLabel,
    periodCaption,
+   PROMO_MKT_ID,
    shouldShowPeriodBadge,
    totalsSectionTitle,
 } from "./eventMarketsDisplay";
 import { inferBetColumn } from "./selectors";
-import type { UiGroupedEvent, UiMarket } from "./types";
+import type { UiGroupedEvent, UiMarket, UiPromotionalMarket } from "./types";
 
 export function eventLookupKey(chain: MarketId): string {
    const eid = chain.eventId;
    return `${eid.sport}:${eid.league}:${Number(eid.event)}`;
+}
+
+export function isPromoMarketChain(chain: MarketId): boolean {
+   return Number(chain.mkt) === PROMO_MKT_ID;
+}
+
+export function promoMarketLookupKey(chain: MarketId): string {
+   const eid = chain.eventId;
+   return `${eid.sport}:${eid.league}:${Number(eid.event)}:${chain.period}`;
+}
+
+export function indexPromotionalMarkets(promos: readonly UiPromotionalMarket[]): Map<string, UiPromotionalMarket> {
+   const map = new Map<string, UiPromotionalMarket>();
+   for (const promo of promos) {
+      const events = [
+         { sport_id: promo.sport_id, league_id: promo.league_id, event_id: promo.event_id },
+         ...promo.related_events,
+      ];
+      for (const ev of events) {
+         map.set(`${ev.sport_id}:${ev.league_id}:${ev.event_id}:${promo.period_id}`, promo);
+      }
+   }
+   return map;
+}
+
+function promoPickLabel(side: number, promo: UiPromotionalMarket): string {
+   return side === 0 ? promo.yes_label : "No";
 }
 
 function findUiMarket(ev: UiGroupedEvent, chain: MarketId): UiMarket | undefined {
@@ -62,12 +90,36 @@ export type BetMarketDisplayLines = Readonly<{
    periodMarket: string;
    pick: string;
    detailLine: string;
+   promoTitle: string | null;
+   promoDescription: string | null;
 }>;
 
 /** Human-readable event title, LIVE marker, and period / market / pick for a bet row. */
-export function betMarketDisplayLines(ev: UiGroupedEvent | undefined, chain: MarketId, side: number): BetMarketDisplayLines {
+export function betMarketDisplayLines(
+   ev: UiGroupedEvent | undefined,
+   chain: MarketId,
+   side: number,
+   promo?: UiPromotionalMarket | null,
+): BetMarketDisplayLines {
    const eventTitle = ev != null ? displayEventTitle(ev) : `Event ${chain.eventId.event.toString()}`;
    const liveSuffix = !chain.isPregame ? " · LIVE" : "";
+
+   if (promo != null) {
+      const pick = promoPickLabel(side, promo);
+      const sportId = ev?.sport_id ?? promo.sport_id;
+      const periodMarket = shouldShowPeriodBadge(sportId, { period_id: promo.period_id } as UiMarket)
+         ? `${periodCaption(promo.period_id)} · ${promo.title}`
+         : promo.title;
+      return {
+         eventTitle,
+         liveSuffix,
+         periodMarket,
+         pick,
+         detailLine: `${promo.title} · ${pick}`,
+         promoTitle: promo.title,
+         promoDescription: promo.description.trim() !== "" ? promo.description : null,
+      };
+   }
 
    if (ev == null) {
       const fb = `Market #${chain.mkt.toString()}`;
@@ -78,6 +130,8 @@ export function betMarketDisplayLines(ev: UiGroupedEvent | undefined, chain: Mar
          periodMarket: fb,
          pick,
          detailLine: `${fb} · ${pick}`,
+         promoTitle: null,
+         promoDescription: null,
       };
    }
 
@@ -91,6 +145,8 @@ export function betMarketDisplayLines(ev: UiGroupedEvent | undefined, chain: Mar
          periodMarket: fb,
          pick,
          detailLine: `${fb} · ${pick}`,
+         promoTitle: null,
+         promoDescription: null,
       };
    }
 
@@ -107,5 +163,7 @@ export function betMarketDisplayLines(ev: UiGroupedEvent | undefined, chain: Mar
       periodMarket,
       pick,
       detailLine,
+      promoTitle: null,
+      promoDescription: null,
    };
 }

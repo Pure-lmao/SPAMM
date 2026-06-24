@@ -3,14 +3,14 @@ import { AccountRole, type Instruction } from "@solana/instructions";
 import { address, getU32Encoder, getU64Encoder, sol, solToLamports, type Address } from "@solana/kit";
 import { buildSignV0Transaction, createRpcClients, sendAndConfirmInstructions, sendAndConfirmSignedTransaction, simulateTransaction } from "../aggregator/client/txSend";
 import { loadKeypairSignerFromJsonFile } from "../aggregator/client/utils";
-import { fetchGradedStartedEvents, fetchUngradedStartedEvents } from "localDb";
+import { fetchGradedStartedEvents } from "localDb";
 import { BetResult, getBetsData, getGradeBetsIx, getParlaysData, type BetAccountData } from "spamm-aggregator-sdk";
 import type { Event } from "types";
 import { round } from "utils";
 import { ADMIN_SIGNER } from "../aggregator/client/admin";
 
 const SYSTEM_PROGRAM_ID: Address = address("11111111111111111111111111111111");
-const clients = createRpcClients({ httpUrl: "https://"+process.env.CHAINSTACK_URL });
+const clients = createRpcClients({ httpUrl: "https://mainnet.helius-rpc.com/?api-key=3a454590-f45d-441e-9a62-833890f31eb2" });
 
 /** System program: `Transfer` (instruction index 2) + `lamports` u64 LE. */
 function buildSystemTransferSolInstruction(from: Address, to: Address, lamports: bigint): Instruction {
@@ -64,11 +64,23 @@ export async function gradeBets() {
    const resultAddresses = [];
    for (const bet of bets) {
       const event = allEvents.get(`${bet.data.marketId.eventId.sport}:${bet.data.marketId.eventId.league}:${bet.data.marketId.eventId.event}`);
-      if (event) {
-         const result = getBetResult(bet.data.marketId.eventId.sport, bet.data.marketId.period, bet.data.marketId.mkt, bet.data.marketId.player, bet.data.side, event.home_score!, event.away_score!);
-         if (result) {
-            resultAddresses.push([result, bet.address]);
-         }
+      if (!event) {
+         continue;
+      }
+      if (bet.data.marketId.mkt === 9) {
+         continue;
+      }
+      const result = getBetResult(
+         bet.data.marketId.eventId.sport,
+         bet.data.marketId.period,
+         bet.data.marketId.mkt,
+         bet.data.marketId.player,
+         bet.data.side,
+         event.home_score!,
+         event.away_score!,
+      );
+      if (result) {
+         resultAddresses.push([result, bet.address]);
       }
    }
 
@@ -110,17 +122,29 @@ export async function gradeParlays() {
          ) {
             continue;
          }
+         if (leg.marketId.mkt === 9) {
+            legResults.push(null);
+            continue;
+         }
          const event = allEvents.get(`${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event}`);
-         if (event) {
-            const legResult = getBetResult(leg.marketId.eventId.sport, leg.marketId.period, leg.marketId.mkt, leg.marketId.player, leg.side, event.home_score!, event.away_score!);
-            if (legResult) {
-               legResults.push(legResult);
-            } else { 
-               console.log(`Leg ${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event} result not found`);
-               legResults.push(null);
-            }
-         } else {
+         if (!event) {
             console.log(`Leg ${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event} not found`);
+            legResults.push(null);
+            continue;
+         }
+         const legResult = getBetResult(
+            leg.marketId.eventId.sport,
+            leg.marketId.period,
+            leg.marketId.mkt,
+            leg.marketId.player,
+            leg.side,
+            event.home_score!,
+            event.away_score!,
+         );
+         if (legResult) {
+            legResults.push(legResult);
+         } else {
+            console.log(`Leg ${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event} result not found`);
             legResults.push(null);
          }
       }
@@ -151,15 +175,19 @@ export async function gradeParlays() {
 }
 
 function getBetResult(sport: number, period: number, mkt: number, player: bigint, side: number, home: number, away: number): BetResult | null {
-   //invalid bet
    if (
-      (player !== 0n) || //no player props
-      (sport === 0) || //invalid sport
-      (sport === 1) && (period !== 1) || //invalid soccer period
-      (sport !== 1) && (period !== 0) //invalid non-soccer period
+      (player !== 0n) ||
+      (sport === 0) ||
+      (mkt === 9)
    ) {
       return null;
-   };
+   }
+   if ((sport === 1) && (period !== 1)) {
+      return null;
+   }
+   if ((sport !== 1) && (period !== 0)) {
+      return null;
+   }
 
    if (home === null || away === null) {
       return null;

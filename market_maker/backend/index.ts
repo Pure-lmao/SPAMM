@@ -161,6 +161,20 @@ async function runMarketMakerCycle() {
                         ));
                      }
                   }
+               } else if (market.id === 9) {
+                  let parsed: number[];
+                  try {
+                     parsed = JSON.parse(market.last_odds) as number[];
+                  } catch {
+                     parsed = [0, 0];
+                  }
+                  const odds0 = BigInt(parsed[0] ?? 0);
+                  const odds1 = BigInt(parsed[1] ?? 0);
+                  ixs.push(await getUpdateOracleIx(
+                     ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId,
+                     sequence,
+                     odds0, odds1, undefined,
+                  ));
                }
             }
             // send the ixs

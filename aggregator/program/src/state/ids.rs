@@ -114,6 +114,7 @@ pub fn num_sides_for_mkt(mkt: u16) -> Option<u8> {
       1 | 5 => Some(3),
       6 => Some(6),
       7 => Some(9),
+      9 => Some(1),
       10..=50 => Some(2),
       51..=99 => Some(2),
       100..=299 => Some(2),

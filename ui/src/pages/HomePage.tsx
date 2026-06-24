@@ -14,7 +14,9 @@ import {
    getTotalOdds,
 } from "../markets/selectors";
 import { oddsTableLabels } from "../markets/oddsTableLabels";
-import type { UiGroupedSport } from "../markets/types";
+import { fetchActivePromos } from "../markets/fetchPromos";
+import { PromoMarketsSection } from "../markets/PromoMarketsSection";
+import type { UiGroupedSport, UiPromotionalMarket } from "../markets/types";
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 async function fetchGroupedTree(): Promise<UiGroupedSport[]> {
@@ -70,6 +72,7 @@ function computeMatchColPx(tree: UiGroupedSport[], font: string): number {
 export function HomePage(): ReactElement {
    const { toggleSelection, isSelected } = useBetSlip();
    const [tree, setTree] = useState<UiGroupedSport[] | null>(null);
+   const [promos, setPromos] = useState<UiPromotionalMarket[]>([]);
    const [err, setErr] = useState<string | null>(null);
    const [collapsedSports, setCollapsedSports] = useState<Set<number>>(() => new Set());
    const [collapsedLeagues, setCollapsedLeagues] = useState<Set<string>>(() => new Set());
@@ -107,6 +110,17 @@ export function HomePage(): ReactElement {
                setErr(e instanceof Error ? e.message : String(e));
             }
          });
+      fetchActivePromos()
+         .then((rows) => {
+            if (!cancelled) {
+               setPromos(rows);
+            }
+         })
+         .catch(() => {
+            if (!cancelled) {
+               setPromos([]);
+            }
+         });
       return () => {
          cancelled = true;
       };
@@ -121,6 +135,7 @@ export function HomePage(): ReactElement {
          {tree === null && err == null && <p className="loading">Loading…</p>}
          {tree != null && displayTree != null && (
             <div className="home-events-scope" style={homeScopeStyle}>
+               <PromoMarketsSection promos={promos} />
                <div className="events-table-font-probe-host" aria-hidden>
                   <table className="events-table">
                      <tbody>

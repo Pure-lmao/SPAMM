@@ -79,6 +79,7 @@ mkt start | mkt end | market | sides count | logic | sides meaning (in index ord
 | 5 |-| dc | 3 | fixed | not home, not away, not draw
 | 6 |-| ft+btts | 6 | fixed | h-y, a-y, d-y, h-n, a-n, d-n
 | 7 |-| ht/ft | 9 | fixed | h/h, h/a, h/d, a/h, a/a, a/d, d/h, d/a, d/d
+| 9 |-| promo | 1 | fixed | yes
 | 10 | 50 | mo | 2 | fixed | win, not win
 | 51 | 99 | ou (x.25) | 2 | 50+4*L | over, under
 | 100 | 299 | ah (x.5) | 2 | 200+2*L | home, away

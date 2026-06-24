@@ -44,3 +44,28 @@ export type UiGroupedSport = {
    api_id: string;
    leagues: UiGroupedLeague[];
 };
+
+export type UiPromotionalMarket = {
+   id: number;
+   title: string;
+   description: string;
+   sport_id: number;
+   league_id: number;
+   event_id: number;
+   mkt_id: number;
+   period_id: number;
+   yes_label: string;
+   last_odds: string;
+   status: "open" | "settled";
+   winning_side: number | null;
+   related_events: {
+      sport_id: number;
+      league_id: number;
+      event_id: number;
+      event_name?: string;
+   }[];
+   closes_at: number | null;
+   created_at: number;
+   settled_at: number | null;
+   settled_notes: string | null;
+};

@@ -57,6 +57,9 @@ export function buildMarketLabel(
          const lab = side === 0 ? sideLabel(teams, "home", "Home") : sideLabel(teams, "away", "Away");
          return `${lab} (To qualify)`;
       }
+      if (s === "PROMO") {
+         return sideLabel(teams, "home", "Yes");
+      }
       return `${s} (${side})`;
    }
    if (column === "spread") {

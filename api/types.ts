@@ -43,6 +43,36 @@ export type Market = {
    mkt_string: string;
 };
 
+export type PromotionalMarketStatus = 'open' | 'settled';
+
+export type PromoRelatedEvent = {
+   sport_id: number;
+   league_id: number;
+   event_id: number;
+   event_name?: string;
+};
+
+/** Promo market: on-chain `mkt` 9 (`PROMO`). Graded manually after Discord settle. */
+export type PromotionalMarket = {
+   id: number;
+   title: string;
+   description: string;
+   sport_id: number;
+   league_id: number;
+   event_id: number;
+   period_id: number;
+   yes_label: string;
+   last_odds: string;
+   last_update: number;
+   status: PromotionalMarketStatus;
+   winning_side: number | null;
+   related_events: PromoRelatedEvent[];
+   closes_at: number | null;
+   created_at: number;
+   settled_at: number | null;
+   settled_notes: string | null;
+};
+
 /** One event inside `GroupedLeague.events`; `markets` set when fetched with `withMarkets`. */
 export type GroupedEvent = Event & { markets?: Market[] };
 

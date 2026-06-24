@@ -44,6 +44,17 @@ export function BetSlipProvider({ children }: { children: ReactNode }): ReactEle
       const id = selectionId(input);
       setSelections((prev) => {
          const exactIdx = prev.findIndex((s) => s.id === id);
+         if (input.mktString === "PROMO") {
+            if (exactIdx >= 0) {
+               setExpanded(true);
+               return [];
+            }
+            setExpanded(true);
+            return [{ ...input, id }];
+         }
+         if (prev.some((s) => s.mktString === "PROMO")) {
+            return prev;
+         }
          if (slipLocked) {
             if (exactIdx < 0) {
                return prev;

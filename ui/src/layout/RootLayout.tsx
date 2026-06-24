@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { Link, Outlet, useLocation } from "react-router-dom";
+import { Outlet, useLocation } from "react-router-dom";
+import { AppBrand } from "./AppBrand";
 import { AppTopNav } from "./AppTopNav";
 import { AppFooter } from "./AppFooter";
 import { InviteFriendsControls } from "../invite/InviteFriendsModal";
@@ -58,12 +59,7 @@ export function RootLayout(): ReactElement {
    return (
       <div className="app-shell">
          <header className="app-header">
-            <div className="app-header__brand">
-               <Link to="/" className="app-header__brand-link inline-nav-link">
-                  <img src="/brand.png" alt="" className="app-header__brand-mark" />
-                  <h1 className="app-title">Automatic Sports Markets</h1>
-               </Link>
-            </div>
+            <AppBrand />
             <AppTopNav />
             <div className="app-header__wallet-shell" ref={walletShellRef}>
                <button
