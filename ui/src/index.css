@@ -582,6 +582,11 @@ h1 {
 .promo-market-card__odd-price {
    font-size: 1rem;
    font-weight: 650;
+   font-variant-numeric: tabular-nums;
+}
+
+.odd-btn.promo-market-card__odd .promo-market-card__odd-price--boosted {
+   color: #5dd879;
 }
 
 .event-page .promo-markets-section {

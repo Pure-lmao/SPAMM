@@ -10,21 +10,21 @@ const clients = createRpcClients();
 
 
 export const USER_SIGNER = await loadKeypairSignerFromJsonFile(
-   path.join(__dirname, "user_keypair.json"),
+   path.join(__dirname, "user_mainnet_keypair.json"),
 );
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
 const WCMarketMaker = "WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address;
 
 const betId = 10n;
-const sport = 4 as Sport;
+const sport = 1 as Sport;
 const marketId = {
    eventId: {
-      event: 401873203n,
-      league: 11840,
+      event: 760465n,
+      league: 21900,
       sport,
    },
-   mkt: 0,
-   period: 0,
+   mkt: 9,
+   period: 1,
    isPregame: true,
    player: 0n,
 };
@@ -172,7 +172,7 @@ async function placeBetWithBestMm() {
       return undefined;
    }
    const parsedReturnData = decodeProxyQuoteReturnData(Buffer.from(...returnData));
-
+   // console.log(parsedReturnData);
    const validMms = parsedReturnData.filter((mm) => mm.maxAmount > 0n && mm.oddsScaled > 0n).sort((a, b) => Number(a.maxAmount) - Number(b.maxAmount));
    if (validMms.length === 0) {
       throw new Error("No valid MMs found");

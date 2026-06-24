@@ -116,7 +116,11 @@ export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSection
                            onClick={pickYes}
                         >
                            <span className="promo-market-card__odd-label">{promo.yes_label}</span>
-                           <span className="promo-market-card__odd-price">{yesDb > 0 ? fmtOdd(yesDec) : "—"}</span>
+                           <span
+                              className={`promo-market-card__odd-price${yesDb > 0 ? " promo-market-card__odd-price--boosted" : ""}`}
+                           >
+                              {yesDb > 0 ? fmtOdd(yesDb) : "—"}
+                           </span>
                         </button>
                      </div>
                   </li>
