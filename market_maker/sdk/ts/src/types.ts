@@ -195,4 +195,5 @@ export type DecodedMarketMakerInstruction =
      }
    | { kind: 'closeEvent'; eventId: EventId }
    | { kind: 'closeMarket'; marketId: MarketId }
+   | { kind: 'writeArbitraryData'; data: Uint8Array }
    | { kind: 'forceClosePda' };

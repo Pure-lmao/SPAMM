@@ -8,8 +8,17 @@ import {
    type Rpc,
    type SolanaRpcApi,
 } from "@solana/kit";
+import { getSetComputeUnitLimitInstruction } from "@solana-program/compute-budget";
 import { useCluster, useKitTransactionSigner, useWallet } from "@solana/connector/react";
-import { BetResult, getSettleBetIx, getSettleParlayIx, ODDS_SCALE, type BetAccountData } from "spamm-aggregator-sdk";
+import {
+   BetResult,
+   TXLINE_PROGRAM_ID_DEVNET,
+   getSettleBetIx,
+   getSettleParlayIx,
+   getSettleWithTxLineIx,
+   ODDS_SCALE,
+   type BetAccountData,
+} from "spamm-aggregator-sdk";
 import { compileUnsignedV0TransactionChunks, httpToWsRpcUrl, resolveHttpRpcUrl } from "../betting/txPipeline";
 import { formatUsdcBaseUnitsForUi } from "../betting/usdc";
 import {
@@ -20,8 +29,10 @@ import {
    type WalletParlayLeg,
 } from "../markets/fetchBetHistory";
 import { fetchOneEvent } from "../markets/fetchEvent";
+import { base64ToBytes, fetchSettleWithTxlineBuildPayload } from "../markets/fetchSettleWithTxline";
 import { betMarketDisplayLines, eventLookupKey } from "../markets/myBetsMarketDisplay";
 import type { UiGroupedEvent } from "../markets/types";
+import { solscanAddressUrl } from "../betting/betSlipUtils";
 
 type LoadState = "idle" | "loading" | "ok" | "err";
 
@@ -141,10 +152,6 @@ function truncateAddressMiddle(addr: string, head = 4, tail = 4): string {
    return `${addr.slice(0, head)}…${addr.slice(-tail)}`;
 }
 
-function solscanAddressUrl(address: string): string {
-   return `https://solscan.io/account/${encodeURIComponent(address)}`;
-}
-
 function BetBanner({
    betPda,
    betId,
@@ -216,10 +223,18 @@ function BetCard({
    betPda,
    b,
    eventsByKey,
+   showTxlineSettle,
+   txlineSettleBusy,
+   txlineSettleDisabled,
+   onSettleWithTxline,
 }: {
    betPda: string;
    b: BetAccountData;
    eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   showTxlineSettle?: boolean;
+   txlineSettleBusy?: boolean;
+   txlineSettleDisabled?: boolean;
+   onSettleWithTxline?: () => void;
 }): ReactElement {
    const ek = eventLookupKey(b.marketId);
    const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side);
@@ -234,6 +249,16 @@ function BetCard({
             </p>
             <p className="my-bets-card__market-detail">{lines.detailLine}</p>
             <BetStakeGrid amount={b.amount} payout={b.payout} result={b.result} />
+            {showTxlineSettle && onSettleWithTxline != null && (
+               <button
+                  type="button"
+                  className="my-bets-card__txline-settle"
+                  disabled={txlineSettleBusy || txlineSettleDisabled}
+                  onClick={() => onSettleWithTxline()}
+               >
+                  {txlineSettleBusy ? "Building TxLINE settle…" : "Settle with TxLINE"}
+               </button>
+            )}
          </div>
       </li>
    );
@@ -297,14 +322,34 @@ function ParlayBetCard({
 function WalletBetCard({
    row,
    eventsByKey,
+   showTxlineSettle,
+   txlineSettleBusy,
+   txlineSettleDisabled,
+   onSettleWithTxline,
 }: {
    row: WalletBetRow;
    eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   showTxlineSettle?: boolean;
+   txlineSettleBusy?: boolean;
+   txlineSettleDisabled?: boolean;
+   onSettleWithTxline?: (betPda: string) => void;
 }): ReactElement {
    if (row.kind === "parlay") {
       return <ParlayBetCard betPda={row.address} row={row} eventsByKey={eventsByKey} />;
    }
-   return <BetCard betPda={row.address} b={row.data} eventsByKey={eventsByKey} />;
+   return (
+      <BetCard
+         betPda={row.address}
+         b={row.data}
+         eventsByKey={eventsByKey}
+         showTxlineSettle={showTxlineSettle && row.data.result === BetResult.Pending}
+         txlineSettleBusy={txlineSettleBusy}
+         txlineSettleDisabled={txlineSettleDisabled}
+         onSettleWithTxline={
+            onSettleWithTxline != null ? () => onSettleWithTxline(row.address) : undefined
+         }
+      />
+   );
 }
 
 export function MyBetsPage(): ReactElement {
@@ -336,6 +381,8 @@ export function MyBetsPage(): ReactElement {
    const [eventsByKey, setEventsByKey] = useState<ReadonlyMap<string, UiGroupedEvent | null>>(() => new Map());
    const [claimBusy, setClaimBusy] = useState(false);
    const [claimErr, setClaimErr] = useState<string | null>(null);
+   const [txlineBusyPda, setTxlineBusyPda] = useState<string | null>(null);
+   const [txlineErr, setTxlineErr] = useState<string | null>(null);
    const claimLockRef = useRef(false);
 
    const settledRows = useMemo(
@@ -509,6 +556,62 @@ export function MyBetsPage(): ReactElement {
       }
    }, [account, isConnected, loadClosed, loadOpen, rpc, rpcSubscriptions, settledRows, signerReady, walletSigner]);
 
+   const runSettleWithTxline = useCallback(
+      async (betPda: string) => {
+         if (!isConnected || !account || !walletSigner || !signerReady) {
+            return;
+         }
+         if (txlineBusyPda != null) {
+            return;
+         }
+         const row = rows.find((r) => r.address === betPda);
+         if (!row || row.kind !== "single") {
+            setTxlineErr("Bet not found");
+            return;
+         }
+         setTxlineBusyPda(betPda);
+         setTxlineErr(null);
+         try {
+            const build = await fetchSettleWithTxlineBuildPayload(betPda, account);
+            const settleData = {
+               expectedResult: build.expectedResult,
+               validateStatIxData: base64ToBytes(build.validateStatIxData),
+            };
+            const settleIx = await getSettleWithTxLineIx(
+               address(account),
+               address(betPda),
+               row.data,
+               settleData,
+               TXLINE_PROGRAM_ID_DEVNET,
+            );
+            const computeBudgetIx = getSetComputeUnitLimitInstruction({ units: build.computeUnitLimit });
+            const unsigned = await compileUnsignedV0TransactionChunks(rpc, {
+               feePayer: walletSigner,
+               instructionChunks: [[computeBudgetIx, settleIx]],
+               useALT: true,
+            });
+            if (unsigned.length === 0) {
+               throw new Error("Failed to compile settle transaction");
+            }
+            const sendAndConfirm = sendAndConfirmTransactionFactory({
+               rpc,
+               rpcSubscriptions,
+            } as never);
+            const [signed] = await walletSigner.modifyAndSignTransactions([unsigned[0]!]);
+            assertIsTransactionWithBlockhashLifetime(signed);
+            await sendAndConfirm(signed as never, { commitment: "confirmed" });
+            setRows((prev) => prev.filter((row) => row.address !== betPda));
+            await loadOpen();
+            void loadClosed();
+         } catch (e) {
+            setTxlineErr(e instanceof Error ? e.message : String(e));
+         } finally {
+            setTxlineBusyPda(null);
+         }
+      },
+      [account, isConnected, loadClosed, loadOpen, rpc, rpcSubscriptions, rows, signerReady, txlineBusyPda, walletSigner],
+   );
+
    if (!isConnected || !account) {
       return (
          <main className="my-bets-page">
@@ -534,6 +637,7 @@ export function MyBetsPage(): ReactElement {
 
          {activeState === "err" && activeErr != null && <p className="my-bets-page__err">{activeErr}</p>}
          {claimErr != null && betTab === "open" && <p className="my-bets-page__err">{claimErr}</p>}
+         {txlineErr != null && betTab === "open" && <p className="my-bets-page__err">{txlineErr}</p>}
 
          <div className="my-bets-page__tabs-row">
             <div className="my-bets-page__tabs" role="tablist" aria-label="Bet groups">
@@ -589,7 +693,15 @@ export function MyBetsPage(): ReactElement {
             {betTab === "open" && openCount > 0 && (
                <ul className="my-bets-list">
                   {rows.map((row) => (
-                     <WalletBetCard key={row.address} row={row} eventsByKey={eventsByKey} />
+                     <WalletBetCard
+                        key={row.address}
+                        row={row}
+                        eventsByKey={eventsByKey}
+                        showTxlineSettle
+                        txlineSettleBusy={txlineBusyPda === row.address}
+                        txlineSettleDisabled={!signerReady || walletSigner == null || txlineBusyPda != null}
+                        onSettleWithTxline={runSettleWithTxline}
+                     />
                   ))}
                </ul>
             )}

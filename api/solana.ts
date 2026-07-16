@@ -150,7 +150,7 @@ export async function gradeParlays() {
    console.log("Parlays graded");
 }
 
-function getBetResult(sport: number, period: number, mkt: number, player: bigint, side: number, home: number, away: number): BetResult | null {
+export function getBetResult(sport: number, period: number, mkt: number, player: bigint, side: number, home: number, away: number): BetResult | null {
    //invalid bet
    if (
       (player !== 0n) || //no player props

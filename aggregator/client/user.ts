@@ -10,21 +10,21 @@ const clients = createRpcClients();
 
 
 export const USER_SIGNER = await loadKeypairSignerFromJsonFile(
-   path.join(__dirname, "user_keypair.json"),
+   path.join(__dirname, "user_devnet_keypair.json"),
 );
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
 const WCMarketMaker = "WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address;
 
 const betId = 10n;
-const sport = 4 as Sport;
+const sport = 1 as Sport;
 const marketId = {
    eventId: {
-      event: 401873203n,
-      league: 11840,
+      event: BigInt(17588223),
+      league: 21900,
       sport,
    },
-   mkt: 0,
-   period: 0,
+   mkt: 1,
+   period: 1,
    isPregame: true,
    player: 0n,
 };
@@ -40,7 +40,7 @@ const marketId2 = {
    player: 0n,
 };
 
-const side = 0;
+const side = 2;
 const eventStateSequence = 1;
 const eventGameState = getEventGameState("PG", 0, 0, 0, 0);
 const legs = [
@@ -85,6 +85,7 @@ async function placeBet() {
 
 async function getQuotesFromProxy() {
    const mmList = await getMmListData(clients.rpc);
+   console.log(mmList.mmProgramAddresses);
    const quoteProxyIx = await getGetQuoteProxyIx(
       {
          betId,
@@ -106,7 +107,7 @@ async function getQuotesFromProxy() {
    const parsedReturnData = decodeProxyQuoteReturnData(Buffer.from(...returnData));
    return parsedReturnData;
 }
-// getQuotesFromProxy().then(console.log).catch(console.error);
+getQuotesFromProxy().then(console.log).catch(console.error);
 
 async function getQuote() {
    const quote = await getMmGetQuoteIx({
@@ -116,7 +117,7 @@ async function getQuote() {
       minOddsScaled,
       eventGameState,
       eventStateSequence,
-   }, WCMarketMaker, USER_SIGNER.address);
+   }, DumbMarketMaker, USER_SIGNER.address);
    console.log(quote.accounts);
    const returnData = await simulateTransaction(clients.rpc, [quote], [USER_SIGNER], true);
    if (!returnData) {
@@ -189,8 +190,8 @@ async function placeBetWithBestMm() {
       }, USER_SIGNER.address, USER_SIGNER.address, validMms.slice(0, 5).map((mm) => mm.mmAddress),
    );
    // console.log(ix.accounts);
-   // const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
-   // console.log(txResult);
+   const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
+   console.log(txResult);
 }
 // placeBetWithBestMm().catch(console.error);
 

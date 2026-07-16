@@ -14,6 +14,7 @@ import {
 } from "./localDb";
 import { safeJSONStringify } from "./utils";
 import { getClosedBetRecordsByUser } from "quickIndexer";
+import { buildSettleWithTxlineTransaction } from "./settleWithTxline";
 
 const TTL_MS = 5000;
 
@@ -70,6 +71,7 @@ function withCors(req: Request, res: Response): Response {
  * - /api/leagues?sport={sportId}
  * - /api/airdrop/sol?user={userAddress}
  * - /api/betHistory?user={userAddress}
+ * - /api/settleWithTxline?betPda={betPda}&signer={walletAddress} — TxLINE proof + settle ix build inputs
  * - /api/predictions/today
  * - /api/predictions/contest?id=
  * - /api/predictions/history?limit=
@@ -140,6 +142,20 @@ export class ApiServer {
       return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
    }
 
+   private async handleGetSettleWithTxline(params: URLSearchParams): Promise<Response> {
+      const betPda = params.get("betPda");
+      const signer = params.get("signer");
+      if (!betPda || !signer) {
+         return Response.json({ error: "Missing query params. Use betPda= and signer=" }, { status: 400 });
+      }
+      const result = await buildSettleWithTxlineTransaction(betPda, signer);
+      const status = "error" in result ? 400 : 200;
+      return new Response(safeJSONStringify(result), {
+         status,
+         headers: { "Content-Type": "application/json" },
+      });
+   }
+
    private async handleGetPredictionsToday(): Promise<Response> {
       const contest = fetchPredictionContestToday();
       if (!contest) {
@@ -200,6 +216,9 @@ export class ApiServer {
       // }
       if (url.pathname === "/api/betHistory") {
          return this.handleGetBetHistory(params).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/settleWithTxline") {
+         return this.handleGetSettleWithTxline(params).then((r) => withCors(req, r));
       }
       if (url.pathname === "/api/predictions/today") {
          return this.handleGetPredictionsToday().then((r) => withCors(req, r));

@@ -1,8 +1,8 @@
-import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda, getWithdrawFromTokenAccountIx } from 'spamm-market-maker-sdk';
+import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda, getWithdrawFromTokenAccountIx, getWriteArbitraryDataIx } from 'spamm-market-maker-sdk';
 import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from 'utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
-import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
+import { getAddressEncoder, getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -11,6 +11,7 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
    path.join(__dirname, 'admin_keypair.json'),
 );
+// console.log(ADMIN_SIGNER.address);
 const clients = createRpcClients();
 
 
@@ -40,8 +41,8 @@ async function registerMM() {
 // getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
 const sport = 1 as Sport;
-const league = 12827;
-const event = 401872576n;
+const league = 21900;
+const event = 18241006n;
 const eventId = {
    sport,
    league,
@@ -140,9 +141,9 @@ const marketId = {
    isPregame: true,
 } as MarketId;
 const oracleBody = new Uint8Array([
-   ...getU32Encoder().encode(20n*ODDS_SCALE/10n), //odds0 = 2.0
-   ...getU32Encoder().encode(19n*ODDS_SCALE/10n), //odds1 = 1.9
-   ...getU32Encoder().encode(21n*ODDS_SCALE/10n), //odds2 = 2.1
+   ...getU32Encoder().encode(275n*ODDS_SCALE/100n), //odds0 = 2.75 (home)
+   ...getU32Encoder().encode(310n*ODDS_SCALE/100n), //odds1 = 3.1 (away)
+   ...getU32Encoder().encode(290n*ODDS_SCALE/100n), //odds2 = 2.9 (draw)
 ]);
 async function initMarket() {
    const marketDataIx = await getInitMarketIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, oracleBody);
@@ -152,7 +153,7 @@ async function initMarket() {
 // initMarket().catch(console.error);
 
 async function updateOracle() {
-   const sequence = 1n;
+   const sequence = 1779549902n;
    const odds0 = 20n*ODDS_SCALE/10n;
    const odds1 = 20n*ODDS_SCALE/10n;
    const odds2 = 20n*ODDS_SCALE/10n;
@@ -210,5 +211,18 @@ async function forceClosePda(pda: Address) {
 // forceClosePda(
 //    (await getMmConfigPda(MARKET_MAKER_PROGRAM_ID))[0]
 // ).catch(console.error);
+
+async function writeArbitraryData(
+   account: Address,
+   data: Uint8Array,
+) {
+   const ix = await getWriteArbitraryDataIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, account, data);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// const [configPda] = await getMmConfigPda(MARKET_MAKER_PROGRAM_ID);
+// const addrBytes = getAddressEncoder().encode(ADMIN_SIGNER.address);
+// writeArbitraryData(configPda, 
+//    new Uint8Array([1, 253, ...addrBytes])).catch(console.error);
 
 

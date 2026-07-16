@@ -82,6 +82,14 @@ export enum BetResult {
    RolledBack = 7,
 }
 
+/** Payload for `settle_with_tx_line` after router discriminator `69`. */
+export type SettleWithTxLineIxData = {
+   /** Graded outcome to settle as (must not be `Pending`). */
+   expectedResult: BetResult;
+   /** Full TxLINE `validate_stat` anchor instruction (8-byte disc + Borsh). */
+   validateStatIxData: Uint8Array;
+};
+
 export type EventId = {
    event: bigint;
    league: number;
@@ -377,10 +385,12 @@ export type DecodedAggregatorInstruction =
    | { kind: 'gradeBets'; betResults: Uint8Array }
    | { kind: 'settleBet' }
    | { kind: 'settleParlay' }
+   | { kind: 'settleWithTxLine'; data: SettleWithTxLineIxData }
    | { kind: 'createNettingAccount'; eventId: EventId }
    | { kind: 'addLineToNettingAccount'; data: AddLineToNettingIxData }
    | { kind: 'removeLineFromNettingAccount'; data: RemoveLineFromNettingIxData }
    | { kind: 'closeNettingAccount'; eventId: EventId }
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint }
+   | { kind: 'addAddressToAlt'; address: Address }
    | { kind: 'writeArbitraryData'; data: Uint8Array }
    | { kind: 'forceClosePda' };

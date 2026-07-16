@@ -7,6 +7,8 @@
     "discord": "bun run bot/index.ts"
   },
   "dependencies": {
+    "@solana-program/address-lookup-table": "^0.11.0",
+    "@solana-program/compute-budget": "^0.11.0",
     "discord.js": "^14.18.0",
     "spamm-aggregator-sdk": "file:../aggregator/sdk/ts"
   },

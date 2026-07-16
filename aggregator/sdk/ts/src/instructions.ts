@@ -26,6 +26,13 @@ import {
 } from './constants.js';
 import { encodeAggregatorInstructionData, encodeGetQuoteIxData, encodeGetQuoteParlayIxData } from './codex.js';
 import {
+   TXLINE_PROGRAM_ID,
+   decodeValidateStatIxData,
+   encodeValidateStatIxData,
+   getDailyScoresRootsPdaFromTs,
+   type ValidateStatIxData,
+} from './txline.js';
+import {
    getAta,
    getBetPda,
    getConfigPda,
@@ -52,6 +59,7 @@ import {
    type MarketId,
    type ParlayBetAccountData,
    type ParlayLegWire,
+   type SettleWithTxLineIxData,
 } from './types.js';
 import {
    validateBetSide,
@@ -78,6 +86,7 @@ export const FILL_PARLAY_IX_DISCRIMINATOR = 4;
 export const GRADE_BETS_IX_DISCRIMINATOR = 5;
 export const SETTLE_BET_IX_DISCRIMINATOR = 6;
 export const SETTLE_PARLAY_IX_DISCRIMINATOR = 7;
+export const SETTLE_WITH_TX_LINE_IX_DISCRIMINATOR = 69;
 export const GET_QUOTE_PROXY_IX_DISCRIMINATOR = 8;
 export const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR = 9;
 export const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR = 10;
@@ -87,6 +96,7 @@ export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 52;
 export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 53;
 export const DEREGISTER_MM_IX_DISCRIMINATOR = 54;
 export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 100;
+export const ADD_ADDRESS_TO_ALT_IX_DISCRIMINATOR = 250;
 export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
@@ -743,6 +753,78 @@ export async function getSettleBetIx(
 }
 
 /**
+ * Build {@link SettleWithTxLineIxData} from a structured TxLINE `validate_stat` payload.
+ */
+export function settleWithTxLineIxDataFromValidateStat(
+   expectedResult: BetResult,
+   validateStat: ValidateStatIxData,
+): SettleWithTxLineIxData {
+   if (expectedResult === BetResult.Pending) {
+      throw new Error('expectedResult must not be Pending');
+   }
+   return {
+      expectedResult,
+      validateStatIxData: encodeValidateStatIxData(validateStat),
+   };
+}
+
+/**
+ * **`settle_with_tx_line`** — CPI into TxLINE to verify a score Merkle proof, then settle like `settle_bet`.
+ *
+ * **Rust:** `aggregator::instructions::settle_with_tx_line::process` (`SETTLE_WITH_TX_LINE_IX_DISCRIMINATOR` = 69).
+ * Bet must still be `Pending`; `expectedResult` comes from instruction data after proof CPI succeeds.
+ *
+ * @param bet - decoded bet account; `result` must be `Pending`; `marketId.eventId.event` must match proof fixture id.
+ * @param data - expected result, score sequence, and full TxLINE `validate_stat` anchor ix bytes.
+ * @param txlineProgram - TxLINE program id (defaults to {@link TXLINE_PROGRAM_ID}).
+ */
+export async function getSettleWithTxLineIx(
+   signer: Address,
+   betPda: Address,
+   bet: BetAccountData,
+   data: SettleWithTxLineIxData,
+   txlineProgram: Address = TXLINE_PROGRAM_ID,
+): Promise<Instruction> {
+   validatePositiveU64(bet.betId, 'bet.betId');
+   if (bet.result !== BetResult.Pending) {
+      throw new Error('bet.result must be Pending');
+   }
+   if (data.expectedResult === BetResult.Pending) {
+      throw new Error('data.expectedResult must not be Pending');
+   }
+
+   const user = bet.owner;
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const baseAccounts = [
+      rs(signer),
+      rw(betPda),
+      rw(betAta),
+      rw(bet.feepayer),
+      ro(user),
+      rw(userAta),
+      ro(configPda),
+      ro(MINT_ID),
+      ro(SPL_TOKEN_PROGRAM_ID),
+   ];
+   const fillerAccounts: { address: Address; role: AccountRole }[] = [];
+   for (const filler of [bet.filler0, bet.filler1, bet.filler2, bet.filler3, bet.filler4]) {
+      const row = await settleFillerAccountRow(filler);
+      fillerAccounts.push(ro(row[0]!), ro(row[1]!), rw(row[2]!), rw(row[3]!), rw(row[4]!));
+   }
+
+   const validateStat = decodeValidateStatIxData(data.validateStatIxData);
+   const [dailyScoresRoots] = await getDailyScoresRootsPdaFromTs(validateStat.ts, txlineProgram);
+
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [...baseAccounts, ...fillerAccounts, ro(txlineProgram), ro(dailyScoresRoots)],
+      data: encodeAggregatorInstructionData({ kind: 'settleWithTxLine', data }),
+   };
+}
+
+/**
  * **`settle_parlay`** — settle a graded parlay bet; same data shape as `settle_bet` (no payload after router discriminator).
  *
  * **Rust:** `aggregator::instructions::settle_parlay::process` (`SETTLE_PARLAY_IX_DISCRIMINATOR` = 7). Instruction data: none after router discriminator.
@@ -952,6 +1034,30 @@ export async function getWithdrawFromLiabilityAccountIx(
 }
 
 /**
+ * **`add_address_to_alt`** — admin appends one address to the program address lookup table (ALT) via the config PDA (the ALT authority).
+ *
+ * **Rust:** `aggregator::instructions::add_address_to_alt::process` (`ADD_ADDRESS_TO_ALT_IX_DISCRIMINATOR` = 250). Data: `address: [u8; 32]` after discriminator. The config PDA signs the `ExtendLookupTable` CPI via its seeds.
+ *
+ * @param admin - **TS:** `Address` — config authority (writable signer); pays rent on ALT resize. **Rust:** `admin` (writable signer), verified against config authority.
+ * @param newAddress - **TS:** `Address` — address to append to the ALT. **Rust:** `address` parsed from instruction data.
+ * @returns **`Promise<Instruction>`** — five accounts: admin, config PDA (readonly), lookup table (writable), system program, ALT program.
+ */
+export async function getAddAddressToAltIx(admin: Address, newAddress: Address): Promise<Instruction> {
+   const [configPda] = await getConfigPda();
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(admin),
+         ro(configPda),
+         rw(LOOKUP_TABLE_ID),
+         ro(SYSTEM_PROGRAM_ID),
+         ro(ADDRESS_LOOKUP_TABLE_PROGRAM_ID),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'addAddressToAlt', address: newAddress }),
+   };
+}
+
+/**
  * **`force_close_pda`** — dev-only: admin closes an arbitrary PDA owned by the aggregator program and recovers rent.
  *
  * **Rust:** `aggregator::instructions::force_close_pda::process` (`FORCE_CLOSE_PDA_IX_DISCRIMINATOR` = 255). No instruction data after discriminator.
@@ -1011,6 +1117,14 @@ export type AggregatorInstructionInput =
         betAccounts: readonly Address[];
      }
    | { kind: 'settleBet'; bet: BetAccountData; signer: Address; betPda: Address }
+   | {
+        kind: 'settleWithTxLine';
+        bet: BetAccountData;
+        signer: Address;
+        betPda: Address;
+        data: SettleWithTxLineIxData;
+        txlineProgram?: Address;
+     }
    | { kind: 'settleParlay'; parlay: ParlayBetAccountData; signer: Address; betPda: Address }
    | { kind: 'createNettingAccount'; eventId: EventId; mmAdmin: Address; mmProgram: Address }
    | {
@@ -1031,6 +1145,7 @@ export type AggregatorInstructionInput =
      }
    | { kind: 'closeNettingAccount'; eventId: EventId; admin: Address; mmProgram: Address }
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint; mmAdmin: Address; mmProgram: Address }
+   | { kind: 'addAddressToAlt'; admin: Address; newAddress: Address }
    | { kind: 'writeArbitraryData'; admin: Address; account: Address; data: Uint8Array }
    | { kind: 'forceClosePda'; admin: Address; pda: Address };
 
@@ -1064,6 +1179,14 @@ export async function getInstructionIx(input: AggregatorInstructionInput, _rpc: 
          return getGradeBetsIx(input.admin, input.betResults, input.betAccounts);
       case 'settleBet':
          return getSettleBetIx(input.signer, input.betPda, input.bet);
+      case 'settleWithTxLine':
+         return getSettleWithTxLineIx(
+            input.signer,
+            input.betPda,
+            input.bet,
+            input.data,
+            input.txlineProgram,
+         );
       case 'settleParlay':
          return getSettleParlayIx(input.signer, input.betPda, input.parlay);
       case 'createNettingAccount':
@@ -1088,6 +1211,8 @@ export async function getInstructionIx(input: AggregatorInstructionInput, _rpc: 
          return getCloseNettingAccountIx(input.eventId, input.admin, input.mmProgram);
       case 'withdrawFromLiabilityAccount':
          return getWithdrawFromLiabilityAccountIx(input.amount, input.mmAdmin, input.mmProgram);
+      case 'addAddressToAlt':
+         return getAddAddressToAltIx(input.admin, input.newAddress);
       case 'writeArbitraryData':
          return getWriteArbitraryDataIx(input.admin, input.account, input.data);
       case 'forceClosePda':

@@ -74,6 +74,15 @@ struct SettleBetTokenBatchCx<'a> {
 }
 
 pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
+   execute_settlement(accounts, None)
+}
+
+/// Shared settlement path used by `settle_bet` and `settle_with_tx_line`.
+/// When `bet_result_override` is `None`, uses the graded result stored on the bet account.
+pub(crate) fn execute_settlement<'a>(
+   accounts: &'a mut [AccountView],
+   bet_result_override: Option<BetResult>,
+) -> ProgramResult {
    let [
       signer, //verified as signer, can be anyone
       bet_account, //verified inline
@@ -129,13 +138,25 @@ pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
    let bet_data = BetAccountData::decode(bet_account_data.as_ref())?;
    core::mem::drop(bet_account_data);
 
+   let bet_result = match bet_result_override {
+      Some(result) => {
+         if unlikely(bet_data.result != BetResult::Pending) {
+            log!("settle_bet: bet already graded");
+            return Err(ProgramError::InvalidInstructionData);
+         }
+         result
+      }
+      None => {
+         if unlikely(bet_data.result == BetResult::Pending) {
+            log!("settle_bet: bet is pending");
+            return Err(ProgramError::InvalidInstructionData);
+         }
+         bet_data.result
+      }
+   };
+
    let bet_id_bytes = bet_data.bet_id.to_le_bytes();
    let bet_bump_bytes = bet_data.bump.to_le_bytes();
-
-   if unlikely(bet_data.result == BetResult::Pending) {
-      log!("settle_bet: bet is pending");
-      return Err(ProgramError::InvalidInstructionData);
-   }
 
    if unlikely(!address_eq(&bet_data.feepayer, &bet_feepayer.address())) {     
       log!("settle_bet: bet feepayer is invalid");
@@ -159,7 +180,7 @@ pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
       &mint, &token_program
    )?;
 
-   let amount_to_user_from_bet_ata: u64 = match bet_data.result {
+   let amount_to_user_from_bet_ata: u64 = match bet_result {
       BetResult::Won | BetResult::HalfWon |
         BetResult::Push | BetResult::Cancelled |
         BetResult::RolledBack => bet_data.amount,
@@ -208,6 +229,7 @@ pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
    };
    settle_bet_execute_token_batch(
       &bet_data,
+      bet_result,
       amount_to_user_from_bet_ata,
       bet_ata_start,
       bet_id_bytes,
@@ -375,6 +397,7 @@ where
 #[inline(never)]
 fn settle_bet_execute_token_batch<'a>(
    bet_data: &BetAccountData,
+   bet_result: BetResult,
    amount_to_user_from_bet_ata: u64,
    bet_ata_start: u64,
    bet_id_bytes: [u8; 8],
@@ -417,7 +440,7 @@ fn settle_bet_execute_token_batch<'a>(
       cx.bet_ata,
       cx.mint,
       cx.token_program,
-      bet_data.result,
+      bet_result,
       &mut batch,
       &mut bet_ata_remaining,
       &mut enc_needed,
@@ -436,7 +459,7 @@ fn settle_bet_execute_token_batch<'a>(
       cx.bet_ata,
       cx.mint,
       cx.token_program,
-      bet_data.result,
+      bet_result,
       &mut batch,
       &mut bet_ata_remaining,
       &mut enc_needed,
@@ -455,7 +478,7 @@ fn settle_bet_execute_token_batch<'a>(
       cx.bet_ata,
       cx.mint,
       cx.token_program,
-      bet_data.result,
+      bet_result,
       &mut batch,
       &mut bet_ata_remaining,
       &mut enc_needed,
@@ -474,7 +497,7 @@ fn settle_bet_execute_token_batch<'a>(
       cx.bet_ata,
       cx.mint,
       cx.token_program,
-      bet_data.result,
+      bet_result,
       &mut batch,
       &mut bet_ata_remaining,
       &mut enc_needed,
@@ -493,7 +516,7 @@ fn settle_bet_execute_token_batch<'a>(
       cx.bet_ata,
       cx.mint,
       cx.token_program,
-      bet_data.result,
+      bet_result,
       &mut batch,
       &mut bet_ata_remaining,
       &mut enc_needed,

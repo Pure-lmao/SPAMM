@@ -1,4 +1,4 @@
-import { decodeAggregatorInstructionData, decodeMmAccountConfig, getBetPda, getBetsData, getChangeConfigStatusIx, getConfigPda, getDeregisterMmIx, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getMmAccountConfigDecoder, getMmConfigPda, getMmEncumbranceData, getMmListData, getMmListPda, getNettingPda, getParlayBetPda, getParlaysData, getRecentSlot, getSettleBetIx, getSettleParlayIx, getWriteArbitraryDataIx, readAccountDataRaw } from "spamm-aggregator-sdk";
+import { decodeAggregatorInstructionData, decodeMmAccountConfig, getAddAddressToAltIx, getBetPda, getBetsData, getChangeConfigStatusIx, getConfigPda, getDeregisterMmIx, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getMmAccountConfigDecoder, getMmConfigPda, getMmEncumbranceData, getMmListData, getMmListPda, getNettingPda, getParlayBetPda, getParlaysData, getRecentSlot, getSettleBetIx, getSettleParlayIx, getWriteArbitraryDataIx, readAccountDataRaw, TXLINE_PROGRAM_ID_DEVNET } from "spamm-aggregator-sdk";
 import { loadKeypairSignerFromJsonFile } from "./utils.ts";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
 import type { Address } from "@solana/kit";
@@ -10,7 +10,7 @@ const clients = createRpcClients();
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
-   path.join(__dirname, 'admin_keypair.json'),
+   path.join(__dirname, 'admin_devnet_keypair.json'),
 );
 
 async function initProgram() {
@@ -127,6 +127,13 @@ async function writeArbitraryData(
 }
 // writeArbitraryData("CpmHPq7wwEpFibQ6LcFmuwhgNayonyDbne8jRwMGumP7" as Address, 
 //    new Uint8Array([4, 255, 0, 0, 0, 0, 0, 0, 0, 0])).catch(console.error);
+
+async function addAddressToAlt(address: Address) {
+   const ix = await getAddAddressToAltIx(ADMIN_SIGNER.address, address);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// addAddressToAlt(TXLINE_PROGRAM_ID_DEVNET).catch(console.error);
 
 // getMmListData(clients.rpc).then(console.log).catch(console.error);
 

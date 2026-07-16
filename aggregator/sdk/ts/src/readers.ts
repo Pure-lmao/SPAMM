@@ -82,10 +82,11 @@ export const PARLAY_BET_ACCOUNT_WIRE_OFFSETS = {
    betId: 66,
    amount: 74,
    payout: 82,
-   fillerAddress: 90,
-   result: 122,
-   numLegs: 123,
-   legs: 124,
+   timestamp: 90,
+   fillerAddress: 94,
+   result: 126,
+   numLegs: 127,
+   legs: 128,
 } as const;
 
 export type ProgramAccountRaw = Readonly<{

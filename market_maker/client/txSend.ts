@@ -32,13 +32,15 @@ import {
 
 /** HTTP RPC URL (env `SOLANA_RPC_URL` or devnet default). */
 export function resolveHttpRpcUrl(override?: string): string {
-   return override ?? 'https://api.mainnet-beta.solana.com';
+   // return override ?? 'https://api.mainnet-beta.solana.com';
+   return override ?? 'https://api.devnet.solana.com';
 }
 
 /** WebSocket URL for subscriptions (env `SOLANA_WS_URL`, or derived from HTTP). */
 export function resolveWsRpcUrl(httpUrl: string, override?: string): string {
    if (override ?? process.env.SOLANA_WS_URL) {
-      return (override ?? process.env.SOLANA_WS_URL) as string;
+      // return (override ?? process.env.SOLANA_WS_URL) as string;
+      return (override ?? "wss://api.devnet.solana.com") as string;
    }
    if (httpUrl.startsWith('https://')) {
       return `wss://${httpUrl.slice('https://'.length)}`;

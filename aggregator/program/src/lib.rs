@@ -5,6 +5,7 @@ pub mod constants;
 pub mod instructions;
 pub mod parsers;
 pub mod helpers;
+pub mod txline;
 pub mod quote_result;
 pub mod readers;
 pub mod writers;

@@ -63,5 +63,9 @@ export function parlayLegFromSelection(sel: BetSlipSelection): ParlayLegWire {
 }
 
 export function solscanTxUrl(signature: string): string {
-   return `https://solscan.io/tx/${encodeURIComponent(signature)}`;
+   return `https://solscan.io/tx/${encodeURIComponent(signature)}?cluster=devnet`;
+}
+
+export function solscanAddressUrl(address: string): string {
+   return `https://solscan.io/account/${encodeURIComponent(address)}?cluster=devnet`;
 }

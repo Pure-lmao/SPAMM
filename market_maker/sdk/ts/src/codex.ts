@@ -87,6 +87,7 @@ export const CLOSE_EVENT_IX_DISCRIMINATOR = 11;
 export const CLOSE_MARKET_IX_DISCRIMINATOR = 12;
 /** `update_event_state` — must match `UPDATE_EVENT_STATE_IX_DISCRIMINATOR` in the MM program. */
 export const UPDATE_EVENT_STATE_IX_DISCRIMINATOR = 13;
+export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 249;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
 /** Rust `EventGameState.game_phase` (`other.rs`). Space (U+0020) is stored as byte `0`; decode maps `0` → space, then trims trailing spaces. */
@@ -626,6 +627,9 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
             throw new RangeError(`market id payload len ${p.length}`);
          }
          return concatDiscriminator(CLOSE_MARKET_IX_DISCRIMINATOR, p);
+      }
+      case 'writeArbitraryData': {
+         return concatDiscriminator(WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR, ix.data);
       }
       case 'forceClosePda': {
          return concatDiscriminator(FORCE_CLOSE_PDA_IX_DISCRIMINATOR, new Uint8Array([]));

@@ -20,7 +20,7 @@ function formatAddressAsRustNewFromArrayBody(address: Address): string {
 }
 // const [addr] = await getMmParlayQuoteBufferPda("WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address);
 // console.log(addr);
-// console.log(formatAddressAsRustNewFromArrayBody("9cg4mZSLwjtL3D2JBhockpfw7kprmrXxcg6K5Um68Pga" as Address));
+// console.log(formatAddressAsRustNewFromArrayBody("BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW" as Address));
 
 const pkString = '';
 /** Base58-encoded 32-byte seed or 64-byte secret key (wallet export format). */

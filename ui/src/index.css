@@ -1990,6 +1990,30 @@ h1 {
    cursor: not-allowed;
 }
 
+.my-bets-card__txline-settle {
+   font: inherit;
+   font-size: 0.82rem;
+   font-weight: 600;
+   margin-top: 0.85rem;
+   padding: 0.45rem 0.85rem;
+   border-radius: 8px;
+   border: 1px solid color-mix(in srgb, var(--accent) 45%, var(--border));
+   background: var(--surface-deep);
+   color: var(--accent);
+   cursor: pointer;
+   width: 100%;
+}
+
+.my-bets-card__txline-settle:hover:not(:disabled) {
+   border-color: var(--accent);
+   color: var(--accent-bright);
+}
+
+.my-bets-card__txline-settle:disabled {
+   opacity: 0.55;
+   cursor: not-allowed;
+}
+
 .my-bets-page__tab {
    font: inherit;
    font-size: 0.9rem;

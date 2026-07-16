@@ -6,6 +6,9 @@ license = "CC-BY-NC-4.0"
 description = ""
 autotests = false
 
+[package.metadata.solana]
+tools-version = "v1.53"
+
 [lib]
 crate-type = ["cdylib", "lib"]
 

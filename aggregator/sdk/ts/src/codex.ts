@@ -31,6 +31,7 @@ import {
 } from '@solana/kit';
 
 import {
+   ADD_ADDRESS_TO_ALT_IX_DISCRIMINATOR,
    ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR,
    CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
@@ -50,6 +51,7 @@ import {
    REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    SETTLE_BET_IX_DISCRIMINATOR,
    SETTLE_PARLAY_IX_DISCRIMINATOR,
+   SETTLE_WITH_TX_LINE_IX_DISCRIMINATOR,
    WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR,
    WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR,
 } from './instructions.js';
@@ -91,6 +93,7 @@ import {
    type ParlayBetAccountData,
    type ParlayLegWire,
    type RemoveLineFromNettingIxData,
+   type SettleWithTxLineIxData,
    ADD_LINE_TO_LIABILITY_NETTING_IX_LEN,
    BET_ACCOUNT_LEN,
    CONFIG_PDA_LEN,
@@ -942,6 +945,33 @@ function concatDiscriminator(disc: number, payload: ReadonlyUint8Array | Uint8Ar
    return out;
 }
 
+export function encodeSettleWithTxLineIxPayload(data: SettleWithTxLineIxData): Uint8Array {
+   if (data.expectedResult === BetResult.Pending) {
+      throw new RangeError('settleWithTxLine.expectedResult must not be Pending');
+   }
+   if (data.validateStatIxData.length < 8) {
+      throw new RangeError('settleWithTxLine.validateStatIxData too short');
+   }
+   const out = new Uint8Array(1 + data.validateStatIxData.length);
+   out[0] = data.expectedResult;
+   out.set(data.validateStatIxData, 1);
+   return out;
+}
+
+export function decodeSettleWithTxLineIxPayload(rest: ReadonlyUint8Array): SettleWithTxLineIxData {
+   if (rest.length < 1 + 8) {
+      throw new RangeError('settleWithTxLine: payload too short');
+   }
+   const expectedResult = rest[0]!;
+   if (expectedResult === 0 || expectedResult > 7) {
+      throw new RangeError('settleWithTxLine: invalid expectedResult');
+   }
+   return {
+      expectedResult: expectedResult as BetResult,
+      validateStatIxData: new Uint8Array(rest.subarray(1)),
+   };
+}
+
 export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction): Uint8Array {
    switch (ix.kind) {
       case 'initProgram': {
@@ -1006,6 +1036,8 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
          return new Uint8Array([SETTLE_BET_IX_DISCRIMINATOR]);
       case 'settleParlay':
          return new Uint8Array([SETTLE_PARLAY_IX_DISCRIMINATOR]);
+      case 'settleWithTxLine':
+         return concatDiscriminator(SETTLE_WITH_TX_LINE_IX_DISCRIMINATOR, encodeSettleWithTxLineIxPayload(ix.data));
       case 'createNettingAccount': {
          const p = getEventIdEncoder().encode(ix.eventId);
          if (p.length !== EVENT_ID_WIRE_SIZE) {
@@ -1037,6 +1069,13 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
       case 'withdrawFromLiabilityAccount': {
          const p = getU64Encoder().encode(ix.amount);
          return concatDiscriminator(WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR, p);
+      }
+      case 'addAddressToAlt': {
+         const p = getAddressEncoder().encode(ix.address);
+         if (p.length !== 32) {
+            throw new RangeError(`add address to alt payload length ${p.length}`);
+         }
+         return concatDiscriminator(ADD_ADDRESS_TO_ALT_IX_DISCRIMINATOR, p);
       }
       case 'writeArbitraryData': {
          return concatDiscriminator(WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR, ix.data);
@@ -1121,6 +1160,8 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError('settleParlay: expected no payload');
          }
          return { kind: 'settleParlay' };
+      case SETTLE_WITH_TX_LINE_IX_DISCRIMINATOR:
+         return { kind: 'settleWithTxLine', data: decodeSettleWithTxLineIxPayload(rest) };
       case CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR:
          if (rest.length !== EVENT_ID_WIRE_SIZE) {
             throw new RangeError(`createNettingAccount: expected ${EVENT_ID_WIRE_SIZE} bytes`);
@@ -1151,6 +1192,11 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError('withdrawFromLiabilityAccount: expected 8 bytes');
          }
          return { kind: 'withdrawFromLiabilityAccount', amount: getU64Decoder().decode(restBytes) };
+      case ADD_ADDRESS_TO_ALT_IX_DISCRIMINATOR:
+         if (rest.length !== 32) {
+            throw new RangeError('addAddressToAlt: expected 32 bytes (one address)');
+         }
+         return { kind: 'addAddressToAlt', address: getAddressDecoder().decode(restBytes) };
       case WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR:
          if (rest.length === 0) {
             throw new RangeError('writeArbitraryData: expected at least one payload byte');

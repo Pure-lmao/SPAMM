@@ -31,20 +31,24 @@ import {
    getBase64EncodedWireTransaction,
    getTransactionSize,
    type Base64EncodedDataResponse,
+   setTransactionMessageComputeUnitLimit,
 } from '@solana/kit';
 import { LOOKUP_TABLE_ID } from 'spamm-aggregator-sdk';
 
 
 /** HTTP RPC URL (env `SOLANA_RPC_URL` or devnet default). */
 export function resolveHttpRpcUrl(override?: string): string {
-   return override ?? "https://"+process.env.CHAINSTACK_URL;
+   // return override ?? "https://"+process.env.CHAINSTACK_URL;
+   return override ?? "https://api.devnet.solana.com";
 }
 
 /** WebSocket URL for subscriptions (env `SOLANA_WS_URL`, or derived from HTTP). */
 export function resolveWsRpcUrl(httpUrl: string, override?: string): string {
-   if (override ?? process.env.CHAINSTACK_URL) {
-      return (override ?? "wss://"+process.env.CHAINSTACK_URL) as string;
-   }
+   
+   // if (override ?? process.env.CHAINSTACK_URL) {
+      // return (override ?? "wss://"+process.env.CHAINSTACK_URL) as string;
+      return (override ?? "wss://api.devnet.solana.com") as string;
+   // }
    if (httpUrl.startsWith('https://')) {
       return `wss://${httpUrl.slice('https://'.length)}`;
    }
@@ -100,6 +104,7 @@ export async function buildSignV0Transaction(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayerSigner(params.feePayer, m),
       (m) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m),
+      (m) => setTransactionMessageComputeUnitLimit(1000000, m),
       (m) => appendTransactionMessageInstructions([...params.instructions], m),
    );
 
@@ -167,7 +172,8 @@ export async function simulateTransaction(
    instructions: readonly Instruction[],
    signers: readonly KeyPairSigner[],
    useALT: boolean = false,
-): Promise<Base64EncodedDataResponse | undefined> {
+){
+// ): Promise<Base64EncodedDataResponse | undefined> {
    const transaction = await buildSignV0Transaction(rpc, {
       feePayer: signers[0]!,
       instructions,
@@ -180,6 +186,6 @@ export async function simulateTransaction(
    const simulation = await rpc
       .simulateTransaction(encodedTransaction, { encoding: 'base64', sigVerify: false })
       .send();
-   // console.log(simulation);
+   console.log(simulation);
    return simulation.value.returnData?.data;
 }

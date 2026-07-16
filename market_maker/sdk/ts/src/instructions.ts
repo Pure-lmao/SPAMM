@@ -347,6 +347,15 @@ export async function getMmFillParlayQuoteIx(
    };
 }
 
+export async function getWriteArbitraryDataIx(admin: Address, mmProgram: Address, account: Address, data: Uint8Array): Promise<Instruction> {
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   return {
+      programAddress: mmProgram,
+      accounts: [ws(admin), ro(mmConfigPda), rw(account)],
+      data: encodeMarketMakerInstructionData({ kind: 'writeArbitraryData', data }),
+   };
+}
+
 export async function getForceClosePdaIx(auth: Address, mmProgram: Address, pda: Address): Promise<Instruction> {
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    return {

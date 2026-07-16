@@ -21,6 +21,12 @@ pub unsafe fn read_u32_le_unchecked(ptr: *const u8, offset: usize) -> u32 {
 }
 
 #[inline(always)]
+pub unsafe fn read_i32_le_unchecked(ptr: *const u8, offset: usize) -> i32 {
+   // SAFETY: caller guarantees `offset..offset+4` is in-bounds.
+   unsafe { read_unaligned(ptr.add(offset) as *const i32) }
+}
+
+#[inline(always)]
 pub unsafe fn read_u64_le_unchecked(ptr: *const u8, offset: usize) -> u64 {
    // SAFETY: caller guarantees `offset..offset+8` is in-bounds.
    unsafe { read_unaligned(ptr.add(offset) as *const u64) }
