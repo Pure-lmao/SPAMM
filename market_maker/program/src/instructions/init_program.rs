@@ -12,7 +12,7 @@
 //! 7. `associated_token_program` (readonly)
 //! 8. `system_program` (readonly)
 //!
-//! Instruction `data`: [`InitProgramIxPayload`] — `admin` pubkey (must equal `feepayer`; example policy).
+//! Instruction `data`: [`InitProgramIxPayload`] — `admin` + `rfq_signer` pubkeys (`admin` must equal `feepayer`).
 
 use pinocchio::ProgramResult;
 use pinocchio::address::address_eq;
@@ -120,6 +120,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
          discriminator: MM_ACCOUNT_CONFIG_DISCRIMINATOR.into(),
          bump: config_bump.into(),
          admin: parsed.admin.into(),
+         rfq_signer: parsed.rfq_signer.into(),
       };
       unsafe {
          core::ptr::write(data.as_mut_ptr().cast::<MmAccountConfigZc>(), initial);

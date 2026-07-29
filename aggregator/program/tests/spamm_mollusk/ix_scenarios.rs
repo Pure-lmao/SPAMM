@@ -15,6 +15,7 @@ use crate::common::{
    market_soccer_ft_pregame, market_spread_pregame, netting_pda_for_event, oracle_body_three_outcome,
    oracle_body_two_outcome, parlay_bet_pda_for, parlay_leg, parlay_table, read_encumbrance,
    read_netting_soccer_header_and_lines, read_token_balance, settle_bet_instruction, settle_parlay_instruction,
+   grade_parlay_instruction, grade_parlay_leg_mask,
    system_owned_empty, uniform_parlay_combined_odds, user, user_collateral_ata, Env, LIABILITY_9_USDC,
    ODDS_1_9_SCALED, STAKE_10_USDC,
 };
@@ -90,6 +91,7 @@ fn scenario_netting_create_add_fill_m4() {
       mkt: 4,
       period: 1,
       is_pregame: true,
+      operator: crate::common::fixtures::market_operator(),
    };
    let body = crate::common::oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -207,7 +209,7 @@ fn scenario_ml_p0_m0_opposing_stakes_net_liability_deposit() {
       LIABILITY_9_USDC,
       "second fill must not pull another $9 from MM collateral"
    );
-   assert_eq!(read_encumbrance(&env, &encumbrance_pda()), LIABILITY_9_USDC as i64);
+   assert_eq!(read_encumbrance(&env, &encumbrance_pda()), 0, "opposing fills net encumbrance to zero");
 
    let profit = calc_potential_profit(STAKE_10_USDC, ODDS_1_9_SCALED).unwrap() as i64;
    let (ft, lines) = read_netting_soccer_header_and_lines(&env, &np);
@@ -228,6 +230,7 @@ fn scenario_soccer_mkt0_no_netting_double_liability_deposit() {
       mkt: 0,
       period: 0,
       is_pregame: true,
+      operator: crate::common::fixtures::market_operator(),
    };
    let body = oracle_body_two_outcome(ODDS_1_9_SCALED, ODDS_1_9_SCALED);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -295,7 +298,11 @@ fn scenario_parlay_fill_grade_settle_won() {
       uniform_parlay_combined_odds(20_000, 2),
    );
 
-   let gr = env.run_ix(grade_ix(&[BetResult::Won as u8], &[bet]));
+   let gr = env.run_ix(grade_parlay_instruction(
+      &[&grade_parlay_leg_mask(&[BetResult::Won as u8, BetResult::Won as u8])],
+      &[bet],
+      admin(),
+   ));
    assert!(gr.program_result.is_ok());
 
    let pd = decode_parlay_bet(&env, &bet);

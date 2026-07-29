@@ -23,7 +23,7 @@ use crate::{
 };
 
 
-pub const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 53;
+pub const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 43;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [

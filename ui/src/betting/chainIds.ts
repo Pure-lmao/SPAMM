@@ -1,8 +1,11 @@
 import { address } from "@solana/kit";
-import { Sport, getEventGameState } from "spamm-aggregator-sdk";
+import { BetResult, Sport, getEventGameState } from "spamm-aggregator-sdk";
 
 /** Funded pubkey — required as tx fee payer for read-only ix simulations. */
 export const SIM_FEE_PAYER_ADDRESS = address("BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW");
+
+/** Market operator embedded in `MarketId` (grading authority for dev). */
+export const DEFAULT_MARKET_OPERATOR = SIM_FEE_PAYER_ADDRESS;
 
 export const EVENT_GAME_STATE_PG = getEventGameState("PG", 0, 0, 0, 0);
 
@@ -25,5 +28,6 @@ export function buildMarketId(
       period,
       isPregame: true,
       player: 0n,
+      operator: DEFAULT_MARKET_OPERATOR,
    };
 }

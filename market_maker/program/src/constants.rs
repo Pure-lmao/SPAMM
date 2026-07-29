@@ -13,7 +13,7 @@ pub const MM_CONFIG_PDA: Address = Address::new_from_array([
    0xfd, 0x25, 0x3c, 0x4a, 0x6a, 0x60, 0x57, 0x89, 0x9d, 0x0b, 0x3d, 0x6b, 0x2c, 0x50, 0x99, 0xd4,
 ]);
 
-/// PDA seed for per-market odds / oracle data (`["market_data", market_id_wire]`).
+/// PDA seed for per-market odds / oracle data (`["market_data", market_id_body_wire, operator]`).
 pub const MM_MARKET_DATA_PDA_SEED: &[u8] = b"market_data";
 
 /// PDA seed for the single per-program MM quote buffer (`["mm_parlay_quote_buffer"]`).

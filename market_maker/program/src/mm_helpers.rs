@@ -10,7 +10,7 @@ use spamm_aggregator::state::mm_account_config::{
    MM_CONFIG_PDA_ADMIN_OFFSET,
 };
 use spamm_aggregator::state::{
-   EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventId, EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId
+   EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventId, EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId, market_id_pda_seed_parts,
 };
 use zeropod::ZeroPodFixed;
 
@@ -95,7 +95,7 @@ pub fn verify_event_state_pda(
    Ok(*state)
 }
 
-/// Market-data PDA: `["market_data", market_id_wire]`, with `MarketId` wire bytes from `to_zc` (see `get_quote`).
+/// Market-data PDA: `["market_data", market_id_body_wire, operator]` (`MarketId` body = legacy wire without operator).
 #[inline(always)]
 pub fn find_market_data_pda(program_id: &Address, market_id: &MarketId) -> (Address, u8) {
    let mut market_wire = [0u8; MarketId::WIRE_SIZE];
@@ -103,7 +103,8 @@ pub fn find_market_data_pda(program_id: &Address, market_id: &MarketId) -> (Addr
    unsafe {
       core::ptr::write(market_wire.as_mut_ptr().cast(), zc);
    }
-   let seeds: [&[u8]; 2] = [MM_MARKET_DATA_PDA_SEED, market_wire.as_slice()];
+   let (body, operator) = market_id_pda_seed_parts(&market_wire);
+   let seeds: [&[u8]; 3] = [MM_MARKET_DATA_PDA_SEED, body, operator];
    Address::find_program_address(&seeds, program_id)
 }
 

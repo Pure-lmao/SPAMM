@@ -32,7 +32,7 @@ import {
 
 /** HTTP RPC URL (env `SOLANA_RPC_URL` or devnet default). */
 export function resolveHttpRpcUrl(override?: string): string {
-   return override ?? 'https://api.mainnet-beta.solana.com';
+   return override ?? process.env.SOLANA_RPC_URL ?? 'https://api.devnet.solana.com';
 }
 
 /** WebSocket URL for subscriptions (env `SOLANA_WS_URL`, or derived from HTTP). */

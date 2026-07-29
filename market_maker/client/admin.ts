@@ -1,8 +1,8 @@
-import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda, getWithdrawFromTokenAccountIx } from 'spamm-market-maker-sdk';
+import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda, getWithdrawFromTokenAccountIx, getWriteArbitraryDataIx, MM_ACCOUNT_CONFIG_MIN_LEN, readAccountDataRaw } from 'spamm-market-maker-sdk';
 import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda } from 'spamm-aggregator-sdk';
-import { loadKeypairSignerFromJsonFile } from 'utils';
+import { loadKeypairSignerFromJsonFile } from './utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
-import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
+import { getAddressEncoder, getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -40,8 +40,8 @@ async function registerMM() {
 // getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
 const sport = 1 as Sport;
-const league = 12827;
-const event = 401872576n;
+const league = 1;
+const event = 1n;
 const eventId = {
    sport,
    league,
@@ -138,6 +138,7 @@ const marketId = {
    mkt,
    period,
    isPregame: true,
+   operator: "BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW" as Address,
 } as MarketId;
 const oracleBody = new Uint8Array([
    ...getU32Encoder().encode(20n*ODDS_SCALE/10n), //odds0 = 2.0
@@ -152,7 +153,7 @@ async function initMarket() {
 // initMarket().catch(console.error);
 
 async function updateOracle() {
-   const sequence = 1n;
+   const sequence = 2n;
    const odds0 = 20n*ODDS_SCALE/10n;
    const odds1 = 20n*ODDS_SCALE/10n;
    const odds2 = 20n*ODDS_SCALE/10n;
@@ -211,4 +212,30 @@ async function forceClosePda(pda: Address) {
 //    (await getMmConfigPda(MARKET_MAKER_PROGRAM_ID))[0]
 // ).catch(console.error);
 
+async function writeArbitraryData(account: Address, data: Uint8Array) {
+   const ix = await getWriteArbitraryDataIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, account, data);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+
+/** Grow legacy 34-byte config to `MmAccountConfig` and set `rfqSigner`. */
+async function setRfqSignerViaWriteArbitrary(rfqSigner: Address) {
+   const [configPda] = await getMmConfigPda(MARKET_MAKER_PROGRAM_ID);
+   const raw = await readAccountDataRaw(clients.rpc, configPda);
+   if (raw === null) {
+      throw new Error('MM config account not found');
+   }
+   const header = raw.length >= 34 ? raw.subarray(0, 34) : raw;
+   const rfqBytes = new Uint8Array(getAddressEncoder().encode(rfqSigner));
+   const data = new Uint8Array(MM_ACCOUNT_CONFIG_MIN_LEN);
+   data.set(header.subarray(0, Math.min(header.length, 34)), 0);
+   data.set(rfqBytes, 34);
+   const sig = await writeArbitraryData(configPda, data);
+   const updated = await getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID);
+   console.log('config after write:', updated);
+   return sig;
+}
+
+const RFQ_SIGNER = '95Zg5Wp4RWgUWghjkrGNReXVuNWU6tU9y26tkqnsPBgF' as Address;
+// setRfqSignerViaWriteArbitrary(RFQ_SIGNER).catch(console.error);
 

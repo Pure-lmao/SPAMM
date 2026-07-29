@@ -9,6 +9,7 @@ import {
    fixEncoderSize,
    getAddressDecoder,
    getAddressEncoder,
+   type Address,
    type Decoder,
    type Encoder,
    getBytesDecoder,
@@ -37,11 +38,14 @@ import {
    CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    FILL_BET_IX_DISCRIMINATOR,
    FILL_PARLAY_IX_DISCRIMINATOR,
+   FILL_RFQ_BET_IX_DISCRIMINATOR,
+   FILL_RFQ_PARLAY_IX_DISCRIMINATOR,
    GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR,
    GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR,
    GET_QUOTE_PROXY_IX_DISCRIMINATOR,
    FORCE_CLOSE_PDA_IX_DISCRIMINATOR,
    GRADE_BETS_IX_DISCRIMINATOR,
+   GRADE_PARLAY_IX_DISCRIMINATOR,
    INIT_PROGRAM_IX_DISCRIMINATOR,
    MM_FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
    MM_GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
@@ -67,6 +71,12 @@ import {
    type EventId,
    type EventStateData,
    type FillBetIxData,
+   type FillRfqBetIxBody,
+   type FillRfqBetIxData,
+   type FillRfqParlayIxBody,
+   type FillRfqParlayIxData,
+   type RfqBetMessageInput,
+   type RfqParlayMessageInput,
    type FillParlayIxData,
    type FillParlayQuoteIxData,
    type FillQuoteIxData,
@@ -82,8 +92,10 @@ import {
    type MmReturnData,
    type ProxyMarketMmQuotes,
    type ProxyQuoteData,
+   type ProxyParlayQuoteData,
    MARKET_QUOTES_PROXY_RETURN_MAX,
    PROXY_MARKET_SIDE_ODDS_WIRE_LEN,
+   PROXY_PARLAY_QUOTE_DATA_LEN,
    PROXY_QUOTE_DATA_LEN,
    type NettingLine,
    type NettingPdaAccountData,
@@ -97,7 +109,16 @@ import {
    EVENT_ID_WIRE_SIZE,
    EVENT_STATE_LEN,
    FILL_BET_IX_DATA_LEN,
+   FILL_RFQ_BET_IX_BODY_LEN,
+   FILL_RFQ_BET_IX_DATA_LEN,
+   FILL_RFQ_PARLAY_IX_BODY_LEN,
+   FILL_RFQ_PARLAY_IX_DATA_LEN,
+   RFQ_BET_MESSAGE_LEN,
+   RFQ_PARLAY_MESSAGE_LEN,
+   RFQ_SIGNED_PARLAY_LEG_LEN,
+   RFQ_SIGNED_PARLAY_LEG_TABLE_LEN,
    FILL_PARLAY_IX_DATA_LEN,
+   RFQ_SIGNATURE_LEN,
    FILL_QUOTE_IX_WIRE_LEN,
    FILL_QUOTE_PARLAY_IX_WIRE_LEN,
    GET_QUOTE_IX_WIRE_LEN,
@@ -120,7 +141,7 @@ import {
    REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN,
 } from './types.js';
 
-import { validateFillParlayIxData, validateGetQuoteParlayIxData } from './validate.js';
+import { validateFillParlayIxData, validateFillRfqBetIxData, validateFillRfqParlayIxData, validateGetQuoteParlayIxData } from './validate.js';
 
 /** Rust `EventGameState.game_phase`: up to 4 ASCII bytes, NUL-padded (`other.rs`). Space is encoded as `0` on the wire. */
 function encodeGamePhaseAscii4(phase: string): Uint8Array {
@@ -281,6 +302,7 @@ export const getMarketIdEncoder = (): Encoder<MarketId> =>
       ['mkt', getU16Encoder()],
       ['period', getU8Encoder()],
       ['isPregame', getBoolU8Encoder()],
+      ['operator', getAddressEncoder()],
    ]);
 
 export const getMarketIdDecoder = (): Decoder<MarketId> =>
@@ -290,6 +312,7 @@ export const getMarketIdDecoder = (): Decoder<MarketId> =>
       ['mkt', getU16Decoder()],
       ['period', getU8Decoder()],
       ['isPregame', getBoolU8Decoder()],
+      ['operator', getAddressDecoder()],
    ]);
 
 const getBetFillerWireEncoder = (): Encoder<BetFiller> =>
@@ -400,22 +423,7 @@ export const decodeNettingPdaAccountData = (data: ReadonlyUint8Array): NettingPd
    if (data.length < NETTING_HEADER_LEN) {
       throw new RangeError(`netting account data length ${data.length} < header ${NETTING_HEADER_LEN}`);
    }
-   const header = getNettingPdaHeaderDecoder().decode(new Uint8Array(data.subarray(0, NETTING_HEADER_LEN)));
-   const n = header.numberOfLines;
-   if (n > NETTING_DEFAULT_LINE_CAPACITY) {
-      throw new RangeError(`numberOfLines ${n} exceeds capacity ${NETTING_DEFAULT_LINE_CAPACITY}`);
-   }
-   const linesEnd = NETTING_HEADER_LEN + n * NETTING_LINE_LEN;
-   if (data.length < linesEnd) {
-      throw new RangeError(`netting account data length ${data.length} < lines end ${linesEnd}`);
-   }
-   const lineDec = getNettingLineDecoder();
-   const lines: NettingLine[] = [];
-   for (let i = 0; i < n; i++) {
-      const off = NETTING_HEADER_LEN + i * NETTING_LINE_LEN;
-      lines.push(lineDec.decode(new Uint8Array(data.subarray(off, off + NETTING_LINE_LEN))));
-   }
-   return { ...header, lines };
+   return getNettingPdaAccountDataDecoder().decode(new Uint8Array(data));
 };
 
 export const encodeNettingPdaAccountData = (account: NettingPdaAccountData): Uint8Array => {
@@ -431,14 +439,53 @@ export const encodeNettingPdaAccountData = (account: NettingPdaAccountData): Uin
       throw new RangeError('encoded netting account exceeds NETTING_ACCOUNT_ALLOC_LEN');
    }
    const out = new Uint8Array(NETTING_ACCOUNT_ALLOC_LEN);
-   const head = getNettingPdaHeaderEncoder().encode(header);
-   out.set(new Uint8Array(head), 0);
-   const lineEnc = getNettingLineEncoder();
-   for (let i = 0; i < lines.length; i++) {
-      out.set(new Uint8Array(lineEnc.encode(lines[i]!)), NETTING_HEADER_LEN + i * NETTING_LINE_LEN);
-   }
+   out.set(getNettingPdaAccountDataEncoder().encode(account), 0);
    return out;
 };
+
+const getNettingPdaAccountDataEncoder = (): Encoder<NettingPdaAccountData> =>
+   transformEncoder(
+      getStructEncoder([
+         ['header', getNettingPdaHeaderEncoder()],
+         ['linesBytes', getBytesEncoder()],
+      ]),
+      (account) => {
+         const { lines, ...header } = account;
+         const lineEnc = getNettingLineEncoder();
+         const linesBytes = new Uint8Array(lines.length * NETTING_LINE_LEN);
+         for (let i = 0; i < lines.length; i++) {
+            linesBytes.set(new Uint8Array(lineEnc.encode(lines[i]!)), i * NETTING_LINE_LEN);
+         }
+         return { header, linesBytes };
+      },
+   );
+
+const getNettingPdaAccountDataDecoder = (): Decoder<NettingPdaAccountData> =>
+   transformDecoder(
+      getStructDecoder([
+         ['header', getNettingPdaHeaderDecoder()],
+         ['linesBytes', getBytesDecoder()],
+      ]),
+      (wire) => {
+         const n = wire.header.numberOfLines;
+         if (n > NETTING_DEFAULT_LINE_CAPACITY) {
+            throw new RangeError(`numberOfLines ${n} exceeds capacity ${NETTING_DEFAULT_LINE_CAPACITY}`);
+         }
+         const expectedLinesLen = n * NETTING_LINE_LEN;
+         if (wire.linesBytes.length < expectedLinesLen) {
+            throw new RangeError(
+               `netting lines bytes ${wire.linesBytes.length} < expected ${expectedLinesLen}`,
+            );
+         }
+         const lineDec = getNettingLineDecoder();
+         const lines: NettingLine[] = [];
+         for (let i = 0; i < n; i++) {
+            const off = i * NETTING_LINE_LEN;
+            lines.push(lineDec.decode(wire.linesBytes.subarray(off, off + NETTING_LINE_LEN)));
+         }
+         return { ...wire.header, lines };
+      },
+   );
 
 export const getMmQuoteBufferEncoder = (): Encoder<MmQuoteBuffer> =>
    getStructEncoder([
@@ -529,6 +576,7 @@ export const getMmAccountConfigEncoder = (): Encoder<MmAccountConfig> =>
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
       ['admin', getAddressEncoder()],
+      ['rfqSigner', getAddressEncoder()],
    ]);
 
 export const getMmAccountConfigDecoder = (): Decoder<MmAccountConfig> =>
@@ -536,39 +584,78 @@ export const getMmAccountConfigDecoder = (): Decoder<MmAccountConfig> =>
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
       ['admin', getAddressDecoder()],
+      ['rfqSigner', getAddressDecoder()],
    ]);
+
+const getMmListPdaDataEncoder = (): Encoder<MmListPdaData> =>
+   transformEncoder(
+      getStructEncoder([
+         ['discriminator', getU8Encoder()],
+         ['numberOfMms', getU16Encoder()],
+         ['mmProgramAddressesBytes', getBytesEncoder()],
+      ]),
+      (list) => {
+         if (list.numberOfMms !== list.mmProgramAddresses.length) {
+            throw new RangeError('numberOfMms must match mmProgramAddresses.length');
+         }
+         const addrEnc = getAddressEncoder();
+         const mmProgramAddressesBytes = new Uint8Array(list.mmProgramAddresses.length * 32);
+         for (let i = 0; i < list.mmProgramAddresses.length; i++) {
+            mmProgramAddressesBytes.set(addrEnc.encode(list.mmProgramAddresses[i]!), i * 32);
+         }
+         return {
+            discriminator: list.discriminator,
+            numberOfMms: list.numberOfMms,
+            mmProgramAddressesBytes,
+         };
+      },
+   );
+
+const getMmListPdaDataDecoder = (): Decoder<MmListPdaData> =>
+   transformDecoder(
+      getStructDecoder([
+         ['discriminator', getU8Decoder()],
+         ['numberOfMms', getU16Decoder()],
+         ['mmProgramAddressesBytes', getBytesDecoder()],
+      ]),
+      (wire) => {
+         const n = wire.numberOfMms;
+         const expectedLen = n * 32;
+         if (wire.mmProgramAddressesBytes.length !== expectedLen) {
+            throw new RangeError(
+               `mm_list addresses bytes ${wire.mmProgramAddressesBytes.length} !== expected ${expectedLen}`,
+            );
+         }
+         const addrDec = getAddressDecoder();
+         const mmProgramAddresses: Address[] = [];
+         for (let i = 0; i < n; i++) {
+            const off = i * 32;
+            mmProgramAddresses.push(
+               addrDec.decode(wire.mmProgramAddressesBytes.subarray(off, off + 32)),
+            );
+         }
+         return {
+            discriminator: wire.discriminator,
+            numberOfMms: n,
+            mmProgramAddresses,
+         };
+      },
+   );
 
 export const decodeMmListPdaData = (data: ReadonlyUint8Array): MmListPdaData => {
    if (data.length < MM_LIST_HEADER_LEN) {
       throw new RangeError(`mm_list data too short: ${data.length}`);
    }
-   const discriminator = data[0]!;
-   const numberOfMms = new DataView(data.buffer, data.byteOffset, data.byteLength).getUint16(1, true);
-   const expectLen = MM_LIST_HEADER_LEN + numberOfMms * 32;
+   const decoded = getMmListPdaDataDecoder().decode(new Uint8Array(data));
+   const expectLen = MM_LIST_HEADER_LEN + decoded.numberOfMms * 32;
    if (data.length !== expectLen) {
       throw new RangeError(`mm_list data length ${data.length} !== expected ${expectLen}`);
    }
-   const addrDec = getAddressDecoder();
-   const mmProgramAddresses = [];
-   for (let i = 0; i < numberOfMms; i++) {
-      const off = MM_LIST_HEADER_LEN + i * 32;
-      mmProgramAddresses.push(addrDec.decode(new Uint8Array(data.subarray(off, off + 32))));
-   }
-   return { discriminator, numberOfMms, mmProgramAddresses };
+   return decoded;
 };
 
 export const encodeMmListPdaData = (list: MmListPdaData): Uint8Array => {
-   if (list.numberOfMms !== list.mmProgramAddresses.length) {
-      throw new RangeError('numberOfMms must match mmProgramAddresses.length');
-   }
-   const out = new Uint8Array(MM_LIST_HEADER_LEN + list.mmProgramAddresses.length * 32);
-   out[0] = list.discriminator & 0xff;
-   new DataView(out.buffer, out.byteOffset, out.byteLength).setUint16(1, list.numberOfMms, true);
-   const addrEnc = getAddressEncoder();
-   for (let i = 0; i < list.mmProgramAddresses.length; i++) {
-      out.set(addrEnc.encode(list.mmProgramAddresses[i]!), MM_LIST_HEADER_LEN + i * 32);
-   }
-   return out;
+   return new Uint8Array(getMmListPdaDataEncoder().encode(list));
 };
 
 export const getMmReturnDataDecoder = (): Decoder<MmReturnData> =>
@@ -597,7 +684,6 @@ export const getProxyQuoteDataEncoder = (): Encoder<ProxyQuoteData> =>
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
    ]);
 
-/** Return data from aggregator `get_quote_proxy` / `get_parlay_quote_proxy` (0..N × `ProxyQuoteData`). */
 export function decodeProxyQuoteReturnData(data: ReadonlyUint8Array): ProxyQuoteData[] {
    if (data.length % PROXY_QUOTE_DATA_LEN !== 0) {
       throw new RangeError(
@@ -612,6 +698,58 @@ export function decodeProxyQuoteReturnData(data: ReadonlyUint8Array): ProxyQuote
    }
    return quotes;
 }
+
+const getProxyParlayQuoteDataWireDecoder = () =>
+   getStructDecoder([
+      ['mmAddress', getAddressDecoder()],
+      ['maxAmount', getU64Decoder()],
+      ['oddsScaled', getU32BigintDecoder()],
+      ['numLegs', getU8Decoder()],
+      ['legOdds0', getU32BigintDecoder()],
+      ['legOdds1', getU32BigintDecoder()],
+      ['legOdds2', getU32BigintDecoder()],
+      ['legOdds3', getU32BigintDecoder()],
+      ['legOdds4', getU32BigintDecoder()],
+   ]);
+
+const getProxyParlayQuoteDataDecoder = (): Decoder<ProxyParlayQuoteData> =>
+   transformDecoder(getProxyParlayQuoteDataWireDecoder(), (row) => ({
+      mmAddress: row.mmAddress,
+      maxAmount: row.maxAmount,
+      oddsScaled: row.oddsScaled,
+      numLegs: row.numLegs,
+      legOdds: [row.legOdds0, row.legOdds1, row.legOdds2, row.legOdds3, row.legOdds4],
+   }));
+
+/** Return data from aggregator `get_parlay_quote_proxy` (0..N × `ProxyParlayQuoteData`). */
+export function decodeProxyParlayQuoteReturnData(data: ReadonlyUint8Array): ProxyParlayQuoteData[] {
+   if (data.length % PROXY_PARLAY_QUOTE_DATA_LEN !== 0) {
+      throw new RangeError(
+         `parlay proxy quote return data len ${data.length} is not a multiple of ${PROXY_PARLAY_QUOTE_DATA_LEN}`,
+      );
+   }
+   const decoder = getProxyParlayQuoteDataDecoder();
+   const quotes: ProxyParlayQuoteData[] = [];
+   const bytes = new Uint8Array(data);
+   for (let offset = 0; offset < bytes.length; offset += PROXY_PARLAY_QUOTE_DATA_LEN) {
+      quotes.push(decoder.decode(bytes.subarray(offset, offset + PROXY_PARLAY_QUOTE_DATA_LEN)));
+   }
+   return quotes;
+}
+
+const getProxyMarketMmQuotesEntryDecoder = (numSides: number): Decoder<ProxyMarketMmQuotes> => {
+   const entryLen = 32 + numSides * PROXY_MARKET_SIDE_ODDS_WIRE_LEN;
+   return transformDecoder(fixDecoderSize(getBytesDecoder(), entryLen), (raw) => {
+      const mmAddress = getAddressDecoder().decode(raw.subarray(0, 32));
+      const oddsScaled: bigint[] = [];
+      const oddsDec = getU32BigintDecoder();
+      for (let s = 0; s < numSides; s++) {
+         const off = 32 + s * PROXY_MARKET_SIDE_ODDS_WIRE_LEN;
+         oddsScaled.push(oddsDec.decode(raw.subarray(off, off + PROXY_MARKET_SIDE_ODDS_WIRE_LEN)));
+      }
+      return { mmAddress, oddsScaled };
+   });
+};
 
 /** Return data from aggregator `get_market_quotes_proxy` (fixed-size MM chunks; `numSides` from `mkt`). */
 export function decodeMarketQuotesProxyReturnData(
@@ -630,19 +768,11 @@ export function decodeMarketQuotesProxyReturnData(
    if (data.length > MARKET_QUOTES_PROXY_RETURN_MAX) {
       throw new RangeError(`market quotes return data exceeds ${MARKET_QUOTES_PROXY_RETURN_MAX} bytes`);
    }
-   const addrDecoder = getAddressDecoder();
-   const bytes = new Uint8Array(data);
-   const view = new DataView(bytes.buffer, bytes.byteOffset, bytes.byteLength);
+   const decoder = getProxyMarketMmQuotesEntryDecoder(numSides);
    const quotes: ProxyMarketMmQuotes[] = [];
+   const bytes = new Uint8Array(data);
    for (let offset = 0; offset < bytes.length; offset += entryLen) {
-      const mmAddress = addrDecoder.decode(bytes.subarray(offset, offset + 32));
-      const oddsScaled: bigint[] = [];
-      let sideOff = offset + 32;
-      for (let s = 0; s < numSides; s++) {
-         oddsScaled.push(BigInt(view.getUint32(sideOff, true)));
-         sideOff += PROXY_MARKET_SIDE_ODDS_WIRE_LEN;
-      }
-      quotes.push({ mmAddress, oddsScaled });
+      quotes.push(decoder.decode(bytes.subarray(offset, offset + entryLen)));
    }
    return quotes;
 }
@@ -675,6 +805,8 @@ export const getParlayLegWireEncoder = (): Encoder<ParlayLegWire> =>
       ['side', getU8Encoder()],
       ['eventStateSequence', getU16Encoder()],
       ['eventGameState', getEventGameStateEncoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+      ['result', getBetResultU8Encoder()],
    ]);
 
 export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
@@ -683,21 +815,21 @@ export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
       ['side', getU8Decoder()],
       ['eventStateSequence', getU16Decoder()],
       ['eventGameState', getEventGameStateDecoder()],
+      ['oddsScaled', getU32BigintDecoder()],
+      ['result', getBetResultU8Decoder()],
    ]);
 
 /** Pad `ParlayLegTable` wire to `MAX_PARLAY_LEGS` slots; unused slots are zero. */
-function padParlayLegTableBytes(legs: readonly ParlayLegWire[], numLegs: number): Uint8Array {
+export function padParlayLegTableBytes(legs: readonly ParlayLegWire[], numLegs: number): Uint8Array {
    if (numLegs < 1 || numLegs > MAX_PARLAY_LEGS || legs.length < numLegs) {
       throw new RangeError('padParlayLegTableBytes: invalid legs / numLegs');
    }
    const enc = getParlayLegWireEncoder();
    const out = new Uint8Array(PARLAY_LEG_TABLE_LEN);
-   let o = 0;
    for (let i = 0; i < MAX_PARLAY_LEGS; i++) {
       if (i < numLegs) {
-         out.set(enc.encode(legs[i]!), o);
+         out.set(enc.encode(legs[i]!), i * PARLAY_LEG_WIRE_LEN);
       }
-      o += PARLAY_LEG_WIRE_LEN;
    }
    return out;
 }
@@ -720,6 +852,13 @@ const getParlayLegTableWireDecoder = (): Decoder<readonly ParlayLegWire[]> =>
       decodeParlayLegTableBytes(raw),
    );
 
+function decodeParlayLegsFromTable(numLegs: number, legsTable: ReadonlyUint8Array): readonly ParlayLegWire[] {
+   if (numLegs < 2 || numLegs > MAX_PARLAY_LEGS) {
+      throw new RangeError(`parlay numLegs invalid: ${numLegs}`);
+   }
+   return decodeParlayLegTableBytes(legsTable).slice(0, numLegs);
+}
+
 const getParlayBetAccountDataDecoder = (): Decoder<ParlayBetAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
@@ -736,40 +875,93 @@ const getParlayBetAccountDataDecoder = (): Decoder<ParlayBetAccountData> =>
       ['legs', getParlayLegTableWireDecoder()],
    ]);
 
+export const getFillParlayIxDataEncoder = (): Encoder<FillParlayIxData> =>
+   transformEncoder(
+      getStructEncoder([
+         ['betId', getU64Encoder()],
+         ['amount', getU64Encoder()],
+         ['minOddsScaled', getU32BigintEncoder('minOddsScaled')],
+         ['numLegs', getU8Encoder()],
+         ['legsTable', fixEncoderSize(getBytesEncoder(), PARLAY_LEG_TABLE_LEN)],
+      ]),
+      (data) => ({
+         betId: data.betId,
+         amount: data.amount,
+         minOddsScaled: data.minOddsScaled,
+         numLegs: data.numLegs,
+         legsTable: padParlayLegTableBytes(data.legs, data.numLegs),
+      }),
+   );
+
+export const getFillParlayIxDataDecoder = (): Decoder<FillParlayIxData> =>
+   transformDecoder(
+      getStructDecoder([
+         ['betId', getU64Decoder()],
+         ['amount', getU64Decoder()],
+         ['minOddsScaled', getU32BigintDecoder()],
+         ['numLegs', getU8Decoder()],
+         ['legsTable', fixDecoderSize(getBytesDecoder(), PARLAY_LEG_TABLE_LEN)],
+      ]),
+      (decoded) => ({
+         betId: decoded.betId,
+         amount: decoded.amount,
+         minOddsScaled: decoded.minOddsScaled,
+         numLegs: decoded.numLegs,
+         legs: decodeParlayLegsFromTable(decoded.numLegs, decoded.legsTable),
+      }),
+   );
+
 export function encodeFillParlayIxData(data: FillParlayIxData): Uint8Array {
    validateFillParlayIxData(data);
-   const out = new Uint8Array(FILL_PARLAY_IX_DATA_LEN);
-   const dv = new DataView(out.buffer);
-   dv.setBigUint64(0, data.betId, true);
-   dv.setBigUint64(8, data.amount, true);
-   dv.setUint32(16, assertU32Bigint('minOddsScaled', data.minOddsScaled), true);
-   out[20] = data.numLegs & 0xff;
-   out.set(padParlayLegTableBytes(data.legs, data.numLegs), 21);
-   return out;
+   const out = getFillParlayIxDataEncoder().encode(data);
+   if (out.length !== FILL_PARLAY_IX_DATA_LEN) {
+      throw new RangeError(`fill_parlay body len ${out.length}; expected ${FILL_PARLAY_IX_DATA_LEN}`);
+   }
+   return new Uint8Array(out);
 }
 
 export function decodeFillParlayIxData(data: ReadonlyUint8Array): FillParlayIxData {
    if (data.length !== FILL_PARLAY_IX_DATA_LEN) {
       throw new RangeError(`fill_parlay body len ${data.length}; expected ${FILL_PARLAY_IX_DATA_LEN}`);
    }
-   const u8 = new Uint8Array(data);
-   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-   const betId = dv.getBigUint64(0, true);
-   const amount = dv.getBigUint64(8, true);
-   const minOddsScaled = BigInt(dv.getUint32(16, true) >>> 0);
-   const numLegs = u8[20]!;
-   if (numLegs < 2 || numLegs > MAX_PARLAY_LEGS) {
-      throw new RangeError(`fill_parlay numLegs invalid: ${numLegs}`);
-   }
-   const allLegs = decodeParlayLegTableBytes(u8.subarray(21, 21 + PARLAY_LEG_TABLE_LEN));
-   return {
-      betId,
-      amount,
-      minOddsScaled,
-      numLegs,
-      legs: allLegs.slice(0, numLegs),
-   };
+   return getFillParlayIxDataDecoder().decode(new Uint8Array(data));
 }
+
+export const getGetQuoteParlayIxDataEncoder = (): Encoder<GetQuoteParlayIxData> =>
+   transformEncoder(
+      getStructEncoder([
+         ['instructionDiscriminator', getU8Encoder()],
+         ['amount', getU64Encoder()],
+         ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+         ['numLegs', getU8Encoder()],
+         ['legsTable', fixEncoderSize(getBytesEncoder(), PARLAY_LEG_TABLE_LEN)],
+      ]),
+      (ix) => ({
+         instructionDiscriminator: ix.instructionDiscriminator,
+         amount: ix.amount,
+         oddsScaled: ix.oddsScaled,
+         numLegs: ix.numLegs,
+         legsTable: padParlayLegTableBytes(ix.legs, ix.numLegs),
+      }),
+   );
+
+export const getGetQuoteParlayIxDataDecoder = (): Decoder<GetQuoteParlayIxData> =>
+   transformDecoder(
+      getStructDecoder([
+         ['instructionDiscriminator', getU8Decoder()],
+         ['amount', getU64Decoder()],
+         ['oddsScaled', getU32BigintDecoder()],
+         ['numLegs', getU8Decoder()],
+         ['legsTable', fixDecoderSize(getBytesDecoder(), PARLAY_LEG_TABLE_LEN)],
+      ]),
+      (decoded) => ({
+         instructionDiscriminator: decoded.instructionDiscriminator,
+         amount: decoded.amount,
+         oddsScaled: decoded.oddsScaled,
+         numLegs: decoded.numLegs,
+         legs: decodeParlayLegsFromTable(decoded.numLegs, decoded.legsTable),
+      }),
+   );
 
 export function encodeGetQuoteParlayIxData(ix: GetQuoteParlayIxData): Uint8Array {
    if (ix.instructionDiscriminator !== MM_GET_QUOTE_PARLAY_IX_DISCRIMINATOR) {
@@ -781,38 +973,35 @@ export function encodeGetQuoteParlayIxData(ix: GetQuoteParlayIxData): Uint8Array
       { amount: ix.amount, oddsScaled: ix.oddsScaled, numLegs: ix.numLegs, legs: ix.legs },
       'getQuoteParlay',
    );
-   const out = new Uint8Array(GET_QUOTE_PARLAY_IX_WIRE_LEN);
-   out[0] = ix.instructionDiscriminator & 0xff;
-   const dv = new DataView(out.buffer);
-   dv.setBigUint64(1, ix.amount, true);
-   dv.setUint32(9, assertU32Bigint('oddsScaled', ix.oddsScaled), true);
-   out[13] = ix.numLegs & 0xff;
-   out.set(padParlayLegTableBytes(ix.legs, ix.numLegs), 14);
-   return out;
+   const out = getGetQuoteParlayIxDataEncoder().encode(ix);
+   if (out.length !== GET_QUOTE_PARLAY_IX_WIRE_LEN) {
+      throw new RangeError(`get_quote_parlay wire len ${out.length}`);
+   }
+   return new Uint8Array(out);
 }
 
 export function decodeGetQuoteParlayIxData(data: ReadonlyUint8Array): GetQuoteParlayIxData {
    if (data.length !== GET_QUOTE_PARLAY_IX_WIRE_LEN) {
       throw new RangeError(`get_quote_parlay wire len ${data.length}`);
    }
-   const u8 = new Uint8Array(data);
-   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-   const instructionDiscriminator = u8[0]!;
-   const amount = dv.getBigUint64(1, true);
-   const oddsScaled = BigInt(dv.getUint32(9, true) >>> 0);
-   const numLegs = u8[13]!;
-   if (numLegs < 2 || numLegs > MAX_PARLAY_LEGS) {
-      throw new RangeError(`get_quote_parlay numLegs invalid: ${numLegs}`);
-   }
-   const allLegs = decodeParlayLegTableBytes(u8.subarray(14, 14 + PARLAY_LEG_TABLE_LEN));
-   return {
-      instructionDiscriminator,
-      amount,
-      oddsScaled,
-      numLegs,
-      legs: allLegs.slice(0, numLegs),
-   };
+   return getGetQuoteParlayIxDataDecoder().decode(new Uint8Array(data));
 }
+
+export const getFillParlayQuoteIxDataEncoder = (): Encoder<FillParlayQuoteIxData> =>
+   getStructEncoder([
+      ['instructionDiscriminator', getU8Encoder()],
+      ['amountToFill', getU64Encoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+      ['amountToSend', getU64Encoder()],
+   ]);
+
+export const getFillParlayQuoteIxDataDecoder = (): Decoder<FillParlayQuoteIxData> =>
+   getStructDecoder([
+      ['instructionDiscriminator', getU8Decoder()],
+      ['amountToFill', getU64Decoder()],
+      ['oddsScaled', getU32BigintDecoder()],
+      ['amountToSend', getU64Decoder()],
+   ]);
 
 export function encodeFillParlayQuoteIxData(ix: FillParlayQuoteIxData): Uint8Array {
    if (ix.instructionDiscriminator !== MM_FILL_QUOTE_PARLAY_IX_DISCRIMINATOR) {
@@ -820,52 +1009,268 @@ export function encodeFillParlayQuoteIxData(ix: FillParlayQuoteIxData): Uint8Arr
          `fill_parlay_quote instructionDiscriminator must be ${MM_FILL_QUOTE_PARLAY_IX_DISCRIMINATOR}`,
       );
    }
-   const out = new Uint8Array(FILL_QUOTE_PARLAY_IX_WIRE_LEN);
-   out[0] = ix.instructionDiscriminator & 0xff;
-   const dv = new DataView(out.buffer);
-   dv.setBigUint64(1, ix.amountToFill, true);
-   dv.setUint32(9, assertU32Bigint('oddsScaled', ix.oddsScaled), true);
-   dv.setBigUint64(13, ix.amountToSend, true);
-   return out;
+   const out = getFillParlayQuoteIxDataEncoder().encode(ix);
+   if (out.length !== FILL_QUOTE_PARLAY_IX_WIRE_LEN) {
+      throw new RangeError(`fill_parlay_quote wire len ${out.length}`);
+   }
+   return new Uint8Array(out);
 }
 
 export function decodeFillParlayQuoteIxData(data: ReadonlyUint8Array): FillParlayQuoteIxData {
    if (data.length !== FILL_QUOTE_PARLAY_IX_WIRE_LEN) {
       throw new RangeError(`fill_parlay_quote wire len ${data.length}`);
    }
-   const u8 = new Uint8Array(data);
-   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+   return getFillParlayQuoteIxDataDecoder().decode(new Uint8Array(data));
+}
+
+/** One parlay leg in an RFQ signed message (`RfqSignedParlayLeg` on-chain). */
+export type RfqSignedParlayLeg = Pick<
+   ParlayLegWire,
+   'marketId' | 'eventGameState' | 'eventStateSequence' | 'side' | 'oddsScaled'
+>;
+
+const getRfqSignedParlayLegEncoder = (): Encoder<RfqSignedParlayLeg> =>
+   getStructEncoder([
+      ['marketId', getMarketIdEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
+      ['eventStateSequence', getU16Encoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+      ['side', getU8Encoder()],
+   ]);
+
+function rfqSignedParlayLegFromWire(leg: ParlayLegWire): RfqSignedParlayLeg {
    return {
-      instructionDiscriminator: u8[0]!,
-      amountToFill: dv.getBigUint64(1, true),
-      oddsScaled: BigInt(dv.getUint32(9, true) >>> 0),
-      amountToSend: dv.getBigUint64(13, true),
+      marketId: leg.marketId,
+      eventGameState: leg.eventGameState,
+      eventStateSequence: leg.eventStateSequence,
+      side: leg.side,
+      oddsScaled: leg.oddsScaled,
    };
 }
+
+function rfqSignedParlayLegPlaceholder(): RfqSignedParlayLeg {
+   return {
+      marketId: {
+         eventId: { event: 0n, league: 0, sport: 0 },
+         player: 0n,
+         mkt: 0,
+         period: 0,
+         isPregame: false,
+         operator: '11111111111111111111111111111111' as Address,
+      },
+      side: 0,
+      eventStateSequence: 0,
+      eventGameState: { gamePhase: '', homePrimary: 0, awayPrimary: 0, homeSecondary: 0, awaySecondary: 0 },
+      oddsScaled: 10_000n,
+   };
+}
+
+/** Pad RFQ signed parlay leg slots to `MAX_PARLAY_LEGS`; unused slots are placeholders. */
+export function padRfqSignedParlayLegTableBytes(
+   legs: readonly ParlayLegWire[],
+   numLegs: number,
+): Uint8Array {
+   if (numLegs < 1 || numLegs > MAX_PARLAY_LEGS || legs.length < numLegs) {
+      throw new RangeError('padRfqSignedParlayLegTableBytes: invalid legs / numLegs');
+   }
+   const enc = getRfqSignedParlayLegEncoder();
+   const out = new Uint8Array(RFQ_SIGNED_PARLAY_LEG_TABLE_LEN);
+   for (let i = 0; i < MAX_PARLAY_LEGS; i++) {
+      const leg =
+         i < numLegs && legs[i] != null
+            ? rfqSignedParlayLegFromWire(legs[i]!)
+            : rfqSignedParlayLegPlaceholder();
+      out.set(enc.encode(leg), i * RFQ_SIGNED_PARLAY_LEG_LEN);
+   }
+   return out;
+}
+
+const getFillRfqBetIxBodyEncoder = (): Encoder<FillRfqBetIxBody> =>
+   getStructEncoder([
+      ['betId', getU64Encoder()],
+      ['marketId', getMarketIdEncoder()],
+      ['side', getU8Encoder()],
+      ['amount', getU64Encoder()],
+      ['eventStateSequence', getU16Encoder()],
+      ['eventGameState', getEventGameStateEncoder()],
+      ['maxStake', getU64Encoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+      ['offerExpiry', getU32Encoder()],
+   ]);
+
+export function encodeFillRfqBetIxBody(data: FillRfqBetIxBody): Uint8Array {
+   const out = getFillRfqBetIxBodyEncoder().encode(data);
+   if (out.length !== FILL_RFQ_BET_IX_BODY_LEN) {
+      throw new RangeError(`fillRfqBet body len ${out.length}; expected ${FILL_RFQ_BET_IX_BODY_LEN}`);
+   }
+   return new Uint8Array(out);
+}
+
+const getFillRfqParlayIxBodyEncoder = (): Encoder<FillRfqParlayIxBody> =>
+   transformEncoder(
+      getStructEncoder([
+         ['betId', getU64Encoder()],
+         ['amount', getU64Encoder()],
+         ['numLegs', getU8Encoder()],
+         ['legsTable', fixEncoderSize(getBytesEncoder(), PARLAY_LEG_TABLE_LEN)],
+         ['maxStake', getU64Encoder()],
+         ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+         ['offerExpiry', getU32Encoder()],
+      ]),
+      (data) => ({
+         betId: data.betId,
+         amount: data.amount,
+         numLegs: data.numLegs,
+         legsTable: padParlayLegTableBytes(data.legs, data.numLegs),
+         maxStake: data.maxStake,
+         oddsScaled: data.oddsScaled,
+         offerExpiry: data.offerExpiry,
+      }),
+   );
+
+const getFillRfqParlayIxBodyDecoder = (): Decoder<FillRfqParlayIxBody> =>
+   transformDecoder(
+      getStructDecoder([
+         ['betId', getU64Decoder()],
+         ['amount', getU64Decoder()],
+         ['numLegs', getU8Decoder()],
+         ['legsTable', fixDecoderSize(getBytesDecoder(), PARLAY_LEG_TABLE_LEN)],
+         ['maxStake', getU64Decoder()],
+         ['oddsScaled', getU32BigintDecoder()],
+         ['offerExpiry', getU32Decoder()],
+      ]),
+      (decoded) => ({
+         betId: decoded.betId,
+         amount: decoded.amount,
+         numLegs: decoded.numLegs,
+         legs: decodeParlayLegsFromTable(decoded.numLegs, decoded.legsTable),
+         maxStake: decoded.maxStake,
+         oddsScaled: decoded.oddsScaled,
+         offerExpiry: decoded.offerExpiry,
+      }),
+   );
+
+export function encodeFillRfqParlayIxBody(data: FillRfqParlayIxBody): Uint8Array {
+   const out = getFillRfqParlayIxBodyEncoder().encode(data);
+   if (out.length !== FILL_RFQ_PARLAY_IX_BODY_LEN) {
+      throw new RangeError(
+         `fillRfqParlay body len ${out.length}; expected ${FILL_RFQ_PARLAY_IX_BODY_LEN}`,
+      );
+   }
+   return new Uint8Array(out);
+}
+
+export const getRfqBetMessageEncoder = (): Encoder<RfqBetMessageInput> =>
+   getStructEncoder([
+      ['networkDomain', getU8Encoder()],
+      ['user', getAddressEncoder()],
+      ['betId', getU64Encoder()],
+      ['marketId', getMarketIdEncoder()],
+      ['eventGameState', getEventGameStateEncoder()],
+      ['eventStateSequence', getU16Encoder()],
+      ['side', getU8Encoder()],
+      ['maxStake', getU64Encoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+      ['offerExpiry', getU32Encoder()],
+      ['mmProgramId', getAddressEncoder()],
+   ]);
+
+/** Canonical ed25519 message bytes for a single-bet RFQ quote. */
+export function encodeRfqBetMessageBytes(input: RfqBetMessageInput): Uint8Array {
+   const out = getRfqBetMessageEncoder().encode(input);
+   if (out.length !== RFQ_BET_MESSAGE_LEN) {
+      throw new RangeError(`rfq bet message len ${out.length}; expected ${RFQ_BET_MESSAGE_LEN}`);
+   }
+   return new Uint8Array(out);
+}
+
+export const getRfqParlayMessageEncoder = (): Encoder<RfqParlayMessageInput> =>
+   transformEncoder(
+      getStructEncoder([
+         ['networkDomain', getU8Encoder()],
+         ['user', getAddressEncoder()],
+         ['betId', getU64Encoder()],
+         ['numLegs', getU8Encoder()],
+         ['legsTable', fixEncoderSize(getBytesEncoder(), RFQ_SIGNED_PARLAY_LEG_TABLE_LEN)],
+         ['maxStake', getU64Encoder()],
+         ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+         ['offerExpiry', getU32Encoder()],
+         ['mmProgramId', getAddressEncoder()],
+      ]),
+      (input) => ({
+         networkDomain: input.networkDomain,
+         user: input.user,
+         betId: input.betId,
+         numLegs: input.numLegs,
+         legsTable: padRfqSignedParlayLegTableBytes(input.legs, input.numLegs),
+         maxStake: input.maxStake,
+         oddsScaled: input.oddsScaled,
+         offerExpiry: input.offerExpiry,
+         mmProgramId: input.mmProgramId,
+      }),
+   );
+
+/** Canonical ed25519 message bytes for a parlay RFQ quote (fixed `MAX_PARLAY_LEGS` leg slots). */
+export function encodeRfqParlayMessageBytes(input: RfqParlayMessageInput): Uint8Array {
+   const out = getRfqParlayMessageEncoder().encode(input);
+   if (out.length !== RFQ_PARLAY_MESSAGE_LEN) {
+      throw new RangeError(`rfq parlay message len ${out.length}; expected ${RFQ_PARLAY_MESSAGE_LEN}`);
+   }
+   return new Uint8Array(out);
+}
+
+export const getMmParlayQuoteBufferEncoder = (): Encoder<MmParlayQuoteBuffer> =>
+   transformEncoder(
+      getStructEncoder([
+         ['discriminator', getU8Encoder()],
+         ['isUsed', getU8Encoder()],
+         ['userAddress', getAddressEncoder()],
+         ['maxAmount', getU64Encoder()],
+         ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+         ['numLegs', getU8Encoder()],
+         ['legsTable', fixEncoderSize(getBytesEncoder(), PARLAY_LEG_TABLE_LEN)],
+      ]),
+      (data) => ({
+         discriminator: data.discriminator,
+         isUsed: data.isUsed,
+         userAddress: data.userAddress,
+         maxAmount: data.maxAmount,
+         oddsScaled: data.oddsScaled,
+         numLegs: data.numLegs,
+         legsTable: padParlayLegTableBytes(data.legs, data.numLegs),
+      }),
+   );
+
+export const getMmParlayQuoteBufferDecoder = (): Decoder<MmParlayQuoteBuffer> =>
+   transformDecoder(
+      getStructDecoder([
+         ['discriminator', getU8Decoder()],
+         ['isUsed', getU8Decoder()],
+         ['userAddress', getAddressDecoder()],
+         ['maxAmount', getU64Decoder()],
+         ['oddsScaled', getU32BigintDecoder()],
+         ['numLegs', getU8Decoder()],
+         ['legsTable', fixDecoderSize(getBytesDecoder(), PARLAY_LEG_TABLE_LEN)],
+      ]),
+      (decoded) => ({
+         discriminator: decoded.discriminator,
+         isUsed: decoded.isUsed,
+         userAddress: decoded.userAddress,
+         maxAmount: decoded.maxAmount,
+         oddsScaled: decoded.oddsScaled,
+         numLegs: decoded.numLegs,
+         legs: decodeParlayLegsFromTable(decoded.numLegs, decoded.legsTable).slice(
+            0,
+            Math.min(decoded.numLegs, MAX_PARLAY_LEGS),
+         ),
+      }),
+   );
 
 export function decodeMmParlayQuoteBuffer(data: ReadonlyUint8Array): MmParlayQuoteBuffer {
    if (data.length !== MM_PARLAY_QUOTE_BUFFER_LEN) {
       throw new RangeError(`mm parlay quote buffer len ${data.length}`);
    }
-   const u8 = new Uint8Array(data);
-   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
-   const discriminator = u8[0]!;
-   const isUsed = u8[1]!;
-   const userSlice = u8.subarray(2, 34);
-   const userAddress = getAddressDecoder().decode(userSlice);
-   const maxAmount = dv.getBigUint64(34, true);
-   const oddsScaled = BigInt(dv.getUint32(42, true) >>> 0);
-   const numLegs = u8[46]!;
-   const allLegs = decodeParlayLegTableBytes(u8.subarray(47, 47 + PARLAY_LEG_TABLE_LEN));
-   return {
-      discriminator,
-      isUsed,
-      userAddress,
-      maxAmount,
-      oddsScaled,
-      numLegs,
-      legs: allLegs.slice(0, Math.min(numLegs, MAX_PARLAY_LEGS)),
-   };
+   return getMmParlayQuoteBufferDecoder().decode(new Uint8Array(data));
 }
 
 const getAddLineToNettingIxPayloadEncoder = (): Encoder<AddLineToNettingIxData> =>
@@ -934,6 +1339,106 @@ export const getFillQuoteIxDataDecoder = (): Decoder<FillQuoteIxData> =>
       ['amountToSend', getU64Decoder()],
    ]);
 
+export const getFillRfqBetIxDataEncoder = (): Encoder<FillRfqBetIxData> =>
+   transformEncoder(
+      getStructEncoder([
+         ['betId', getU64Encoder()],
+         ['marketId', getMarketIdEncoder()],
+         ['side', getU8Encoder()],
+         ['amount', getU64Encoder()],
+         ['eventStateSequence', getU16Encoder()],
+         ['eventGameState', getEventGameStateEncoder()],
+         ['maxStake', getU64Encoder()],
+         ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+         ['offerExpiry', getU32Encoder()],
+         ['signature', fixEncoderSize(getBytesEncoder(), RFQ_SIGNATURE_LEN)],
+      ]),
+      (data) => {
+         if (data.signature.length !== RFQ_SIGNATURE_LEN) {
+            throw new RangeError(`fillRfqBet.signature must be ${RFQ_SIGNATURE_LEN} bytes`);
+         }
+         return data;
+      },
+   );
+
+export function encodeFillRfqBetIxData(data: FillRfqBetIxData): Uint8Array {
+   validateFillRfqBetIxData(data);
+   const out = getFillRfqBetIxDataEncoder().encode(data);
+   if (out.length !== FILL_RFQ_BET_IX_DATA_LEN) {
+      throw new RangeError(`fillRfqBet data len ${out.length}; expected ${FILL_RFQ_BET_IX_DATA_LEN}`);
+   }
+   return new Uint8Array(out);
+}
+
+export const getFillRfqParlayIxDataEncoder = (): Encoder<FillRfqParlayIxData> =>
+   transformEncoder(
+      getStructEncoder([
+         ['body', fixEncoderSize(getBytesEncoder(), FILL_RFQ_PARLAY_IX_BODY_LEN)],
+         ['signature', fixEncoderSize(getBytesEncoder(), RFQ_SIGNATURE_LEN)],
+      ]),
+      (data) => {
+         if (data.signature.length !== RFQ_SIGNATURE_LEN) {
+            throw new RangeError(`fillRfqParlay.signature must be ${RFQ_SIGNATURE_LEN} bytes`);
+         }
+         return {
+            body: getFillRfqParlayIxBodyEncoder().encode(data),
+            signature: data.signature,
+         };
+      },
+   );
+
+export function encodeFillRfqParlayIxData(data: FillRfqParlayIxData): Uint8Array {
+   validateFillRfqParlayIxData(data);
+   const out = getFillRfqParlayIxDataEncoder().encode(data);
+   if (out.length !== FILL_RFQ_PARLAY_IX_DATA_LEN) {
+      throw new RangeError(`fillRfqParlay data len ${out.length}; expected ${FILL_RFQ_PARLAY_IX_DATA_LEN}`);
+   }
+   return new Uint8Array(out);
+}
+
+export const getFillRfqBetIxDataDecoder = (): Decoder<FillRfqBetIxData> =>
+   transformDecoder(
+      getStructDecoder([
+         ['betId', getU64Decoder()],
+         ['marketId', getMarketIdDecoder()],
+         ['side', getU8Decoder()],
+         ['amount', getU64Decoder()],
+         ['eventStateSequence', getU16Decoder()],
+         ['eventGameState', getEventGameStateDecoder()],
+         ['maxStake', getU64Decoder()],
+         ['oddsScaled', getU32BigintDecoder()],
+         ['offerExpiry', getU32Decoder()],
+         ['signature', fixDecoderSize(getBytesDecoder(), RFQ_SIGNATURE_LEN)],
+      ]),
+      (decoded) => ({
+         ...decoded,
+         signature: new Uint8Array(decoded.signature),
+      }),
+   );
+
+
+export const getFillRfqParlayIxDataDecoder = (): Decoder<FillRfqParlayIxData> =>
+   transformDecoder(
+      getStructDecoder([
+         ['body', fixDecoderSize(getBytesDecoder(), FILL_RFQ_PARLAY_IX_BODY_LEN)],
+         ['signature', fixDecoderSize(getBytesDecoder(), RFQ_SIGNATURE_LEN)],
+      ]),
+      (decoded) => {
+         const body = getFillRfqParlayIxBodyDecoder().decode(decoded.body);
+         return {
+            ...body,
+            signature: new Uint8Array(decoded.signature),
+         };
+      },
+   );
+
+function decodeFillRfqParlayIxData(rest: ReadonlyUint8Array): FillRfqParlayIxData {
+   if (rest.length !== FILL_RFQ_PARLAY_IX_DATA_LEN) {
+      throw new RangeError(`fillRfqParlay: expected ${FILL_RFQ_PARLAY_IX_DATA_LEN} bytes`);
+   }
+   return getFillRfqParlayIxDataDecoder().decode(new Uint8Array(rest));
+}
+
 function concatDiscriminator(disc: number, payload: ReadonlyUint8Array | Uint8Array): Uint8Array {
    const p = new Uint8Array(payload);
    const out = new Uint8Array(1 + p.length);
@@ -968,12 +1473,26 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
          }
          return concatDiscriminator(FILL_BET_IX_DISCRIMINATOR, p);
       }
+      case 'fillRfqBet': {
+         const p = encodeFillRfqBetIxData(ix.data);
+         if (p.length !== FILL_RFQ_BET_IX_DATA_LEN) {
+            throw new RangeError(`fill rfq bet payload length ${p.length}`);
+         }
+         return concatDiscriminator(FILL_RFQ_BET_IX_DISCRIMINATOR, p);
+      }
       case 'fillParlay': {
          const p = encodeFillParlayIxData(ix.data);
          if (p.length !== FILL_PARLAY_IX_DATA_LEN) {
             throw new RangeError(`fill parlay payload length ${p.length}`);
          }
          return concatDiscriminator(FILL_PARLAY_IX_DISCRIMINATOR, p);
+      }
+      case 'fillRfqParlay': {
+         const p = encodeFillRfqParlayIxData(ix.data);
+         if (p.length !== FILL_RFQ_PARLAY_IX_DATA_LEN) {
+            throw new RangeError(`fill rfq parlay payload length ${p.length}`);
+         }
+         return concatDiscriminator(FILL_RFQ_PARLAY_IX_DISCRIMINATOR, p);
       }
       case 'getQuoteProxy': {
          const p = getFillBetIxDataEncoder().encode(ix.data);
@@ -1001,6 +1520,23 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
             throw new RangeError('gradeBets requires at least one result byte');
          }
          return concatDiscriminator(GRADE_BETS_IX_DISCRIMINATOR, new Uint8Array(ix.betResults));
+      }
+      case 'gradeParlay': {
+         if (ix.legGradeMasks.length === 0) {
+            throw new RangeError('gradeParlay requires at least one mask');
+         }
+         const parts: Uint8Array[] = [];
+         for (const mask of ix.legGradeMasks) {
+            if (mask.length !== MAX_PARLAY_LEGS) {
+               throw new RangeError(`gradeParlay mask must be ${MAX_PARLAY_LEGS} bytes`);
+            }
+            parts.push(new Uint8Array(mask));
+         }
+         const body = new Uint8Array(parts.length * MAX_PARLAY_LEGS);
+         for (let i = 0; i < parts.length; i++) {
+            body.set(parts[i]!, i * MAX_PARLAY_LEGS);
+         }
+         return concatDiscriminator(GRADE_PARLAY_IX_DISCRIMINATOR, body);
       }
       case 'settleBet':
          return new Uint8Array([SETTLE_BET_IX_DISCRIMINATOR]);
@@ -1086,11 +1622,21 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError(`fillBet: expected ${FILL_BET_IX_DATA_LEN} bytes`);
          }
          return { kind: 'fillBet', data: getFillBetIxDataDecoder().decode(restBytes) };
+      case FILL_RFQ_BET_IX_DISCRIMINATOR:
+         if (rest.length !== FILL_RFQ_BET_IX_DATA_LEN) {
+            throw new RangeError(`fillRfqBet: expected ${FILL_RFQ_BET_IX_DATA_LEN} bytes`);
+         }
+         return { kind: 'fillRfqBet', data: getFillRfqBetIxDataDecoder().decode(restBytes) };
       case FILL_PARLAY_IX_DISCRIMINATOR:
          if (rest.length !== FILL_PARLAY_IX_DATA_LEN) {
             throw new RangeError(`fillParlay: expected ${FILL_PARLAY_IX_DATA_LEN} bytes`);
          }
          return { kind: 'fillParlay', data: decodeFillParlayIxData(restBytes) };
+      case FILL_RFQ_PARLAY_IX_DISCRIMINATOR:
+         if (rest.length !== FILL_RFQ_PARLAY_IX_DATA_LEN) {
+            throw new RangeError(`fillRfqParlay: expected ${FILL_RFQ_PARLAY_IX_DATA_LEN} bytes`);
+         }
+         return { kind: 'fillRfqParlay', data: decodeFillRfqParlayIxData(restBytes) };
       case GET_QUOTE_PROXY_IX_DISCRIMINATOR:
          if (rest.length !== FILL_BET_IX_DATA_LEN) {
             throw new RangeError(`getQuoteProxy: expected ${FILL_BET_IX_DATA_LEN} bytes`);
@@ -1111,6 +1657,17 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError('gradeBets: expected at least one byte');
          }
          return { kind: 'gradeBets', betResults: new Uint8Array(rest) };
+      case GRADE_PARLAY_IX_DISCRIMINATOR:
+         if (rest.length === 0 || rest.length % MAX_PARLAY_LEGS !== 0) {
+            throw new RangeError(`gradeParlay: expected non-zero multiple of ${MAX_PARLAY_LEGS} bytes`);
+         }
+         {
+            const masks: Uint8Array[] = [];
+            for (let o = 0; o < rest.length; o += MAX_PARLAY_LEGS) {
+               masks.push(restBytes.subarray(o, o + MAX_PARLAY_LEGS));
+            }
+            return { kind: 'gradeParlay', legGradeMasks: masks };
+         }
       case SETTLE_BET_IX_DISCRIMINATOR:
          if (rest.length !== 0) {
             throw new RangeError('settleBet: expected no payload');

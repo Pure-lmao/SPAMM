@@ -15,7 +15,8 @@ use spamm_aggregator::state::EventGameState;
 use crate::common::{
    admin, assert_bet_after_fill, assert_fill_bet_single_mm_economics, assert_ok_record_cu, assert_program_err,
    bet_pda_for, bet_token_ata, config_pda, decode_bet, encumbrance_pda, event_id_soccer, fill_bet_instruction,
-   fill_bet_metas_one_mm, fill_bet_netting_placeholder, market_spread_pregame, mm_program_id, netting_pda_for_event,
+   fill_bet_metas_one_mm, fill_bet_netting_placeholder, FILL_BET_MM_ACCOUNTS, FILL_MM_GROUP_OFFSET,
+   market_spread_pregame, mm_program_id, netting_pda_for_event,
    oracle_body_two_outcome, read_encumbrance, read_netting_soccer_header_and_lines, read_token_balance,
    system_owned_empty, user, user_collateral_ata, Env,
 };
@@ -255,7 +256,7 @@ fn fill_bet_duplicate_mm_program_in_tail() {
       event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
-   let tail = metas[11..].to_vec();
+   let tail = metas[FILL_MM_GROUP_OFFSET..].to_vec();
    metas.extend(tail);
    let mut buf = vec![3u8];
    let mut pay = [0u8; spamm_aggregator::instructions::FILL_BET_IX_DATA_LEN];
@@ -389,6 +390,7 @@ fn fill_bet_with_netting_line_m4() {
       mkt: 4,
       period: 1,
       is_pregame: true,
+      operator: crate::common::fixtures::market_operator(),
    };
    let body = crate::common::oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -477,6 +479,7 @@ fn fill_bet_netting_m4_offset_opposing_sides() {
       mkt: 4,
       period: 1,
       is_pregame: true,
+      operator: crate::common::fixtures::market_operator(),
    };
    let body = crate::common::oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -685,7 +688,7 @@ fn fill_bet_too_many_mm_groups_rejected() {
       event_game_state: EventGameState::zeroed(),
    };
    let mut metas = fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder());
-   let group = metas[11..20].to_vec();
+   let group = metas[FILL_MM_GROUP_OFFSET..FILL_MM_GROUP_OFFSET + FILL_BET_MM_ACCOUNTS].to_vec();
    assert_eq!(MAX_NUMBER_OF_MMS, 5);
    for _ in 0..5 {
       metas.extend(group.clone());

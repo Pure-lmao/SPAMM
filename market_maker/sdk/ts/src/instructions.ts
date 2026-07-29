@@ -16,11 +16,14 @@ import {
    FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
    GET_QUOTE_IX_DISCRIMINATOR,
    GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   MM_FILL_BET_RFQ_IX_DISCRIMINATOR,
+   MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR,
 } from './codex.js';
 import {
    getAta,
    getEventStatePda,
    getMmConfigPda,
+   getMmEncumbrancePda,
    getMmMarketDataPda,
    getMmParlayQuoteBufferPda,
    getMmQuoteBufferPda,
@@ -29,6 +32,7 @@ import type {
    EventGameState,
    EventId,
    FillParlayQuoteIxData,
+   FillRfqIxData,
    GetQuoteIxData,
    GetQuoteParlayIxData,
    MarketId,
@@ -55,7 +59,11 @@ export {
    INIT_EVENT_IX_DISCRIMINATOR,
    INIT_MARKET_IX_DISCRIMINATOR,
    INIT_PROGRAM_IX_DISCRIMINATOR,
+   MM_FILL_BET_RFQ_IX_DISCRIMINATOR,
+   MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR,
+   SET_RFQ_SIGNER_IX_DISCRIMINATOR,
    UPDATE_EVENT_STATE_IX_DISCRIMINATOR,
+   WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR,
 } from './codex.js';
 
 /**
@@ -88,7 +96,11 @@ const ws = (address: Address) => ({ address, role: AccountRole.WRITABLE_SIGNER }
  *
  * **Rust:** `market_maker::instructions::init_program` (`INIT_PROGRAM_IX_DISCRIMINATOR` = 1). `admin` in data must equal `feepayer`.
  */
-export async function getInitProgramIx(feepayer: Address, mmProgram: Address): Promise<Instruction> {
+export async function getInitProgramIx(
+   feepayer: Address,
+   mmProgram: Address,
+   rfqSigner?: Address,
+): Promise<Instruction> {
    const [configPda] = await getMmConfigPda(mmProgram);
    const [quoteBuf] = await getMmQuoteBufferPda(mmProgram);
    const [parlayQuoteBuf] = await getMmParlayQuoteBufferPda(mmProgram);
@@ -108,8 +120,85 @@ export async function getInitProgramIx(feepayer: Address, mmProgram: Address): P
       ],
       data: encodeMarketMakerInstructionData({
          kind: 'initProgram',
-         data: { admin: feepayer },
+         data: { admin: feepayer, rfqSigner: rfqSigner ?? feepayer },
       }),
+   };
+}
+
+export async function getSetRfqSignerIx(
+   admin: Address,
+   mmProgram: Address,
+   rfqSigner: Address,
+): Promise<Instruction> {
+   const [configPda] = await getMmConfigPda(mmProgram);
+   return {
+      programAddress: mmProgram,
+      accounts: [ws(admin), rw(configPda)],
+      data: encodeMarketMakerInstructionData({
+         kind: 'setRfqSigner',
+         data: { rfqSigner },
+      }),
+   };
+}
+
+/** MM **`fill_bet_rfq`** CPI entry for single-bet RFQ (normally invoked by aggregator; exposed for tests). */
+export async function getMmFillBetRfqIx(
+   user: Address,
+   mmProgram: Address,
+   marketId: MarketId,
+   amountToSend: bigint,
+): Promise<Instruction> {
+   const [configPda] = await getMmConfigPda(mmProgram);
+   const [marketDataPda] = await getMmMarketDataPda(mmProgram, marketId);
+   const mmTokenAta = await getAta(configPda);
+   const [encumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const liabilityAta = await getAta(encumbrancePda);
+   const data: FillRfqIxData = {
+      instructionDiscriminator: MM_FILL_BET_RFQ_IX_DISCRIMINATOR,
+      amountToSend,
+   };
+   return {
+      programAddress: mmProgram,
+      accounts: [
+         ro(user),
+         rw(marketDataPda),
+         rw(configPda),
+         rw(mmTokenAta),
+         rw(liabilityAta),
+         ro(MINT_ID),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SYSVAR_INSTRUCTIONS_ID),
+      ],
+      data: encodeMarketMakerInstructionData({ kind: 'fillBetRfq', data }),
+   };
+}
+
+/** MM **`fill_parlay_rfq`** CPI entry for parlay RFQ (no market_data account). */
+export async function getMmFillParlayRfqIx(
+   user: Address,
+   mmProgram: Address,
+   amountToSend: bigint,
+): Promise<Instruction> {
+   const [configPda] = await getMmConfigPda(mmProgram);
+   const mmTokenAta = await getAta(configPda);
+   const [encumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const liabilityAta = await getAta(encumbrancePda);
+   const data: FillRfqIxData = {
+      instructionDiscriminator: MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR,
+      amountToSend,
+   };
+   return {
+      programAddress: mmProgram,
+      accounts: [
+         ro(user),
+         rw(configPda),
+         rw(mmTokenAta),
+         rw(liabilityAta),
+         ro(MINT_ID),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SYSVAR_INSTRUCTIONS_ID),
+      ],
+      data: encodeMarketMakerInstructionData({ kind: 'fillParlayRfq', data }),
    };
 }
 
@@ -347,6 +436,20 @@ export async function getMmFillParlayQuoteIx(
    };
 }
 
+export async function getWriteArbitraryDataIx(
+   admin: Address,
+   mmProgram: Address,
+   account: Address,
+   data: Uint8Array,
+): Promise<Instruction> {
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   return {
+      programAddress: mmProgram,
+      accounts: [ws(admin), ro(mmConfigPda), rw(account), ro(SYSTEM_PROGRAM_ID)],
+      data: encodeMarketMakerInstructionData({ kind: 'writeArbitraryData', data }),
+   };
+}
+
 export async function getForceClosePdaIx(auth: Address, mmProgram: Address, pda: Address): Promise<Instruction> {
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    return {
@@ -395,6 +498,7 @@ export type MarketMakerInstructionInput =
         user: Address;
         liabilityAta: Address;
      }
+   | { kind: 'writeArbitraryData'; admin: Address; mmProgram: Address; account: Address; data: Uint8Array }
    | { kind: 'forceClosePda'; auth: Address; pda: Address; mmProgram: Address };
 
 export type MarketMakerInstructionKind = MarketMakerInstructionInput['kind'];
@@ -438,6 +542,8 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
          return getMmGetQuoteParlayIx(input.quote, input.mmProgram, input.user);
       case 'fillParlayQuote':
          return getMmFillParlayQuoteIx(input.params, input.mmProgram, input.user, input.liabilityAta);
+      case 'writeArbitraryData':
+         return getWriteArbitraryDataIx(input.admin, input.mmProgram, input.account, input.data);
       case 'forceClosePda':
          return getForceClosePdaIx(input.auth, input.mmProgram, input.pda);
       default: {

@@ -1,3 +1,5 @@
+use core::matches;
+
 use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
@@ -26,8 +28,13 @@ pub enum BetResult {
    HalfLost = 4,
    Push = 5,
    Cancelled = 6,
-   RolledBack = 7
+   RolledBack = 7,
+   /// Parlay ticket with void and/or half legs; settle recomputes payout from leg odds.
+   ModifiedWin = 8,
 }
+
+/// `grade_parlay` ix: skip updating this leg slot.
+pub const GRADE_PARLAY_LEG_SKIP: u8 = 255;
 
 impl BetResult {
    #[inline(always)]
@@ -41,8 +48,28 @@ impl BetResult {
         5 => Self::Push,
         6 => Self::Cancelled,
         7 => Self::RolledBack,
+        8 => Self::ModifiedWin,
          _ => panic!("Invalid BetResult value: {}", value),
       }
+   }
+
+   /// Leg/ticket grade bytes accepted by `grade_bets` / `grade_parlay` (excludes `Pending` and `ModifiedWin`).
+   #[inline(always)]
+   pub fn try_from_grade_byte(value: u8) -> Option<Self> {
+      match value {
+         1..=7 => Some(Self::from_u8(value)),
+         _ => None,
+      }
+   }
+
+   #[inline(always)]
+   pub fn is_void_like(self) -> bool {
+      matches!(self, Self::Push | Self::Cancelled | Self::RolledBack)
+   }
+
+   #[inline(always)]
+   pub fn is_half(self) -> bool {
+      matches!(self, Self::HalfWon | Self::HalfLost)
    }
 }
 /// Account body layout. [`zeropod`](https://github.com/blueshift-gg/zeropod) does not support

@@ -9,7 +9,9 @@ The **aggregator** is responsible for filling user bets with offers from the int
 
 **Liability** for paying out winning bets is held in a token account **owned by the aggregator**. This must be transferred by the SPAMM during the **`fill_quote`** function. 
 
-The aggregator program is responsible for **grading** the bets. Funds are transferred to the winners by calling **`settle_bet`** on a graded bet.
+Each market carries a **market operator** address on its **`MarketId`**; that operator (or the aggregator admin) grades outcomes via **`grade_bets`** / **`grade_parlay`**. Funds are transferred to the winners by calling **`settle_bet`** / **`settle_parlay`** on a graded bet.
+
+In addition to the competitive, onchain **`get_quote` / `fill_quote`** auction, a SPAMM can fill via **RFQ**: an off-chain ed25519-signed quote (keyed by the MM’s **`rfq_signer`**) that the user submits through **`fill_rfq_bet`** / **`fill_rfq_parlay`**.
 
 There are many ways SPAMMs could work:
 - one might generally quote most markets based on a sports data feed and add basic vig and risk management.
@@ -216,6 +218,67 @@ struct FillParlayQuoteIxData {
 
 The MM should decode the parlay quote buffer, verify it matches the instruction (user, odds, amounts), transfer **`amount_to_send`** to the liability account, then **MUST** set **`is_used`** on the parlay buffer to **1** so the quote **cannot be replayed** without a fresh **`get_quote_parlay`**. The amount to send may be less than the calulated user profit (or 0) if you have free collateral in the MM liability account.
 
+## Set_Rfq_Signer function
+The **`set_rfq_signer`** function updates the **`rfq_signer`** pubkey on the MM config PDA. That key signs off-chain RFQ quote messages; the aggregator verifies the signature against the on-chain config when filling **`fill_rfq_bet`** / **`fill_rfq_parlay`**.
+
+Discriminator: **15**
+
+Data: `rfq_signer: Address` (32 bytes after the router byte).
+
+Accounts:
+
+| Index | Account | Role |
+|-------|---------|------|
+| 0 | Admin | writable, signer — must match config `admin` |
+| 1 | MM Config PDA | writable |
+
+`init_program` may also set the initial `rfq_signer` (defaults to admin if omitted).
+
+## Fill_Bet_Rfq function
+The **`fill_bet_rfq`** function is the MM CPI entry for a single-market RFQ fill. It is invoked by the aggregator under parent instruction **`fill_rfq_bet`** (disc **12**). There is **no quote buffer**; authenticity comes from the ed25519 signature checked by the aggregator before CPI.
+
+Discriminator: **14**
+
+Data (after router byte):
+
+```rust
+struct FillRfqIxPayload {
+   amount_to_send: u64,
+}
+```
+
+Accounts **(8)**:
+
+| Index | Account | Role |
+|-------|---------|------|
+| 0 | User | readonly |
+| 1 | MM Market Data PDA | writable — reserved for MM market updates |
+| 2 | MM Config PDA | writable |
+| 3 | MM Token Account | writable |
+| 4 | MM Liability Token Account | writable |
+| 5 | Mint | readonly |
+| 6 | Token Program | readonly |
+| 7 | Instructions sysvar | readonly — parent must be aggregator `fill_rfq_bet` |
+
+The function **MUST** transfer **`amount_to_send`** from the MM token account to the liability account (config PDA as signer), same liability rules as **`fill_quote`**.
+
+## Fill_Parlay_Rfq function
+The **`fill_parlay_rfq`** function is the MM CPI entry for a multi-leg RFQ fill. It is invoked by the aggregator under parent instruction **`fill_rfq_parlay`** (disc **13**). Same payload as **`fill_bet_rfq`**; **no** market-data account.
+
+Discriminator: **16**
+
+Accounts **(7)**:
+
+| Index | Account | Role |
+|-------|---------|------|
+| 0 | User | readonly |
+| 1 | MM Config PDA | writable |
+| 2 | MM Token Account | writable |
+| 3 | MM Liability Token Account | writable |
+| 4 | Mint | readonly |
+| 5 | Token Program | readonly |
+| 6 | Instructions sysvar | readonly — parent must be aggregator `fill_rfq_parlay` |
+
 ## Config PDA
 The **config PDA** is a PDA owned by the mm program. It **MUST** be of the seeds **`["config"]`**.
 It contains the following data:
@@ -224,6 +287,7 @@ struct Config {
    discriminator: u8 = 1,
    bump: u8,
    admin: Address, // used for interacting with the aggregator program for non-quoting functions
+   rfq_signer: Address, // ed25519 pubkey that signs off-chain RFQ quotes (set at init_program or via set_rfq_signer)
    //...anything else you want
    // for example
    global_risk_limit: u64,
@@ -232,6 +296,8 @@ struct Config {
    smart_bettors: [Address; N], // read on get_quote to reduce odds, knowing that fills are usually unfavourable from these bettors
 }
 ```
+
+The on-wire MM config header used by the aggregator is **`MmAccountConfig`**: `discriminator`, `bump`, `admin`, `rfq_signer`. Anything after that header is free for the SPAMM.
 
 ## Event Liability Netting PDA
 The **event liability netting PDA** is a PDA owned by the **aggregator**. It **MUST** be of the seeds **`["netting", mm_program_address, event_id]`**.
@@ -269,7 +335,7 @@ struct MarketData {
    remaining1: // reset on oracle hot path then decrement on fill_quote
 }
 ```
-It **MUST** have the seeds **`["market_data", market_id]`** using the wire **`MarketId`** bytes. The account can contain any data that you want to store for the market. The **aggregator verifies** the Market Data PDA exists with the expected seed. You should perform additional checks as needed (for example that your odds align with the current **`EventGameState`** / **`sequence`** on the event-state account).
+It **MUST** have the seeds **`["market_data", market_id_body_wire, operator]`**. The full on-wire **`MarketId`** includes an **`operator`** address (see Market Operators under the aggregator). Because Solana PDA seeds are capped at 32 bytes each, the legacy market-id body (everything before `operator`) is one seed and **`operator`** is a second seed — helpers: `market_id_pda_seed_parts` / SDK `getMmMarketDataPda`. The account can contain any data that you want to store for the market. The **aggregator verifies** the Market Data PDA exists with the expected seed. You should perform additional checks as needed (for example that your odds align with the current **`EventGameState`** / **`sequence`** on the event-state account).
 
 It is recommended you use something like Doppler (https://github.com/blueshift-gg/doppler) for 21 CU updates and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_quote function.
 
@@ -366,11 +432,11 @@ ice_hockey (sport_id = 5): {
 ## Accounts at a Glance
 | Account | Discriminator | Seed | Notes |
 |---------|---------------|------|-------|
-| Oracle PDA | 0 | ["oracle", market_id] | created in init_market with a custom body |
-| MM Config PDA | 1 | ["config"] | created in init_program |
+| Oracle PDA | 0 | ["oracle", market_id body + operator] | created in init_market with a custom body |
+| MM Config PDA | 1 | ["config"] | created in init_program; includes `rfq_signer` |
 | MM Quote Buffer | 2 | ["mm_quote_buffer"] | created in init_program |
 | MM Parlay Quote Buffer | 3 | ["mm_parlay_quote_buffer"] | created in init_program; used for parlay get/fill |
-| MM Event State | 4 | ["event_state", event_id] | created in `init_event` at **sequence 0**; operator advances **`game_state` / `sequence`** via `update_event_state` |
+| MM Event State | 4 | ["event_state", event_id] | created in `init_event` at **sequence 0**; admin advances **`game_state` / `sequence`** via `update_event_state` |
 | MM Token Account | n/a | n/a | authority is the MM Config PDA, created in init_program |
 
 MM accounts owned by the aggregator:
@@ -385,32 +451,36 @@ The first byte of instruction data routes the MM program (oracle hot-path **0** 
 
 | Discriminator | Instruction | Notes |
 |---------------|-------------|--------|
-| 1 | `init_program` | Creates config PDA, single-leg quote buffer, parlay quote buffer, MM ATA |
+| 1 | `init_program` | Creates config PDA, single-leg quote buffer, parlay quote buffer, MM ATA; may set `rfq_signer` |
 | 5 | `get_quote` | Single market; CPI from aggregator `fill_bet` or RPC to build tx |
 | 6 | `fill_quote` | Single market; CPI from aggregator `fill_bet` |
 | 7 | `get_quote_parlay` | Multi-leg; CPI from aggregator `fill_parlay` or RPC to build tx |
 | 8 | `fill_parlay_quote` | Multi-leg; CPI from aggregator `fill_parlay` |
 | 9 | `init_event` | Creates event state PDA `["event_state", event_id]` at **sequence 0** (zeroed `game_state`) |
-| 10 | `init_market` | Creates market/oracle body under `["market_data", market_id]` |
+| 10 | `init_market` | Creates market/oracle body under `["market_data", market_id_body, operator]` |
 | 11 | `close_event` | |
 | 12 | `close_market` | |
 | 13 | `update_event_state` | |
+| 14 | `fill_bet_rfq` | CPI from aggregator `fill_rfq_bet`; collateral transfer |
+| 15 | `set_rfq_signer` | Admin updates config `rfq_signer` |
+| 16 | `fill_parlay_rfq` | CPI from aggregator `fill_rfq_parlay`; collateral transfer |
+| 254 | `write_arbitrary_data` | Admin / dev tooling; may grow PDA |
 | 255 | `force_close_pda` | Admin / dev tooling |
 
 ## Integration Lifecycle
 
-1. Write your SPAMM program and ensure that account structs/headers match as expected and you have implemented **`get_quote` / `fill_quote`** and, if you support parlays, **`get_quote_parlay` / `fill_parlay_quote`** correctly.
+1. Write your SPAMM program and ensure that account structs/headers match as expected and you have implemented **`get_quote` / `fill_quote`** and, if you support parlays, **`get_quote_parlay` / `fill_parlay_quote`** correctly. If you support RFQ, implement **`fill_bet_rfq` / `fill_parlay_rfq`** and set an **`rfq_signer`**.
 2. Deploy the SPAMM program.
 3. Init the required SPAMM-owned accounts.
 4. Register the SPAMM with the aggregator by calling register_mm.
-5. Connect to the aggregator API to get events and markets.
+5. Connect to the aggregator API to get events and markets. For RFQ, also connect a market-maker WebSocket (`/ws/mm`) with a signed `mm.hello`.
 6. Create event state PDAs for events you wish to quote.
-7. Create market data PDAs for markets you wish to quote.
+7. Create market data PDAs for markets you wish to quote (seeds include the market **`operator`**).
 8. If you want to net liabilities on a market, create a liability netting PDA for the event by calling create_netting_account and add lines to the netting account by calling add_line_to_netting_account (passing `period` and `mkt` for each spread/total line you want reserved). The main win market (FT in soccer, ML in non-soccer) is added by default.
 9. Update the Event State PDA (**`game_state`** and **`sequence`**) as the event progresses.
 10. Update the Market Data PDA as the market odds change.
-11. Clients can now call the get_quote function of your SPAMM to get quotes for markets you are quoting. You should verify accounts that are passed and calculate the odds you want to offer based on the Market Data PDA and any data you have stored in your Config PDA.
-12. If your quote is in the top 5, the client will build a tx to attempt to fill the user bet. The aggregator will call the get_quote function again to get the best execution-time offers and then the fill_quote function if you are still offering the best odds. You can update the Config PDA and Market Data PDA here if you wish, for reference in the future.
+11. Clients can now call the get_quote function of your SPAMM to get quotes for markets you are quoting. You should verify accounts that are passed and calculate the odds you want to offer based on the Market Data PDA and any data you have stored in your Config PDA. For RFQ, clients POST `/api/rfq` and your MM replies with a signed quote over the WebSocket.
+12. If your quote is in the top 5, the client will build a tx to attempt to fill the user bet. The aggregator will call the get_quote function again to get the best execution-time offers and then the fill_quote function if you are still offering the best odds. You can update the Config PDA and Market Data PDA here if you wish, for reference in the future. RFQ fills use **`fill_rfq_bet` / `fill_rfq_parlay`** instead (one MM, signed quote, no quote buffer).
 13. You can remove lines from the netting account by calling remove_line_from_netting_account and close the netting account by calling close_netting_account once an event is over.
 14. You can manage your own Event State and Market Data PDAs as needed.
 
@@ -429,13 +499,32 @@ By offering **liability netting** on most markets, the aggregator massively impr
 
 Settling bets could be the responsibility of the SPAMM if netting was not involved, but I believe it is a major improvement to have. As it is, the aggregator already holds a lot of responsibility so settling bets fairly is a natural extension. The alternative is no netting, SPAMMs hold the bet accounts, and users specify which SPAMMs are allowed to fill the bet based on the user trust of the SPAMM (similar to users opting out of Singbet filling orders on Mollybet since they are known to cancel bets for no reason). Forcing the user to profile every SPAMM is not a good user experience and would hinder new SPAMMs joining the network.
 
-Parlays allow combining up to 5 legs. It is on the SPAMM to check they arent linked or price them correctly if they are (SGPs). There are only 5 legs per bet and no execution-time routing because of the tx size limit and I can't be bothered dealing with Account Lookup Tables at this time. **edit:** I added Account Lookup Tables so this can be changed but I still dont think it is viable to have ex-time routing due to tx size limits. The number of legs can be increased but waiting to do a full revamp of parlays for better settlement system.
+Parlays allow combining up to 5 legs. It is on the SPAMM to check they arent linked or price them correctly if they are (SGPs). There are only 5 legs per bet and no execution-time routing because of the tx size limit and I can't be bothered dealing with Account Lookup Tables at this time. **edit:** I added Account Lookup Tables so this can be changed but I still dont think it is viable to have ex-time routing due to tx size limits. The number of legs can be increased but waiting to do a full revamp of parlays for better settlement system. Parlay legs are graded individually via **`grade_parlay`**; the ticket-level result is folded from the legs (including **`ModifiedWin`** when voids/halves leave a partial payout).
 
 Event start times are **not** published onchain as part of the Event Id despite it probably being useful. The reason for this is that event times can change, like tennis and esports where the schedule is flexible, or due to weather etc. Market makers are likely to use event start time (as minutes until event start) as part of the quoting and, if the event time was published onchain, the aggregator would be responsible for keeping this correct. It is beyond the scope of the aggregator responsibility to keep this up to manage market maker risk, so market makers should be responsible for managing their own understanding of the event start time by posting it in the market data PDA. The onchain aggregator program should be as minimal as possible. Event start times (of best effort) are provided in the API, along with any other non-essential metadata.
 
+## Market Operators
+
+Every **`MarketId`** includes an **`operator`** address — the key responsible for grading bets on that market:
+
+```rust
+struct MarketId {
+   event_id: EventId,
+   player: u64,
+   mkt: u16,
+   period: u8,
+   is_pregame: bool,
+   operator: Address, // grades this market
+}
+```
+
+The operator is baked into the market id at fill time (auction and RFQ paths alike). There is no separate “set operator” instruction. MM market-data PDAs derive from **`["market_data", market_id_body_wire, operator]`** so two operators never collide on the same PDA for the same selection.
+
+**`grade_bets`** and **`grade_parlay`** accept a signer that is either that market’s **`operator`** or the aggregator config **admin**. For parlays, authority is checked **per graded leg** against that leg’s `market_id.operator`.
+
 ## Trust Assumptions
 
-The **aggregator API** is responsible for providing **event and market ids** and linking them to a **real-world event**. The SPAMMs and users access this API and **trust these will be correct**. The aggregator is also responsible for **grading bets** (currently via an **admin key**). Everyone must trust that **bet grading** will reflect the **true outcome** of the market.
+The **aggregator API** is responsible for providing **event and market ids** and linking them to a **real-world event**. The SPAMMs and users access this API and **trust these will be correct**. The aggregator (via each market’s **operator**, or the aggregator admin) is responsible for **grading bets**. Everyone must trust that **bet grading** will reflect the **true outcome** of the market.
 
 Since the aggregator **checks quotes at execution-time** and only selects the **best valid quotes**, **spoofing** quote responses to the client at the tx-building stage is **pointless**.
 
@@ -459,8 +548,18 @@ The **user bet flow** is as follows (single-leg **`fill_bet`**; parlay **`fill_p
 7. The aggregator ensures that the **`fill_quote`** function was **successful** and the funds were transferred to the **mm liability token account**.
 8. If the market is pre-game and FT/ML, total or spread, the aggregator will net the liability on the market for each market maker if they have opted into position netting for the event by creating a netting account data PDA.
 9. The aggregator creates a bet PDA for the user and stores the stake in the bet ATA.
-10. After the result is known, the bet is graded.
-11. Anyone can call settle_bet on any bet with a non-PENDING result and initiate the transfer of funds to the winners.
+10. After the result is known, the bet is graded (`grade_bets` for single bets; `grade_parlay` for parlays — leg-level grades folded into the ticket result).
+11. Anyone can call settle_bet / settle_parlay on any bet with a non-PENDING result and initiate the transfer of funds to the winners.
+
+### RFQ bet flow
+
+RFQ is an alternate fill path for a **single MM** that has already signed a firm quote off-chain (no competitive `get_quote` auction, no quote buffer):
+
+1. The MM sets **`rfq_signer`** on its config (`init_program` or **`set_rfq_signer`**) and connects to the aggregator RFQ WebSocket with a signed **`mm.hello`**.
+2. The user (or UI) POSTs an RFQ request to **`/api/rfq`** with selections.
+3. The hub fans the request to connected MMs; each MM may reply with a signed quote (`maxStake`, `oddsScaled`, `offerExpiry`, signature, and for parlays `legOddsScaled`).
+4. The client picks a quote and builds **`fill_rfq_bet`** or **`fill_rfq_parlay`** (amount ≤ `maxStake`, before `offerExpiry`).
+5. The aggregator verifies the ed25519 signature over the canonical RFQ message against the MM’s on-chain **`rfq_signer`**, CPIs **`fill_bet_rfq`** / **`fill_parlay_rfq`** for collateral, then opens the bet PDA (one filler). Pregame netting on single-bet RFQ follows the same rules as **`fill_bet`**.
 
 
 ## Liability Netting
@@ -488,12 +587,21 @@ The **aggregator API** will be responsible for providing:
 
 **SPAMMs should NOT** rely on the published snapshot in reflecting reality to the millisecond. If you have access to a **faster data feed**, you should use it to advance **`sequence`** and refresh **`game_state`** so your quotes **match reality** as closely as possible. Keep your **Market Data PDA** and **Event State PDA** **in sync** with each other to avoid filling at **stale odds or stale game state**.
 
+### RFQ hub
+
+The API also hosts an RFQ collect path for signed-quote fills:
+
+- **`POST /api/rfq`** — fan-out the request to connected MMs, wait up to **2s** (`RFQ_COLLECT_TIMEOUT_MS`), return `{ requestId, quotes, timedOut, mmCount }`.
+- **`WS /ws/mm`** — market-maker sockets. On connect, send signed **`mm.hello`** (`mmProgramId`, `rfqSigner`, `timestamp`); the hub checks the MM is on the aggregator `mm_list`, that on-chain `rfq_signer` matches, and that the ed25519 hello signature verifies (`|Δt| ≤ 60s`). Ack: **`mm.hello.ack`**. Quotes arrive as **`rfq.quote`** replies to hub **`rfq.request`** messages.
+
+Request body shape: `{ user, betId, amount, selections[] }` — each selection carries `marketId` (including **operator**), `side`, `eventStateSequence`, `eventGameState`. Quote shape: `{ mmProgramId, maxStake, oddsScaled, offerExpiry, signature (base64), legOddsScaled[] }` (parlay quotes must supply one scaled odds per leg).
+
 ## Accounts at a Glance
 
 | Account | Discriminator | Seed | Notes |
 |---------|---------------|------|-------|
-| Bet PDA Accounts | 1 | ["bet", user_address, bet_id] | created in fill_bet |
-| Parlay Bet PDA Accounts | 2 | ["parlay", user_address, bet_id] | created in fill_parlay |
+| Bet PDA Accounts | 1 | ["bet", user_address, bet_id] | created in fill_bet / fill_rfq_bet |
+| Parlay Bet PDA Accounts | 2 | ["parlay", user_address, bet_id] | created in fill_parlay / fill_rfq_parlay |
 | Bet Token Account | n/a | n/a | authority is the Bet PDA Account, created in fill_bet |
 | Config PDA | 2 | ["config"] | created in init_program |
 | MM List PDA | 3 | ["mm_list"] | created in init_program, used by clients to find SPAMMs to reach for quotes |
@@ -510,19 +618,23 @@ The first byte of aggregator instruction `data` selects the handler.
 | 0 | `init_program` |
 | 1 | `change_config_status` |
 | 2 | `register_mm` |
-| 3 | `fill_bet` |
-| 4 | `fill_parlay` |
-| 5 | `grade_bets` |
-| 6 | `settle_bet` |
-| 7 | `settle_parlay` |
-| 8 | `get_quote_proxy` |
-| 9 | `get_parlay_quote_proxy` |
-| 50 | `create_netting_account` |
-| 51 | `add_line_to_netting_account` |
-| 52 | `remove_line_from_netting_account` |
-| 53 | `close_netting_account` |
-| 54 | `deregister_mm` |
-| 100 | `withdraw_from_liability_account` |
+| 3 | `deregister_mm` |
+| 10 | `fill_bet` |
+| 11 | `fill_parlay` |
+| 12 | `fill_rfq_bet` |
+| 13 | `fill_rfq_parlay` |
+| 20 | `grade_bets` |
+| 21 | `grade_parlay` |
+| 25 | `settle_bet` |
+| 26 | `settle_parlay` |
+| 30 | `get_quote_proxy` |
+| 31 | `get_parlay_quote_proxy` |
+| 32 | `get_market_quotes_proxy` |
+| 40 | `create_netting_account` |
+| 41 | `add_line_to_netting_account` |
+| 42 | `remove_line_from_netting_account` |
+| 43 | `close_netting_account` |
+| 50 | `withdraw_from_liability_account` |
 | 254 | `write_arbitrary_data` |
 | 255 | `force_close_pda` |
 
@@ -601,7 +713,7 @@ Accounts:
 This is called by a SPAMM admin to register the SPAMM with the aggregator. The MM program id, MM config PDA, quote buffers, encumbrance PDA, collateral ATA, and liability ATA are appended to that address lookup table so transactions can reference them via the ALT.
 
 ### deregister_mm
-Discriminator: **54**
+Discriminator: **3**
 
 Data: `None`
 
@@ -630,13 +742,13 @@ Accounts:
 Called by the aggregator admin after off-chain checks that the MM has no open bets. Reverses `register_mm`: removes the seven MM addresses from the ALT, sweeps liability tokens to the MM collateral ATA, closes the liability ATA and encumbrance PDA (rent to `mm_admin`), and removes the MM program id from `mm_list`.
 
 ### fill_bet
-Discriminator: **3**
+Discriminator: **10**
 
 Data:
 
 ```rust
 struct FillBetIxData {
-   discriminator: u8, // 3
+   discriminator: u8, // 10
    bet_id: u64,
    market_id: MarketId,
    side: u8, // two-outcome markets: 0 or 1; soccer mkt 1 or 5: 0, 1, or 2
@@ -681,13 +793,13 @@ Per MM (currently 5 max):
 This is called by a user to place a bet.
 
 ### fill_parlay
-Discriminator: **4**.
+Discriminator: **11**.
 
 Data:
 
 ```rust
 struct FillParlayIxData {
-   discriminator: u8, // 4
+   discriminator: u8, // 11
    bet_id: u64,
    amount: u64,
    min_odds_scaled: u32,
@@ -723,8 +835,89 @@ Accounts:
 
 This is called by a user to place a multi-leg parlay.
 
+### fill_rfq_bet
+Discriminator: **12**
+
+Signed-quote single-market fill against **one** MM (no quote buffer, no competitive auction). The aggregator verifies an ed25519 signature over the canonical RFQ message using the MM config’s **`rfq_signer`**, CPIs MM **`fill_bet_rfq`**, then opens the bet PDA with that MM as the sole filler. Pregame netting uses the same rules as **`fill_bet`**.
+
+Data body + 64-byte signature:
+
+```rust
+struct FillRfqBetIxData {
+   discriminator: u8, // 12
+   bet_id: u64,
+   market_id: MarketId,
+   side: u8,
+   amount: u64,              // must be > 0 and ≤ max_stake
+   event_state_sequence: u16,
+   event_game_state: EventGameState,
+   max_stake: u64,           // signed; user may fill any amount ≤ this
+   odds_scaled: u32,         // signed firm odds
+   offer_expiry: u32,        // unix seconds; clock must be ≤ this
+}
+// + signature: [u8; 64]
+```
+
+Canonical signed message (domain byte first — `RFQ_NETWORK_DOMAIN`, currently **mainnet = 1**; also 2=devnet, 3=local):
+
+`domain | user(32) | bet_id | market_id | event_game_state | event_state_sequence | side | max_stake | odds_scaled | offer_expiry | mm_program_id`
+
+Note: fill **`amount`** is **not** in the signed message — only **`max_stake`**.
+
+Accounts: same **12** fixed prefix as **`fill_bet`**, then **8** MM accounts:
+
+| Offset | Account | Role | Notes |
+|--------|---------|------|-------|
+| 12+0 | mm program | readonly | Must be executable |
+| 12+1 | mm config pda | writable | Holds `rfq_signer` |
+| 12+2 | mm event state pda | readonly | |
+| 12+3 | mm market data pda | writable | Passed through to MM `fill_bet_rfq` |
+| 12+4 | mm encumbrance pda | writable | |
+| 12+5 | mm liability token account | writable | |
+| 12+6 | mm token account | writable | |
+| 12+7 | mm netting pda | writable | Real netting PDA, or system program if none |
+
+### fill_rfq_parlay
+Discriminator: **13**
+
+Signed-quote multi-leg fill against **one** MM. Verifies ed25519 over the parlay RFQ message, CPIs MM **`fill_parlay_rfq`**, opens a parlay bet PDA. No netting. `num_legs` must be **2..=5**; product of per-leg `odds_scaled` must match the ticket `odds_scaled`.
+
+Data body + 64-byte signature:
+
+```rust
+struct FillRfqParlayIxData {
+   discriminator: u8, // 13
+   bet_id: u64,
+   amount: u64,
+   num_legs: u8,
+   legs: [ParlayLegWire; MAX_PARLAY_LEGS],
+   max_stake: u64,
+   odds_scaled: u32,
+   offer_expiry: u32,
+}
+// + signature: [u8; 64]
+```
+
+Canonical signed message:
+
+`domain | user | bet_id | num_legs | RfqSignedParlayLeg×5 (padded) | max_stake | odds_scaled | offer_expiry | mm_program_id`
+
+Each signed leg: `market_id`, `event_game_state`, `event_state_sequence`, `odds_scaled`, `side` (no result).
+
+Accounts: same **12** fixed prefix, then **5** MM accounts (no quote buffer / netting) + **`(market_data, event_state) × L`**:
+
+| Offset | Account | Role |
+|--------|---------|------|
+| 12+0 | mm program | readonly |
+| 12+1 | mm config pda | writable |
+| 12+2 | mm encumbrance pda | writable |
+| 12+3 | mm liability token account | writable |
+| 12+4 | mm token account | writable |
+| 12+5+2*i | mm market data (leg *i*) | writable |
+| 12+6+2*i | mm event state (leg *i*) | readonly |
+
 ### get_quote_proxy
-Discriminator: **8**.
+Discriminator: **30**.
 
 Read-only quote aggregation for the UI: CPI each MM’s **`get_quote`**, collect valid quotes, and return them via **`sol_set_return_data`** (no bet PDA, no token moves). Instruction `data` uses the same layout as **`fill_bet`** (`FillBetIxData`); **`bet_id`** is decoded but **not used**.
 
@@ -754,7 +947,7 @@ Accounts:
 Invalid or empty MM quotes are skipped; duplicate MM program ids fail the instruction.
 
 ### get_market_quotes_proxy
-Discriminator: **10**.
+Discriminator: **32**.
 
 Like **`get_quote_proxy`**, but CPIs each MM’s **`get_quote`** once per side for the market (`mkt` → side count per `id-system.md`: typically 2 or 3, up to 6 or 9). Instruction `data` matches **`fill_bet`** (`bet_id` and `side` are unused). Accounts are the same as **`get_quote_proxy`** (1 + 5×N).
 
@@ -765,7 +958,7 @@ Return data: concatenation of MM chunks, each `mm_address: [u8; 32]` then `num_s
 MMs with no valid quote on any side are omitted. Failed sides for an included MM are zero-filled.
 
 ### get_parlay_quote_proxy
-Discriminator: **9**.
+Discriminator: **31**.
 
 Same pattern as **`get_quote_proxy`**, but CPIs MM **`get_quote_parlay`** for each registered MM. Instruction `data` matches **`fill_parlay`** (`FillParlayIxData`); **`bet_id`** is unused. Return data is the same **`ProxyQuoteData`** array as **`get_quote_proxy`**.
 
@@ -783,29 +976,71 @@ Accounts:
 | 2+(4+2*i)*N | mm event state (leg *i*) | readonly | |
 
 ### grade_bets
-Discriminator: **5**
+Discriminator: **20**
+
+Grades **single-bet** accounts only (rejects parlay account length — use **`grade_parlay`**).
 
 Data:
 
 ```rust
 struct GradeBetsIxData {
-   discriminator: u8, // 5
+   discriminator: u8, // 20
    results: [u8; N], // N = number of bet accounts; each byte is BetResult
 }
 ```
+
+Valid result bytes: **1–7** (`Won` … `RolledBack`). **`Pending` (0)** and **`ModifiedWin` (8)** are rejected (`ModifiedWin` is parlay-only). Regrading is allowed: an already-set `result` may be overwritten.
 
 Accounts:
 
 | Index | Account | Role | Notes |
 |-------|---------|------|-------|
-| 0 | aggregator admin | writable, signer | Must match config admin |
+| 0 | authority | writable, signer | Must be the bet’s `market_id.operator` **or** aggregator config admin |
 | 1 | config pda | readonly | |
-| 1+N | bet pda (×`N`) | writable |  |
+| 2… | bet pda (×`N`) | writable | Single-bet accounts only |
 
-This is called by the aggregator admin to set the `result` of multiple bets.
+`BetResult` values:
+
+```rust
+enum BetResult {
+   Pending = 0,
+   Won = 1,
+   Lost = 2,
+   HalfWon = 3,
+   HalfLost = 4,
+   Push = 5,
+   Cancelled = 6,
+   RolledBack = 7,
+   ModifiedWin = 8, // parlay ticket only — voids/halves; settle recomputes payout
+}
+```
+
+### grade_parlay
+Discriminator: **21**
+
+Grades **parlay** bet accounts **leg by leg**, then folds the ticket-level `result`.
+
+Data: **`[u8; 5]`** per parlay account (`MAX_PARLAY_LEGS = 5`). Total `data.len() == 5 * N`. Each slot is a grade byte **1–7**, or **`255`** (`GRADE_PARLAY_LEG_SKIP`) to leave that leg unchanged. Slots past `num_legs` **must** be `255`.
+
+Accounts:
+
+| Index | Account | Role | Notes |
+|-------|---------|------|-------|
+| 0 | authority | writable, signer | For each graded leg: that leg’s `market_id.operator` **or** aggregator config admin |
+| 1 | config pda | readonly | |
+| 2… | parlay bet pda (×`N`) | writable | Must be `PARLAY_BET_ACCOUNT_LEN` |
+
+Rules:
+- A graded leg must currently be **`Pending`** — already-graded legs cannot be overwritten (skip with `255` instead).
+- After updates, ticket `result` is folded:
+  - any **Lost** → ticket **Lost**
+  - all void (Push / Cancelled / RolledBack) → ticket **Cancelled**
+  - all **Won** → ticket **Won**
+  - any **Pending** → ticket **Pending**
+  - otherwise voids/halves → ticket **`ModifiedWin` (8)**; **`settle_parlay`** recomputes payout from remaining leg odds
 
 ### settle_bet
-Discriminator: **6**
+Discriminator: **25**
 
 Data: `None`
 
@@ -836,7 +1071,7 @@ Per filler (currently 5):
 This is called by **anyone** to settle a bet which has been graded. The tokens go to the user ata / mm ata / liability ata as needed and the lamports go to the original bet fee payer.
 
 ### settle_parlay
-Discriminator: **7**
+Discriminator: **26**
 
 Data: `None`
 
@@ -862,13 +1097,13 @@ Accounts:
 This is called by **anyone** to settle a graded parlay.
 
 ### create_netting_account
-Discriminator: **50**
+Discriminator: **40**
 
 Data:
 
 ```rust
 struct CreateNettingAccountIxData {
-   discriminator: u8, // 50
+   discriminator: u8, // 40
    event_id: EventId,
 }
 ```
@@ -886,13 +1121,13 @@ Accounts:
 This is called by the SPAMM admin to create a liability netting account for an event.
 
 ### add_line_to_netting_account
-Discriminator: **51**
+Discriminator: **41**
 
 Data:
 
 ```rust
 struct AddLineToNettingIxData {
-   discriminator: u8, // 51
+   discriminator: u8, // 41
    event_id: EventId,
    period: u8,
    mkt: u32,
@@ -911,13 +1146,13 @@ Accounts:
 This is called by the SPAMM admin to add a line to the liability netting account for an event.
 
 ### remove_line_from_netting_account
-Discriminator: **52**
+Discriminator: **42**
 
 Data:
 
 ```rust
 struct RemoveLineFromNettingIxData {
-   discriminator: u8, // 52
+   discriminator: u8, // 42
    event_id: EventId,
    period: u8,
    mkt: u32,
@@ -936,13 +1171,13 @@ Accounts:
 This is called by the SPAMM admin to remove a line from the liability netting account for an event.
 
 ### close_netting_account
-Discriminator: **53**
+Discriminator: **43**
 
 Data:
 
 ```rust
 struct CloseNettingAccountIxData {
-   discriminator: u8, // 53
+   discriminator: u8, // 43
    event_id: EventId,
 }
 ```
@@ -960,13 +1195,13 @@ Accounts:
 This is called by the SPAMM admin to close the liability netting account for an event.
 
 ### withdraw_from_liability_account
-Discriminator: **100**
+Discriminator: **50**
 
 Data:
 
 ```rust
 struct WithdrawFromLiabilityAccountIxData {
-   discriminator: u8, // 100
+   discriminator: u8, // 50
    amount: u64,
 }
 ```

@@ -7,7 +7,6 @@
     "moduleDetection": "force",
     "jsx": "react-jsx",
     "allowJs": true,
-    "baseUrl": ".",
     "paths": {
       "spamm-aggregator-sdk": ["../aggregator/sdk/ts/src/index.ts"]
     },

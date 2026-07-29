@@ -15,7 +15,6 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "types": ["vite/client"],
-    "baseUrl": ".",
     "paths": {
       "spamm-aggregator-sdk": ["../aggregator/sdk/ts/src/index.ts"],
       "spamm-score-predict-sdk": ["../score_predict/sdk/ts/src/index.ts"]

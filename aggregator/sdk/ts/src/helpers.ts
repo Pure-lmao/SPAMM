@@ -25,11 +25,22 @@ import {
    SPL_TOKEN_PROGRAM_ID,
 } from './constants.js';
 import { getEventIdEncoder, getMarketIdEncoder } from './codex.js';
-import type { EventGameState, EventId, MarketId } from './types.js';
+import {
+   MARKET_ID_BODY_WIRE_SIZE,
+   type EventGameState,
+   type EventId,
+   type MarketId,
+} from './types.js';
 
 const addressEncoder = getAddressEncoder();
 const eventIdEncoder = getEventIdEncoder();
 const marketIdEncoder = getMarketIdEncoder();
+
+/** PDA seeds for MM market data: legacy `MarketId` body wire + `operator` address bytes. */
+export function marketIdPdaSeeds(marketId: MarketId): readonly [Uint8Array, Uint8Array] {
+   const wire = marketIdEncoder.encode(marketId);
+   return [wire.subarray(0, MARKET_ID_BODY_WIRE_SIZE), wire.subarray(MARKET_ID_BODY_WIRE_SIZE)] as const;
+}
 
 /**
  * Encodes **`EventId`** to its **little-endian wire bytes** for PDA seeds and instruction data.
@@ -183,7 +194,7 @@ export async function getEventStatePda(mmProgramId: Address, eventId: EventId): 
 }
 
 /**
- * Derives **MM market data PDA** (`["market_data", market_id_wire_for_seed]` on the **MM program**).
+ * Derives **MM market data PDA** (`["market_data", market_id_body_wire, operator]` on the **MM program**).
  *
  * **Rust:** `MM_MARKET_DATA_PDA_SEED` + `MarketId` wire bytes from `to_zc` (`verify_mm_market_data_pda`).
  *
@@ -192,9 +203,10 @@ export async function getEventStatePda(mmProgramId: Address, eventId: EventId): 
  * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — MM market-data PDA address and bump.
  */
 export async function getMmMarketDataPda(mmProgramId: Address, marketId: MarketId): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   const [body, operator] = marketIdPdaSeeds(marketId);
    return await getProgramDerivedAddress({
       programAddress: mmProgramId,
-      seeds: [MM_MARKET_DATA_PDA_SEED, marketIdEncoder.encode(marketId)],
+      seeds: [MM_MARKET_DATA_PDA_SEED, body, operator],
    });
 }
 

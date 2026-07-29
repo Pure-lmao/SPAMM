@@ -3,7 +3,8 @@
 use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use crate::state::{EventGameState, MarketId};
+use crate::constants::ODDS_SCALE;
+use crate::state::{account_bet::BetResult, EventGameState, MarketId};
 
 /// One parlay selection on the wire (matches `fill_parlay` / MM quote buffer leg slots).
 #[derive(Copy, Clone, ZeroPod)]
@@ -13,6 +14,10 @@ pub struct ParlayLegWire {
    pub side: u8,
    pub event_state_sequence: u16,
    pub event_game_state: EventGameState,
+   /// Per-leg odds from the MM quote (`0` = deliberate same-event companion leg).
+   pub odds_scaled: u32,
+   /// Graded on-chain via `grade_parlay`; `Pending` at creation.
+   pub result: BetResult,
 }
 
 pub const PARLAY_LEG_WIRE_LEN: usize = <ParlayLegWire as ZeroPodFixed>::SIZE;
@@ -25,6 +30,8 @@ impl ParlayLegWire {
          side: self.side,
          event_state_sequence: self.event_state_sequence.into(),
          event_game_state: self.event_game_state.to_zc(),
+         odds_scaled: self.odds_scaled.into(),
+         result: self.result.into(),
       }
    }
 
@@ -35,7 +42,33 @@ impl ParlayLegWire {
          side: z.side,
          event_state_sequence: z.event_state_sequence.get(),
          event_game_state: EventGameState::from_zc(&z.event_game_state),
+         odds_scaled: z.odds_scaled.get(),
+         result: BetResult::from_u8(z.result.get()),
       })
+   }
+
+   /// Unused parlay table slot placeholder (`odds_scaled = 1.0`, `Pending`).
+   #[inline(always)]
+   pub fn placeholder() -> Self {
+      Self {
+         market_id: MarketId {
+            event_id: crate::state::EventId {
+               event: 0,
+               league: 0,
+               sport: crate::state::Sport::None,
+            },
+            player: 0,
+            mkt: 0,
+            period: 0,
+            is_pregame: false,
+            operator: Address::default(),
+         },
+         side: 0,
+         event_state_sequence: 0,
+         event_game_state: EventGameState::zeroed(),
+         odds_scaled: ODDS_SCALE as u32,
+         result: BetResult::Pending,
+      }
    }
 }
 
@@ -74,6 +107,18 @@ impl ParlayLegTable {
          _ => return false,
       }
       true
+   }
+
+   #[inline(always)]
+   pub fn get_mut(&mut self, i: usize) -> Option<&mut ParlayLegWire> {
+      Some(match i {
+         0 => &mut self.leg_0,
+         1 => &mut self.leg_1,
+         2 => &mut self.leg_2,
+         3 => &mut self.leg_3,
+         4 => &mut self.leg_4,
+         _ => return None,
+      })
    }
 
    #[inline(always)]

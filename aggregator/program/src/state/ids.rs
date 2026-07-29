@@ -1,5 +1,6 @@
 //! Wire `EventId` / `MarketId` via [zeropod](https://github.com/blueshift-gg/zeropod) (alignment-1 packed layouts).
 
+use pinocchio::Address;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ZeroPod)]
@@ -103,8 +104,21 @@ pub struct MarketId {
    pub mkt: u16,
    pub period: u8,
    pub is_pregame: bool,
+   /// Address responsible for grading bets on this market.
+   pub operator: Address,
 }
 pub const MARKET_ID_LEN: usize = <MarketId as ZeroPodFixed>::SIZE;
+
+/// `MarketId` wire bytes before `operator` (legacy pre-operator layout; fits in one PDA seed).
+pub const MARKET_ID_BODY_WIRE_LEN: usize = MARKET_ID_LEN - 32;
+pub const MARKET_ID_OPERATOR_WIRE_LEN: usize = 32;
+const _: () = assert!(MARKET_ID_BODY_WIRE_LEN < 32);
+
+/// PDA seeds: `["market_data", market_id_body_wire, operator]` — body is the legacy `MarketId` wire without `operator`.
+#[inline(always)]
+pub fn market_id_pda_seed_parts(wire: &[u8; MARKET_ID_LEN]) -> (&[u8], &[u8]) {
+   wire.split_at(MARKET_ID_BODY_WIRE_LEN)
+}
 
 /// Side count for a market type (`mkt`), per `id-system.md`.
 #[inline(always)]
@@ -149,6 +163,7 @@ impl MarketId {
       && self.mkt == other.mkt
       && self.period == other.period
       && self.is_pregame == other.is_pregame
+      && self.operator == other.operator
    }
 
    #[inline(always)]
@@ -159,6 +174,7 @@ impl MarketId {
          mkt: self.mkt.into(),
          period: self.period,
          is_pregame: self.is_pregame.into(),
+         operator: self.operator,
       }
    }
 
@@ -170,6 +186,7 @@ impl MarketId {
          mkt: z.mkt.get(),
          period: z.period,
          is_pregame: z.is_pregame.get(),
+         operator: z.operator,
       })
    }
 

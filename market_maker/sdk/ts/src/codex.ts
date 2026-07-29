@@ -53,6 +53,8 @@ import {
    MM_QUOTE_BUFFER_LEN,
    PARLAY_LEG_TABLE_LEN,
    PARLAY_LEG_WIRE_LEN,
+   FILL_RFQ_IX_WIRE_LEN,
+   SET_RFQ_SIGNER_IX_DATA_LEN,
    UPDATE_ORACLE_IX_PAYLOAD_LEN_THREE_OUTCOME,
    UPDATE_ORACLE_IX_PAYLOAD_LEN_TWO_OUTCOME,
    UPDATE_EVENT_STATE_IX_PAYLOAD_LEN,
@@ -61,9 +63,11 @@ import {
    type EventId,
    type EventStateData,
    type FillParlayQuoteIxData,
+   type FillRfqIxData,
    type GetQuoteIxData,
    type GetQuoteParlayIxData,
    type InitProgramIxData,
+   type SetRfqSignerIxData,
    type MmAccountConfig,
    type MmOracleMarketData,
    type MmOracleMarketDataThreeOutcome,
@@ -72,6 +76,8 @@ import {
    type MmQuoteBuffer,
    type ParlayLegWire,
    type MmReturnData,
+   type GetParlayQuoteReturnWire,
+   PARLAY_QUOTE_RETURN_WIRE_LEN,
 } from './types.js';
 
 import { validateFillParlayQuoteIxData, validateGetQuoteParlayIxData } from './validate.js';
@@ -81,12 +87,16 @@ export const INIT_PROGRAM_IX_DISCRIMINATOR = 1;
 export const GET_QUOTE_IX_DISCRIMINATOR = 5;
 export const GET_QUOTE_PARLAY_IX_DISCRIMINATOR = 7;
 export const FILL_QUOTE_PARLAY_IX_DISCRIMINATOR = 8;
+export const MM_FILL_BET_RFQ_IX_DISCRIMINATOR = 14;
+export const MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR = 16;
+export const SET_RFQ_SIGNER_IX_DISCRIMINATOR = 15;
 export const INIT_EVENT_IX_DISCRIMINATOR = 9;
 export const INIT_MARKET_IX_DISCRIMINATOR = 10;
 export const CLOSE_EVENT_IX_DISCRIMINATOR = 11;
 export const CLOSE_MARKET_IX_DISCRIMINATOR = 12;
 /** `update_event_state` — must match `UPDATE_EVENT_STATE_IX_DISCRIMINATOR` in the MM program. */
 export const UPDATE_EVENT_STATE_IX_DISCRIMINATOR = 13;
+export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
 /** Rust `EventGameState.game_phase` (`other.rs`). Space (U+0020) is stored as byte `0`; decode maps `0` → space, then trims trailing spaces. */
@@ -245,6 +255,36 @@ export const getMmReturnDataEncoder = (): Encoder<MmReturnData> =>
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
    ]);
 
+const getGetParlayQuoteReturnWireDecoder = (): Decoder<GetParlayQuoteReturnWire> =>
+   transformDecoder(
+      getStructDecoder([
+         ['maxAmount', getU64Decoder()],
+         ['oddsScaled', getU32BigintDecoder()],
+         ['numLegs', getU8Decoder()],
+         ['legOdds0', getU32BigintDecoder()],
+         ['legOdds1', getU32BigintDecoder()],
+         ['legOdds2', getU32BigintDecoder()],
+         ['legOdds3', getU32BigintDecoder()],
+         ['legOdds4', getU32BigintDecoder()],
+      ]),
+      (row) => ({
+         maxAmount: row.maxAmount,
+         oddsScaled: row.oddsScaled,
+         numLegs: row.numLegs,
+         legOdds: [row.legOdds0, row.legOdds1, row.legOdds2, row.legOdds3, row.legOdds4],
+      }),
+   );
+
+/** Return data from MM `get_quote_parlay` (`GetParlayQuoteReturnWire`). */
+export function decodeGetParlayQuoteReturnWire(data: ReadonlyUint8Array): GetParlayQuoteReturnWire {
+   if (data.length !== PARLAY_QUOTE_RETURN_WIRE_LEN) {
+      throw new RangeError(
+         `get_parlay_quote return data len ${data.length}; expected ${PARLAY_QUOTE_RETURN_WIRE_LEN}`,
+      );
+   }
+   return getGetParlayQuoteReturnWireDecoder().decode(new Uint8Array(data));
+}
+
 export const getMmQuoteBufferEncoder = (): Encoder<MmQuoteBuffer> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
@@ -294,6 +334,7 @@ export const getMmAccountConfigEncoder = (): Encoder<MmAccountConfig> =>
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
       ['admin', getAddressEncoder()],
+      ['rfqSigner', getAddressEncoder()],
    ]);
 
 export const getMmAccountConfigDecoder = (): Decoder<MmAccountConfig> =>
@@ -301,6 +342,7 @@ export const getMmAccountConfigDecoder = (): Decoder<MmAccountConfig> =>
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
       ['admin', getAddressDecoder()],
+      ['rfqSigner', getAddressDecoder()],
    ]);
 
 export const getGetQuoteIxDataEncoder = (): Encoder<GetQuoteIxData> =>
@@ -331,6 +373,8 @@ export const getParlayLegWireEncoder = (): Encoder<ParlayLegWire> =>
       ['side', getU8Encoder()],
       ['eventStateSequence', getU16Encoder()],
       ['eventGameState', getEventGameStateEncoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+      ['result', getU8Encoder()],
    ]);
 
 export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
@@ -339,6 +383,8 @@ export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
       ['side', getU8Decoder()],
       ['eventStateSequence', getU16Decoder()],
       ['eventGameState', getEventGameStateDecoder()],
+      ['oddsScaled', getU32BigintDecoder()],
+      ['result', getU8Decoder()],
    ]);
 
 /** Pad `ParlayLegTable` wire to `MAX_PARLAY_LEGS` slots; unused slots are zero. */
@@ -463,10 +509,39 @@ export function decodeMmParlayQuoteBuffer(data: ReadonlyUint8Array): MmParlayQuo
 }
 
 const getInitProgramIxDataEncoder = (): Encoder<InitProgramIxData> =>
-   getStructEncoder([['admin', getAddressEncoder()]]);
+   getStructEncoder([
+      ['admin', getAddressEncoder()],
+      ['rfqSigner', getAddressEncoder()],
+   ]);
 
 const getInitProgramIxDataDecoder = (): Decoder<InitProgramIxData> =>
-   getStructDecoder([['admin', getAddressDecoder()]]);
+   getStructDecoder([
+      ['admin', getAddressDecoder()],
+      ['rfqSigner', getAddressDecoder()],
+   ]);
+
+const getSetRfqSignerIxDataEncoder = (): Encoder<SetRfqSignerIxData> =>
+   getStructEncoder([['rfqSigner', getAddressEncoder()]]);
+
+const getSetRfqSignerIxDataDecoder = (): Decoder<SetRfqSignerIxData> =>
+   getStructDecoder([['rfqSigner', getAddressDecoder()]]);
+
+export function encodeFillRfqIxData(ix: FillRfqIxData): Uint8Array {
+   const out = new Uint8Array(FILL_RFQ_IX_WIRE_LEN);
+   out[0] = ix.instructionDiscriminator & 0xff;
+   out.set(getU64Encoder().encode(ix.amountToSend), 1);
+   return out;
+}
+
+export function decodeFillRfqIxData(data: ReadonlyUint8Array): FillRfqIxData {
+   if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
+      throw new RangeError(`fillRfq wire len ${data.length}`);
+   }
+   return {
+      instructionDiscriminator: data[0]!,
+      amountToSend: getU64Decoder().decode(data.subarray(1)),
+   };
+}
 
 function encodeUpdateOraclePayload(
    sequence: bigint,
@@ -584,6 +659,33 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
          }
          return new Uint8Array(out);
       }
+      case 'fillBetRfq': {
+         const out = encodeFillRfqIxData(ix.data);
+         if (out[0] !== MM_FILL_BET_RFQ_IX_DISCRIMINATOR) {
+            throw new RangeError(`fillBetRfq disc ${out[0]}; expected ${MM_FILL_BET_RFQ_IX_DISCRIMINATOR}`);
+         }
+         if (out.length !== FILL_RFQ_IX_WIRE_LEN) {
+            throw new RangeError(`fillBetRfq wire len ${out.length}`);
+         }
+         return new Uint8Array(out);
+      }
+      case 'fillParlayRfq': {
+         const out = encodeFillRfqIxData(ix.data);
+         if (out[0] !== MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR) {
+            throw new RangeError(`fillParlayRfq disc ${out[0]}; expected ${MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR}`);
+         }
+         if (out.length !== FILL_RFQ_IX_WIRE_LEN) {
+            throw new RangeError(`fillParlayRfq wire len ${out.length}`);
+         }
+         return new Uint8Array(out);
+      }
+      case 'setRfqSigner': {
+         const p = getSetRfqSignerIxDataEncoder().encode(ix.data);
+         if (p.length !== SET_RFQ_SIGNER_IX_DATA_LEN) {
+            throw new RangeError(`setRfqSigner payload len ${p.length}`);
+         }
+         return concatDiscriminator(SET_RFQ_SIGNER_IX_DISCRIMINATOR, p);
+      }
       case 'initEvent': {
          const p = getEventIdEncoder().encode(ix.eventId);
          if (p.length !== EVENT_ID_WIRE_SIZE) {
@@ -626,6 +728,12 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
             throw new RangeError(`market id payload len ${p.length}`);
          }
          return concatDiscriminator(CLOSE_MARKET_IX_DISCRIMINATOR, p);
+      }
+      case 'writeArbitraryData': {
+         if (ix.data.length === 0) {
+            throw new RangeError('writeArbitraryData: expected at least one payload byte');
+         }
+         return concatDiscriminator(WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR, ix.data);
       }
       case 'forceClosePda': {
          return concatDiscriminator(FORCE_CLOSE_PDA_IX_DISCRIMINATOR, new Uint8Array([]));
@@ -681,6 +789,21 @@ export function decodeMarketMakerInstructionData(data: ReadonlyUint8Array): Deco
             throw new RangeError(`fillParlayQuote: expected ${FILL_QUOTE_PARLAY_IX_WIRE_LEN} bytes`);
          }
          return { kind: 'fillParlayQuote', data: decodeFillParlayQuoteIxData(new Uint8Array(data)) };
+      case MM_FILL_BET_RFQ_IX_DISCRIMINATOR:
+         if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
+            throw new RangeError(`fillBetRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);
+         }
+         return { kind: 'fillBetRfq', data: decodeFillRfqIxData(new Uint8Array(data)) };
+      case MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR:
+         if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
+            throw new RangeError(`fillParlayRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);
+         }
+         return { kind: 'fillParlayRfq', data: decodeFillRfqIxData(new Uint8Array(data)) };
+      case SET_RFQ_SIGNER_IX_DISCRIMINATOR:
+         if (rest.length !== SET_RFQ_SIGNER_IX_DATA_LEN) {
+            throw new RangeError(`setRfqSigner: expected ${SET_RFQ_SIGNER_IX_DATA_LEN} bytes`);
+         }
+         return { kind: 'setRfqSigner', data: getSetRfqSignerIxDataDecoder().decode(restBytes) };
       case INIT_EVENT_IX_DISCRIMINATOR:
          if (rest.length !== EVENT_ID_WIRE_SIZE) {
             throw new RangeError(`initEvent: expected ${EVENT_ID_WIRE_SIZE} bytes`);
@@ -715,6 +838,13 @@ export function decodeMarketMakerInstructionData(data: ReadonlyUint8Array): Deco
             kind: 'closeMarket',
             marketId: getMarketIdDecoder().decode(restBytes.subarray(0, MARKET_ID_WIRE_SIZE)),
          };
+      case WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR:
+         if (rest.length === 0) {
+            throw new RangeError('writeArbitraryData: expected at least one payload byte');
+         }
+         return { kind: 'writeArbitraryData', data: new Uint8Array(rest) };
+      case FORCE_CLOSE_PDA_IX_DISCRIMINATOR:
+         return { kind: 'forceClosePda' };
       default:
          throw new RangeError(`unknown instruction discriminator: ${disc}`);
    }

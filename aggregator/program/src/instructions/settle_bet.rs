@@ -30,12 +30,12 @@ use pinocchio_log::log;
 use pinocchio_system::ID as SYSTEM_ID;
 use pinocchio_token::instructions::{Batch, CloseAccount, IntoBatch, Transfer};
 use pinocchio::{cpi::CpiAccount, instruction::InstructionAccount};
-use crate::{ID, constants::{SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS, SETTLE_BET_TOKEN_BATCH_IX_CAP, SETTLE_TOKEN_BATCH_MAX_INNER_DATA}, helpers::{calc_potential_profit, close_pda_return_rent, verify_config_pda, verify_mint, verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program}, parsers::{get_encumbrance, get_token_account_balance}, state::{
+use crate::{ID, constants::{SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS, SETTLE_BET_TOKEN_BATCH_IX_CAP, SETTLE_TOKEN_BATCH_MAX_INNER_DATA}, helpers::{calc_potential_profit, close_pda_return_rent, push_bet_ata_out, verify_config_pda, verify_mint, verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program}, parsers::{get_encumbrance, get_token_account_balance}, state::{
       BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, account_bet::BetResult, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED}
    }, writers::write_i64_le_unchecked
 };
 
-pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 6;
+pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 25;
 
 /// Account handles for the SPL token batch CPI in `settle_bet` (keeps `process` stack small).
 struct SettleBetTokenBatchCx<'a> {
@@ -165,6 +165,10 @@ pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
         BetResult::RolledBack => bet_data.amount,
       BetResult::Lost => 0,
       BetResult::HalfLost => bet_data.amount / 2,
+      BetResult::ModifiedWin => {
+         log!("settle_bet: ModifiedWin is parlay-only");
+         return Err(ProgramError::InvalidInstructionData);
+      }
       BetResult::Pending => {
          log!("settle_bet: bet result is pending");
          return Err(ProgramError::InvalidInstructionData);
@@ -236,27 +240,6 @@ pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
       bet_feepayer,
    )?;
 
-   Ok(())
-}
-
-fn push_bet_ata_out<'acc, 'buf>(
-   batch: &mut Batch<'acc, 'buf>,
-   bet_ata_remaining: &mut u64,
-   amount: u64,
-   bet_ata: &'acc AccountView,
-   to: &'acc AccountView,
-   bet_authority: &'acc AccountView,
-) -> ProgramResult
-where
-   'acc: 'buf,
-{
-   if amount == 0 {
-      return Ok(());
-   }
-   *bet_ata_remaining = bet_ata_remaining
-      .checked_sub(amount)
-      .ok_or(ProgramError::ArithmeticOverflow)?;
-   Transfer::new(bet_ata, to, bet_authority, amount).into_batch(batch)?;
    Ok(())
 }
 
@@ -334,6 +317,10 @@ where
       BetResult::Push | BetResult::Cancelled | BetResult::RolledBack => {
          (0, 0, 0)
       },
+      BetResult::ModifiedWin => {
+         log!("settle_bet: ModifiedWin is parlay-only");
+         return Err(ProgramError::InvalidInstructionData);
+      }
       BetResult::Pending => {
          log!("settle_bet: bet result is pending");
          return Err(ProgramError::InvalidInstructionData);

@@ -30,7 +30,7 @@ use crate::{
 
 const MM_ACCOUNTS_PER_MM: usize = 5;
 
-pub const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR: u8 = 10;
+pub const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR: u8 = 32;
 
 #[inline(always)]
 fn write_proxy_side_odds(out: &mut [u8], off: usize, odds_scaled: u32) {

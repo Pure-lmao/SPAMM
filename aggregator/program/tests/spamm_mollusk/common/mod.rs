@@ -5,6 +5,7 @@ pub mod env;
 pub mod fill;
 pub mod fixtures;
 pub mod ledger;
+pub mod rfq;
 pub mod settle;
 
 pub use assertions::{
@@ -21,4 +22,5 @@ pub use env::{
 };
 pub use fill::*;
 pub use fixtures::*;
+pub use rfq::{sign_rfq_bet_quote, sign_rfq_parlay_quote, RFQ_OFFER_EXPIRY};
 pub use settle::*;

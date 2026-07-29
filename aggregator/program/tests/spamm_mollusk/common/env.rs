@@ -130,11 +130,9 @@ impl Env {
       let alt_src = alt_stub_so_path();
       let mm_src = mm_so_path();
       let mm_deploy = deploy.join("spamm_market_maker.so");
-      if mm_src != mm_deploy {
-         std::fs::copy(&mm_src, &mm_deploy).unwrap_or_else(|e| {
-            panic!("copy MM artifact {:?} -> {:?}: {}", mm_src, mm_deploy, e);
-         });
-      }
+      std::fs::copy(&mm_src, &mm_deploy).unwrap_or_else(|e| {
+         panic!("copy MM artifact {:?} -> {:?}: {}", mm_src, mm_deploy, e);
+      });
       if !agg_so.exists() || !mm_deploy.exists() || !alt_src.exists() {
          panic!(
             "Missing SBF artifacts.\nExpected aggregator:\n  {:?}\nMM (after sync):\n  {:?}\nALT stub:\n  {:?}\nBuild with:\n  cargo build-sbf --manifest-path aggregator/program/Cargo.toml\n  cargo build-sbf --manifest-path market_maker/program/Cargo.toml\n  cargo build-sbf --manifest-path aggregator/program/tests/spamm_mollusk/alt_stub/Cargo.toml",
@@ -172,6 +170,19 @@ impl Env {
       }
    }
 
+   /// Patch the clock sysvar `unix_timestamp` (Mollusk default is 0).
+   pub fn set_clock_unix_timestamp(&mut self, ts: i64) {
+      let pk = clock_sysvar_pubkey();
+      let mut acct = self.get_account(&pk).cloned().unwrap_or_else(|| {
+         let (_, a) = self.mollusk.sysvars.keyed_account_for_clock_sysvar();
+         a
+      });
+      if acct.data.len() >= 40 {
+         acct.data[32..40].copy_from_slice(&ts.to_le_bytes());
+      }
+      self.upsert(pk, acct);
+   }
+
    pub fn get_account(&self, key: &Pubkey) -> Option<&Account> {
       self.accounts.iter().find(|(k, _)| k == key).map(|(_, a)| a)
    }
@@ -199,6 +210,11 @@ impl Env {
       let (ix_sysvar_pk, ix_sysvar_acct) =
          mollusk_svm::instructions_sysvar::keyed_account(core::iter::once(&ix));
       self.upsert(ix_sysvar_pk, ix_sysvar_acct);
+      let clock_pk = clock_sysvar_pubkey();
+      if self.get_account(&clock_pk).is_none() {
+         let (_, clock_acct) = self.mollusk.sysvars.keyed_account_for_clock_sysvar();
+         self.upsert(clock_pk, clock_acct);
+      }
       let res = self
          .mollusk
          .process_instruction(&ix, self.accounts.as_slice());
@@ -295,9 +311,12 @@ impl Env {
 
       let mut admin_bytes = [0u8; 32];
       admin_bytes.copy_from_slice(mm_admin().as_ref());
+      let mut mm_init_data = Vec::with_capacity(64);
+      mm_init_data.extend_from_slice(&admin_bytes);
+      mm_init_data.extend_from_slice(super::rfq::rfq_signer_pubkey().as_ref());
       let mm_init = self.mm_ix(
          1,
-         admin_bytes.to_vec(),
+         mm_init_data,
          vec![
             AccountMeta::new(mm_admin(), true),
             AccountMeta::new(mm_config_pda(), false),

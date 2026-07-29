@@ -65,6 +65,7 @@ fn fill_netting_m4_bet_and_grade(env: &mut Env, bet_id: u64, result: u8) {
       mkt: 4,
       period: 1,
       is_pregame: true,
+      operator: crate::common::fixtures::market_operator(),
    };
    let body = oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -420,7 +421,7 @@ fn settle_bet_parlay_account_rejected() {
       .program_result
       .is_ok());
    let g = grade_ix(&[BetResult::Won as u8], &[bet]);
-   assert!(env.run_ix(g).program_result.is_ok());
+   assert_program_err(&env.run_ix(g), ProgramError::InvalidInstructionData);
    let r = env.run_ix(settle_bet_instruction(bet, bat));
    assert_program_err(&r, ProgramError::InvalidInstructionData);
 }

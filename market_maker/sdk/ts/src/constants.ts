@@ -4,6 +4,10 @@ export const MARKET_MAKER_PROGRAM_ID: Address = address(
    'DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt',
 );
 
+export const AGGREGATOR_PROGRAM_ID: Address = address(
+   '5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H',
+);
+
 export const MINT_ID: Address = address(
    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
 );
@@ -32,3 +36,4 @@ export const MM_QUOTE_BUFFER_SEED = 'mm_quote_buffer' as const;
 export const MM_PARLAY_QUOTE_BUFFER_SEED = 'mm_parlay_quote_buffer' as const;
 export const EVENT_STATE_SEED = 'event_state' as const;
 export const MM_MARKET_DATA_PDA_SEED = 'market_data' as const;
+export const MM_ENCUMBRANCE_PDA_SEED = 'encumbrance' as const;

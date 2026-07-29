@@ -3,6 +3,7 @@
 use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::address_lookup_table;
+use solana_sdk_ids::sysvar::clock;
 use spamm_aggregator::constants::INIT_PROGRAM_RECENT_SLOT;
 use spamm_aggregator::state::{EventId, MarketId, Sport};
 
@@ -29,9 +30,10 @@ pub fn mm_list_pda() -> Pubkey {
 }
 
 pub fn mint_pubkey() -> Pubkey {
+   // Must match `spamm_aggregator::constants::MINT` (mainnet USDC).
    Pubkey::new_from_array([
-      0xe9, 0x28, 0x39, 0x55, 0x09, 0x65, 0xff, 0xd4, 0xd6, 0x4a, 0xca, 0xaf, 0x46, 0xd4, 0x5d, 0xf7,
-      0x31, 0x8e, 0x5b, 0x4f, 0x57, 0xc9, 0x0c, 0x48, 0x7d, 0x60, 0x62, 0x5d, 0x82, 0x9b, 0x83, 0x7b,
+      0xc6, 0xfa, 0x7a, 0xf3, 0xbe, 0xdb, 0xad, 0x3a, 0x3d, 0x65, 0xf3, 0x6a, 0xab, 0xc9, 0x74, 0x31,
+      0xb1, 0xbb, 0xe4, 0xc2, 0xd2, 0xf6, 0xe0, 0xe4, 0x7c, 0xa6, 0x02, 0x03, 0x45, 0x2f, 0x5d, 0x61,
    ])
 }
 
@@ -99,6 +101,10 @@ pub fn mm_parlay_quote_buffer_pda() -> Pubkey {
 }
 
 // --- Test actors (deterministic; not necessarily on-curve) ---
+
+pub fn clock_sysvar_pubkey() -> Pubkey {
+   clock::id()
+}
 
 pub fn admin() -> Pubkey {
    Pubkey::new_from_array([0xA1; 32])
@@ -177,6 +183,22 @@ pub fn event_id_basketball() -> EventId {
    }
 }
 
+/// Aggregator admin pubkey — also used as the deterministic test market operator.
+pub fn market_operator() -> pinocchio::Address {
+   pinocchio::Address::new_from_array(admin().to_bytes())
+}
+
+/// Packed `MarketId` wire bytes (matches on-chain `to_zc` layout).
+pub fn market_id_wire_bytes(m: &MarketId) -> [u8; MarketId::WIRE_SIZE] {
+   (*m).as_bytes()
+}
+
+pub fn market_data_pda(mid: &MarketId) -> Pubkey {
+   let w = market_id_wire_bytes(mid);
+   let (body, operator) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
+   Pubkey::find_program_address(&[b"market_data", body, operator], &mm_program_id()).0
+}
+
 /// Pregame two-outcome moneyline (`period` 0, `mkt` 0) — nets via netting PDA header on non-soccer sports.
 pub fn market_ml_pregame(eid: EventId) -> MarketId {
    MarketId {
@@ -185,6 +207,7 @@ pub fn market_ml_pregame(eid: EventId) -> MarketId {
       mkt: 0,
       period: 0,
       is_pregame: true,
+      operator: market_operator(),
    }
 }
 
@@ -204,6 +227,7 @@ pub fn market_spread_pregame(eid: EventId) -> MarketId {
       mkt: 200,
       period: 1,
       is_pregame: true,
+      operator: market_operator(),
    }
 }
 
@@ -214,6 +238,7 @@ pub fn market_soccer_ft_pregame(eid: EventId) -> MarketId {
       mkt: 1,
       period: 1,
       is_pregame: true,
+      operator: market_operator(),
    }
 }
 
@@ -238,16 +263,6 @@ pub const BET_ID_BASIC: u64 = 1;
 pub const BET_ID_NET_A: u64 = 2;
 pub const BET_ID_NET_B: u64 = 3;
 pub const BET_ID_PARLAY: u64 = 4;
-
-/// Packed `MarketId` wire bytes (matches on-chain `to_zc` layout).
-pub fn market_id_wire_bytes(m: &MarketId) -> [u8; MarketId::WIRE_SIZE] {
-   let zc = m.to_zc();
-   let mut out = [0u8; MarketId::WIRE_SIZE];
-   unsafe {
-      core::ptr::write(out.as_mut_ptr().cast(), zc);
-   }
-   out
-}
 
 pub fn mm_collateral_ata() -> Pubkey {
    spl_associated_token_account_interface::address::get_associated_token_address_with_program_id(
@@ -294,11 +309,6 @@ pub fn netting_pda_for_event(eid: &EventId) -> Pubkey {
 pub fn event_state_pda(eid: &EventId) -> Pubkey {
    let e = eid.as_wire_bytes();
    Pubkey::find_program_address(&[b"event_state", e.as_slice()], &mm_program_id()).0
-}
-
-pub fn market_data_pda(mid: &MarketId) -> Pubkey {
-   let w = market_id_wire_bytes(mid);
-   Pubkey::find_program_address(&[b"market_data", w.as_slice()], &mm_program_id()).0
 }
 
 pub fn bet_pda_for(user_pk: &Pubkey, bet_id: u64) -> Pubkey {

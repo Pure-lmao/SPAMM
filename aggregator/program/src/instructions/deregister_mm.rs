@@ -44,7 +44,7 @@ use crate::{
    writers::write_u16_le_unchecked,
 };
 
-pub const DEREGISTER_MM_IX_DISCRIMINATOR: u8 = 54;
+pub const DEREGISTER_MM_IX_DISCRIMINATOR: u8 = 3;
 
 fn find_mm_list_index(mm_list: &AccountView, mm_program: &Address) -> Result<usize, ProgramError> {
    let data_len = mm_list.data_len();

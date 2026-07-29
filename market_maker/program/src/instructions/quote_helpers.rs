@@ -1,7 +1,12 @@
 //! Shared helpers for MM `get_quote` and `get_quote_parlay` (odds body layout, parlay math).
 
-use pinocchio::{ProgramResult, error::ProgramError, hint::unlikely};
-use pinocchio_log::log;use spamm_aggregator::state::{MarketId, ParlayLegTable, Sport};
+use pinocchio::{error::ProgramError, hint::unlikely};
+use pinocchio_log::log;
+use spamm_aggregator::state::{MarketId, ParlayLegTable, Sport};
+
+pub use spamm_aggregator::parlay_helpers::{
+   product_parlay_odds, validate_parlay_same_event_odds,
+};
 
 /// Soccer Full-Time (`mkt` 1) and Double Chance (`mkt` 5): three `u32` LE odds in the body in order
 /// **home, away, draw**; wire `side` is `0` / `1` / `2` for the same three outcomes.
@@ -41,18 +46,32 @@ pub fn odds_from_market_data_body(m: &MarketId, body: &[u8], side: u8) -> Result
    }
 }
 
-/// Example parlay rule: no two legs may reference the same `EventId`.
+/// Assign per-leg odds for quote buffer: first leg per `EventId` keeps market odds; companions get `0`.
 #[inline(always)]
-pub fn ensure_distinct_parlay_event_ids(num_legs: usize, legs: &ParlayLegTable) -> ProgramResult {
+pub fn assign_same_event_companion_odds(
+   num_legs: usize,
+   legs: &mut ParlayLegTable,
+   market_odds: &[u32],
+) {
    for i in 0..num_legs {
-      let li = legs.get(i).ok_or(ProgramError::InvalidInstructionData)?;
+      let Some(leg) = legs.get_mut(i) else {
+         return;
+      };
+      leg.odds_scaled = market_odds[i];
+      leg.result = spamm_aggregator::state::account_bet::BetResult::Pending;
+   }
+   for i in 0..num_legs {
+      let event_i = legs.get(i).map(|l| l.market_id.event_id);
+      let Some(event_i) = event_i else {
+         return;
+      };
       for j in (i + 1)..num_legs {
-         let lj = legs.get(j).ok_or(ProgramError::InvalidInstructionData)?;
-         if unlikely(li.market_id.event_id.eq(&lj.market_id.event_id)) {
-            log!("quote_helpers: parlay legs must be on distinct events");
-            return Err(ProgramError::InvalidInstructionData);
+         let leg_j = legs.get(j);
+         if leg_j.is_some_and(|l| l.market_id.event_id.eq(&event_i)) {
+            if let Some(leg) = legs.get_mut(j) {
+               leg.odds_scaled = 0;
+            }
          }
       }
    }
-   Ok(())
 }

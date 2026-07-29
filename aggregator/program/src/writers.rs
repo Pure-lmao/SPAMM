@@ -21,6 +21,12 @@ pub unsafe fn write_u32_le_unchecked(ptr: *mut u8, offset: usize, value: u32) {
 }
 
 #[inline(always)]
+pub unsafe fn write_u64_le_unchecked(ptr: *mut u8, offset: usize, value: u64) {
+   // SAFETY: caller guarantees `offset..offset+8` is in-bounds.
+   unsafe { write_unaligned(ptr.add(offset) as *mut u64, value.to_le()) };
+}
+
+#[inline(always)]
 pub unsafe fn write_i64_le_unchecked(ptr: *mut u8, offset: usize, value: i64) {
    // SAFETY: caller guarantees `offset..offset+8` is in-bounds.
    unsafe { write_unaligned(ptr.add(offset) as *mut i64, value.to_le()) };

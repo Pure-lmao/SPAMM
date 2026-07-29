@@ -40,7 +40,7 @@ use crate::{
 
 const MM_ACCOUNTS_PER_MM: usize = 5;
 
-pub const GET_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 8;
+pub const GET_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 30;
 
 /// CPI `get_quote` for one MM; ix buffers live only in this frame.
 #[inline(never)]

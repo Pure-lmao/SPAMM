@@ -6,13 +6,15 @@ export { MAX_PARLAY_LEGS };
 
 /** Wire sizes from `aggregator/program` packed layouts (`state/ids.rs`, `ZeroPodFixed::SIZE`). */
 export const EVENT_ID_WIRE_SIZE = 11;
-/** `MarketId`: `EventId` + `player: u64` + `mkt: u16` + `period: u8` + `is_pregame: u8`. */
-export const MARKET_ID_WIRE_SIZE = EVENT_ID_WIRE_SIZE + 8 + 2 + 1 + 1;
+/** `MarketId` wire without `operator` (legacy pre-operator layout; used as a PDA seed). */
+export const MARKET_ID_BODY_WIRE_SIZE = EVENT_ID_WIRE_SIZE + 8 + 2 + 1 + 1;
+/** `MarketId`: `EventId` + `player: u64` + `mkt: u16` + `period: u8` + `is_pregame: u8` + `operator: Address`. */
+export const MARKET_ID_WIRE_SIZE = MARKET_ID_BODY_WIRE_SIZE + 32;
 /** Packed `EventGameState` (`other.rs`): 4-byte phase + 4 scores. */
 export const EVENT_GAME_STATE_LEN = 8;
 /** `FillBetIxData` packed wire size (see `fill_bet.rs`). */
 export const FILL_BET_IX_DATA_LEN = 8 + MARKET_ID_WIRE_SIZE + 1 + 8 + 4 + 2 + EVENT_GAME_STATE_LEN;
-export const PARLAY_LEG_WIRE_LEN = MARKET_ID_WIRE_SIZE + 1 + 2 + EVENT_GAME_STATE_LEN;
+export const PARLAY_LEG_WIRE_LEN = MARKET_ID_WIRE_SIZE + 1 + 2 + EVENT_GAME_STATE_LEN + 4 + 1;
 export const PARLAY_LEG_TABLE_LEN = MAX_PARLAY_LEGS * PARLAY_LEG_WIRE_LEN;
 export const FILL_PARLAY_IX_DATA_LEN = 8 + 8 + 4 + 1 + PARLAY_LEG_TABLE_LEN;
 export const ADD_LINE_TO_LIABILITY_NETTING_IX_LEN = EVENT_ID_WIRE_SIZE + 1 + 2;
@@ -47,7 +49,8 @@ export const BET_ACCOUNT_LEN =
 export const PARLAY_BET_ACCOUNT_DISCRIMINATOR = 2;
 export const PARLAY_BET_ACCOUNT_LEN = 128 + PARLAY_LEG_TABLE_LEN;
 export const MM_ENCUMBRANCE_PDA_LEN = 10;
-export const MM_ACCOUNT_CONFIG_MIN_LEN = 34;
+/** `MmAccountConfig` packed wire size (`discriminator` + `bump` + `admin` + `rfq_signer`). */
+export const MM_ACCOUNT_CONFIG_MIN_LEN = 66;
 export const MM_MARKET_DATA_PDA_MIN_LEN = 2;
 export const MM_LIST_HEADER_LEN = 3;
 export const GET_QUOTE_IX_WIRE_LEN =
@@ -59,6 +62,9 @@ export const FILL_QUOTE_IX_WIRE_LEN =
 /** Full MM `fill_parlay_quote` ix data (includes leading discriminator `8`). */
 export const FILL_QUOTE_PARLAY_IX_WIRE_LEN = 21;
 export const MM_RETURN_DATA_LEN = 12;
+export const PARLAY_QUOTE_RETURN_WIRE_LEN = 8 + 4 + 1 + MAX_PARLAY_LEGS * 4;
+export const PROXY_PARLAY_QUOTE_DATA_LEN = 32 + 8 + 4 + 1 + MAX_PARLAY_LEGS * 4;
+export const GRADE_PARLAY_LEG_SKIP = 255;
 
 /** Wire `u8` (`state/ids.rs`). */
 export enum Sport {
@@ -80,6 +86,7 @@ export enum BetResult {
    Push = 5,
    Cancelled = 6,
    RolledBack = 7,
+   ModifiedWin = 8,
 }
 
 export type EventId = {
@@ -94,6 +101,7 @@ export type MarketId = {
    mkt: number;
    period: number;
    isPregame: boolean;
+   operator: Address;
 };
 
 export type BetFiller = {
@@ -198,6 +206,8 @@ export type ParlayLegWire = {
    side: number;
    eventStateSequence: number;
    eventGameState: EventGameState;
+   oddsScaled: bigint;
+   result: BetResult;
 };
 
 export type MmParlayQuoteBuffer = {
@@ -274,7 +284,77 @@ export type MmAccountConfig = {
    discriminator: number;
    bump: number;
    admin: Address;
+   rfqSigner: Address;
 };
+
+export const RFQ_SIGNATURE_LEN = 64;
+/** One parlay leg in an RFQ signed message (selection + per-leg odds; no result). */
+export const RFQ_SIGNED_PARLAY_LEG_LEN = MARKET_ID_WIRE_SIZE + EVENT_GAME_STATE_LEN + 2 + 4 + 1;
+export const RFQ_SIGNED_PARLAY_LEG_TABLE_LEN = RFQ_SIGNED_PARLAY_LEG_LEN * MAX_PARLAY_LEGS;
+/** Canonical RFQ message length: `networkDomain(u8)` + offer body + `mmProgramId`. */
+export const RFQ_BET_MESSAGE_LEN =
+   1 + 32 + 8 + MARKET_ID_WIRE_SIZE + EVENT_GAME_STATE_LEN + 2 + 1 + 8 + 4 + 4 + 32;
+export const RFQ_PARLAY_MESSAGE_LEN =
+   1 + 32 + 8 + 1 + RFQ_SIGNED_PARLAY_LEG_TABLE_LEN + 8 + 4 + 4 + 32;
+export const FILL_RFQ_BET_IX_BODY_LEN = FILL_BET_IX_DATA_LEN + 12;
+export const FILL_RFQ_BET_IX_DATA_LEN = FILL_RFQ_BET_IX_BODY_LEN + RFQ_SIGNATURE_LEN;
+export const FILL_RFQ_PARLAY_IX_BODY_LEN = FILL_PARLAY_IX_DATA_LEN + 12;
+export const FILL_RFQ_PARLAY_IX_DATA_LEN = FILL_RFQ_PARLAY_IX_BODY_LEN + RFQ_SIGNATURE_LEN;
+
+/** Canonical ed25519 message bytes for a single-bet RFQ quote (`rfq_message.rs`). */
+export type RfqBetMessageInput = {
+   networkDomain: number;
+   user: Address;
+   betId: bigint;
+   marketId: MarketId;
+   eventGameState: EventGameState;
+   eventStateSequence: number;
+   side: number;
+   maxStake: bigint;
+   oddsScaled: bigint;
+   offerExpiry: number;
+   mmProgramId: Address;
+};
+
+/** Canonical ed25519 message bytes for a parlay RFQ quote (`rfq_message.rs`). */
+export type RfqParlayMessageInput = {
+   networkDomain: number;
+   user: Address;
+   betId: bigint;
+   numLegs: number;
+   legs: readonly ParlayLegWire[];
+   maxStake: bigint;
+   oddsScaled: bigint;
+   offerExpiry: number;
+   mmProgramId: Address;
+};
+
+export type FillRfqBetIxData = {
+   betId: bigint;
+   marketId: MarketId;
+   side: number;
+   amount: bigint;
+   eventStateSequence: number;
+   eventGameState: EventGameState;
+   maxStake: bigint;
+   oddsScaled: bigint;
+   offerExpiry: number;
+   signature: Uint8Array;
+};
+
+export type FillRfqParlayIxData = {
+   betId: bigint;
+   amount: bigint;
+   numLegs: number;
+   legs: readonly ParlayLegWire[];
+   maxStake: bigint;
+   oddsScaled: bigint;
+   offerExpiry: number;
+   signature: Uint8Array;
+};
+
+export type FillRfqBetIxBody = Omit<FillRfqBetIxData, 'signature'>;
+export type FillRfqParlayIxBody = Omit<FillRfqParlayIxData, 'signature'>;
 
 export type MmReturnData = {
    maxAmount: bigint;
@@ -286,6 +366,15 @@ export type ProxyQuoteData = {
    mmAddress: Address;
    maxAmount: bigint;
    oddsScaled: bigint;
+};
+
+/** One MM parlay quote from `get_parlay_quote_proxy` return data. */
+export type ProxyParlayQuoteData = {
+   mmAddress: Address;
+   maxAmount: bigint;
+   oddsScaled: bigint;
+   numLegs: number;
+   legOdds: readonly bigint[];
 };
 
 /** `state::mm_quote::PROXY_QUOTE_DATA_LEN` — `repr(C)` size of one `ProxyQuoteData`. */
@@ -370,11 +459,14 @@ export type DecodedAggregatorInstruction =
    | { kind: 'registerMm' }
    | { kind: 'deregisterMm' }
    | { kind: 'fillBet'; data: FillBetIxData }
+   | { kind: 'fillRfqBet'; data: FillRfqBetIxData }
    | { kind: 'fillParlay'; data: FillParlayIxData }
+   | { kind: 'fillRfqParlay'; data: FillRfqParlayIxData }
    | { kind: 'getQuoteProxy'; data: FillBetIxData }
    | { kind: 'getParlayQuoteProxy'; data: FillParlayIxData }
    | { kind: 'getMarketQuotesProxy'; data: FillBetIxData }
    | { kind: 'gradeBets'; betResults: Uint8Array }
+   | { kind: 'gradeParlay'; legGradeMasks: readonly Uint8Array[] }
    | { kind: 'settleBet' }
    | { kind: 'settleParlay' }
    | { kind: 'createNettingAccount'; eventId: EventId }

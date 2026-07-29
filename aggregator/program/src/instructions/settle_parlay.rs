@@ -27,33 +27,12 @@ use pinocchio::{
 use pinocchio_log::log;
 use pinocchio_token::instructions::{Batch, CloseAccount, IntoBatch, Transfer};
 use pinocchio::{cpi::CpiAccount, instruction::InstructionAccount};
-use crate::{ID, constants::{SETTLE_PARLAY_TOKEN_BATCH_IX_CAP, SETTLE_TOKEN_BATCH_MAX_INNER_DATA}, helpers::{close_pda_return_rent, verify_config_pda, verify_mint, verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program}, parsers::{get_encumbrance, get_token_account_balance}, state::{
+use crate::{ID, constants::{SETTLE_PARLAY_TOKEN_BATCH_IX_CAP, SETTLE_TOKEN_BATCH_MAX_INNER_DATA}, helpers::{close_pda_return_rent, push_bet_ata_out, verify_config_pda, verify_mint, verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program}, parlay_helpers::compute_modified_parlay_settlement, parsers::{get_encumbrance, get_token_account_balance}, state::{
       PARLAY_BET_ACCOUNT_LEN, PARLAY_BET_ACCOUNT_SEED, ParlayBetAccountData, account_bet::BetResult, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED}
    }, writers::write_i64_le_unchecked
 };
 
-fn push_bet_ata_out<'acc, 'buf>(
-   batch: &mut Batch<'acc, 'buf>,
-   bet_ata_remaining: &mut u64,
-   amount: u64,
-   bet_ata: &'acc AccountView,
-   to: &'acc AccountView,
-   bet_authority: &'acc AccountView,
-) -> ProgramResult
-where
-   'acc: 'buf,
-{
-   if amount == 0 {
-      return Ok(());
-   }
-   *bet_ata_remaining = bet_ata_remaining
-      .checked_sub(amount)
-      .ok_or(ProgramError::ArithmeticOverflow)?;
-   Transfer::new(bet_ata, to, bet_authority, amount).into_batch(batch)?;
-   Ok(())
-}
-
-pub const SETTLE_PARLAY_IX_DISCRIMINATOR: u8 = 7;
+pub const SETTLE_PARLAY_IX_DISCRIMINATOR: u8 = 26;
 
 pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
    let [
@@ -153,31 +132,32 @@ pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
 
    let stake = bet_data.amount;
    let potential_profit = bet_data.payout.checked_sub(stake).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
+   let num_legs = bet_data.num_legs as usize;
 
-   let (
-      amount_to_user_from_bet_ata,
-      amount_to_user_from_filler_liability_token_account,
-      amount_to_filler_from_bet_ata,
-      amount_to_filler_token_account_from_liability_token_account,
-   ): (u64, u64, u64, u64) = match bet_result {
-      BetResult::Won => {
-         (stake, potential_profit, 0, 0)
-      },
-      BetResult::Lost => {
-         (0, 0, stake, potential_profit)
-      },
-      BetResult::Push | BetResult::Cancelled | BetResult::RolledBack => {
-         (stake, 0, 0, potential_profit)
-      },
+   let user_return: u64 = match bet_result {
+      BetResult::Won => bet_data.payout,
+      BetResult::Lost => 0,
+      BetResult::Push | BetResult::Cancelled | BetResult::RolledBack => stake,
+      BetResult::ModifiedWin => {
+         let (ret, _lost) = compute_modified_parlay_settlement(stake, num_legs, &bet_data.legs)?;
+         ret
+      }
       BetResult::HalfWon | BetResult::HalfLost => {
-         log!("settle_parlay: bet result is half won or half lost");
+         log!("settle_parlay: bet result is half won or half lost at ticket level");
          return Err(ProgramError::InvalidInstructionData);
-      },
+      }
       BetResult::Pending => {
          log!("settle_parlay: bet result is pending");
          return Err(ProgramError::InvalidInstructionData);
-      },
+      }
    };
+
+   let amount_to_user_from_bet_ata = core::cmp::min(user_return, stake);
+   let amount_to_user_from_filler_liability_token_account =
+      user_return.saturating_sub(amount_to_user_from_bet_ata);
+   let amount_to_filler_from_bet_ata = stake.saturating_sub(amount_to_user_from_bet_ata);
+   let amount_to_filler_token_account_from_liability_token_account =
+      potential_profit.saturating_sub(amount_to_user_from_filler_liability_token_account);
 
    let encumbrance_pda_bump_seed = [valid_mm_encumbrance_pda_bump];
    let encumbrance_pda_signer_seeds = [

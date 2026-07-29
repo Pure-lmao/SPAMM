@@ -48,6 +48,8 @@ import {
    type EventGameState,
    type EventId,
    type FillBetIxData,
+   type FillRfqBetIxData,
+   type FillRfqParlayIxData,
    type FillParlayIxData,
    type MarketId,
    type ParlayBetAccountData,
@@ -59,9 +61,12 @@ import {
    validateEventGameState,
    validateEventId,
    validateFillBetIxData,
+   validateFillRfqBetIxData,
+   validateFillRfqParlayIxData,
    validateFillParlayIxData,
    validateGetQuoteParlayIxData,
    validateGradeBetResults,
+   validateGradeParlayMasks,
    validateMarketId,
    validatePositiveU64,
    validateU16,
@@ -70,23 +75,37 @@ import {
 } from './validate.js';
 
 /** Router discriminators (first byte of aggregator instruction data). */
+// setup — 0–3
 export const INIT_PROGRAM_IX_DISCRIMINATOR = 0;
 export const CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR = 1;
 export const REGISTER_MM_IX_DISCRIMINATOR = 2;
-export const FILL_BET_IX_DISCRIMINATOR = 3;
-export const FILL_PARLAY_IX_DISCRIMINATOR = 4;
-export const GRADE_BETS_IX_DISCRIMINATOR = 5;
-export const SETTLE_BET_IX_DISCRIMINATOR = 6;
-export const SETTLE_PARLAY_IX_DISCRIMINATOR = 7;
-export const GET_QUOTE_PROXY_IX_DISCRIMINATOR = 8;
-export const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR = 9;
-export const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR = 10;
-export const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 50;
-export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 51;
-export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 52;
-export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 53;
-export const DEREGISTER_MM_IX_DISCRIMINATOR = 54;
-export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 100;
+export const DEREGISTER_MM_IX_DISCRIMINATOR = 3;
+// bets — 10–13
+export const FILL_BET_IX_DISCRIMINATOR = 10;
+export const FILL_PARLAY_IX_DISCRIMINATOR = 11;
+export const FILL_RFQ_BET_IX_DISCRIMINATOR = 12;
+export const FILL_RFQ_PARLAY_IX_DISCRIMINATOR = 13;
+/** MM CPI discriminator for `fill_bet_rfq` (not an aggregator router byte). */
+export const MM_FILL_BET_RFQ_IX_DISCRIMINATOR = 14;
+/** MM CPI discriminator for `fill_parlay_rfq` (not an aggregator router byte). */
+export const MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR = 16;
+// grading / settlement — 20–21 / 25–26
+export const GRADE_BETS_IX_DISCRIMINATOR = 20;
+export const GRADE_PARLAY_IX_DISCRIMINATOR = 21;
+export const SETTLE_BET_IX_DISCRIMINATOR = 25;
+export const SETTLE_PARLAY_IX_DISCRIMINATOR = 26;
+// proxies — 30–32
+export const GET_QUOTE_PROXY_IX_DISCRIMINATOR = 30;
+export const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR = 31;
+export const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR = 32;
+// netting PDA — 40–43
+export const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 40;
+export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 41;
+export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 42;
+export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 43;
+// liability account — 50
+export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 50;
+// devnet
 export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
@@ -238,7 +257,7 @@ export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Pro
 /**
  * **`deregister_mm`** — admin tears down an MM registration (inverse of {@link getRegisterMmIx}).
  *
- * **Rust:** `aggregator::instructions::deregister_mm::process` (`DEREGISTER_MM_IX_DISCRIMINATOR` = 54). No payload after router discriminator.
+ * **Rust:** `aggregator::instructions::deregister_mm::process` (`DEREGISTER_MM_IX_DISCRIMINATOR` = 3). No payload after router discriminator.
  *
  * @param aggregatorAdmin - **TS:** `Address` — aggregator config authority (writable signer). **Rust:** `aggregator_admin`.
  * @param mmAdmin - **TS:** `Address` — MM admin (writable); receives closed-account rent. **Rust:** `mm_admin`, verified against MM config PDA.
@@ -291,7 +310,7 @@ export async function getDeregisterMmIx(
 /**
  * **`fill_bet`** — CPI MM `get_quote` / `fill_quote`, open bet PDA + bet ATA, move collateral per best quotes (up to {@link MAX_NUMBER_OF_MMS} MMs).
  *
- * **Rust:** `aggregator::instructions::fill_bet::fill_bet` (`FILL_BET_IX_DISCRIMINATOR` = 3). Parsed body: `bet_id: u64`, `MarketId`, `side: u8`, `amount: u64`, `min_odds_scaled: u32`, `event_state_sequence: u16`, `event_game_state: EventGameState`.
+ * **Rust:** `aggregator::instructions::fill_bet::fill_bet` (`FILL_BET_IX_DISCRIMINATOR` = 10). Parsed body: `bet_id: u64`, `MarketId`, `side: u8`, `amount: u64`, `min_odds_scaled: u32`, `event_state_sequence: u16`, `event_game_state: EventGameState`.
  *
  * @param fill - **TS:** {@link FillBetIxData} — wire-aligned bet request. **Rust:** same fields as `parse_fill_bet_data` output.
  * @param feepayer - **TS:** `Address` — writable signer paying rent and fees. **Rust:** `feepayer` (writable signer).
@@ -365,9 +384,125 @@ export async function getFillBetIx(
 }
 
 /**
+ * **`fill_rfq_bet`** — verify MM ed25519 RFQ quote, CPI MM `fill_bet_rfq`, open bet PDA (single MM, no quote buffer).
+ */
+export async function getFillRfqBetIx(
+   fill: FillRfqBetIxData,
+   feepayer: Address,
+   user: Address,
+   mmProgram: Address,
+   mmNetting?: Address,
+): Promise<Instruction> {
+   validateFillRfqBetIxData(fill, 'fill');
+   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [betPda] = await getBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
+   const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const liabilityAta = await getAta(
+      mmEncumbrancePda,
+      MINT_ID,
+      SPL_TOKEN_PROGRAM_ID,
+      SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   );
+   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const nettingPda = mmNetting ?? SYSTEM_PROGRAM_ID;
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(feepayer),
+         rs(user),
+         rw(userAta),
+         rw(betPda),
+         rw(betAta),
+         ro(configPda),
+         ro(MINT_ID),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSTEM_PROGRAM_ID),
+         ro(SYSVAR_INSTRUCTIONS_ID),
+         ro(CLOCK_ID),
+         ro(mmProgram),
+         rw(mmConfigPda),
+         ro(eventStatePda),
+         rw(marketDataPda),
+         rw(mmEncumbrancePda),
+         rw(liabilityAta),
+         rw(mmTokenAta),
+         rw(nettingPda),
+      ],
+      data: encodeAggregatorInstructionData({
+         kind: 'fillRfqBet',
+         data: fill,
+      }),
+   };
+}
+
+/**
+ * **`fill_rfq_parlay`** — verify MM ed25519 RFQ parlay quote, CPI MM `fill_parlay_rfq`, open parlay bet PDA (single MM).
+ */
+export async function getFillRfqParlayIx(
+   fill: FillRfqParlayIxData,
+   feepayer: Address,
+   user: Address,
+   mmProgram: Address,
+): Promise<Instruction> {
+   validateFillRfqParlayIxData(fill, 'fill');
+   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [betPda] = await getParlayBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const liabilityAta = await getAta(
+      mmEncumbrancePda,
+      MINT_ID,
+      SPL_TOKEN_PROGRAM_ID,
+      SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   );
+   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const accounts = [
+      ws(feepayer),
+      rs(user),
+      rw(userAta),
+      rw(betPda),
+      rw(betAta),
+      ro(configPda),
+      ro(MINT_ID),
+      ro(SPL_TOKEN_PROGRAM_ID),
+      ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+      ro(SYSTEM_PROGRAM_ID),
+      ro(SYSVAR_INSTRUCTIONS_ID),
+      ro(CLOCK_ID),
+      ro(mmProgram),
+      rw(mmConfigPda),
+      rw(mmEncumbrancePda),
+      rw(liabilityAta),
+      rw(mmTokenAta),
+   ];
+   for (let legIdx = 0; legIdx < fill.numLegs; legIdx++) {
+      const leg = fill.legs[legIdx]!;
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, leg.marketId);
+      const [eventStatePda] = await getEventStatePda(mmProgram, leg.marketId.eventId);
+      accounts.push(rw(marketDataPda), ro(eventStatePda));
+   }
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts,
+      data: encodeAggregatorInstructionData({
+         kind: 'fillRfqParlay',
+         data: fill,
+      }),
+   };
+}
+
+/**
  * **`get_quote_proxy`** — CPI each MM `get_quote`, return `ProxyQuoteData[]` via transaction return data (no bet accounts).
  *
- * **Rust:** `get_quote_proxy::get_quote_proxy` (`GET_QUOTE_PROXY_IX_DISCRIMINATOR` = 8). Instruction body matches `fill_bet` (`FillBetIxData`; `bet_id` unused). Per MM: 5 accounts (program, config, event state, market data, quote buffer).
+ * **Rust:** `get_quote_proxy::get_quote_proxy` (`GET_QUOTE_PROXY_IX_DISCRIMINATOR` = 30). Instruction body matches `fill_bet` (`FillBetIxData`; `bet_id` unused). Per MM: 5 accounts (program, config, event state, market data, quote buffer).
  *
  * @param quote - Same fields as {@link getFillBetIx} / {@link FillBetIxData}.
  * @param user - User pubkey passed to MM `get_quote` CPI (readonly; not required to sign).
@@ -410,7 +545,7 @@ export async function getGetQuoteProxyIx(
 /**
  * **`get_market_quotes_proxy`** — CPI each MM `get_quote` for every side in the market; return packed quotes via transaction return data.
  *
- * **Rust:** `get_market_quotes_proxy::get_market_quotes_proxy` (`GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR` = 10). Body matches `fill_bet` (`bet_id` / `side` unused). Return data is odds-only per side (`decodeMarketQuotesProxyReturnData` in `codex.ts`). `N` ≤ `min(20, maxProxyMmsForMarketQuotes(numSidesForMkt(mkt)))`.
+ * **Rust:** `get_market_quotes_proxy::get_market_quotes_proxy` (`GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR` = 32). Body matches `fill_bet` (`bet_id` / `side` unused). Return data is odds-only per side (`decodeMarketQuotesProxyReturnData` in `codex.ts`). `N` ≤ `min(20, maxProxyMmsForMarketQuotes(numSidesForMkt(mkt)))`.
  *
  * @param quote - Same fields as {@link getFillBetIx} / {@link FillBetIxData}.
  * @param user - User pubkey for MM CPI (readonly).
@@ -460,7 +595,7 @@ export async function getGetMarketQuotesProxyIx(
 /**
  * **`get_parlay_quote_proxy`** — CPI each MM `get_quote_parlay`, return `ProxyQuoteData[]` via transaction return data.
  *
- * **Rust:** `get_parlay_quote_proxy::get_parlay_quote_proxy` (`GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR` = 9). Body matches `fill_parlay` (`FillParlayIxData`; `bet_id` unused). Per MM: `3 + 2 × num_legs` accounts.
+ * **Rust:** `get_parlay_quote_proxy::get_parlay_quote_proxy` (`GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR` = 31). Body matches `fill_parlay` (`FillParlayIxData`; `bet_id` unused). Per MM: `3 + 2 × num_legs` accounts.
  *
  * @param quote - Same fields as {@link getFillParlayIx} / {@link FillParlayIxData}.
  * @param user - User pubkey for MM CPI (readonly).
@@ -504,7 +639,7 @@ export async function getGetParlayQuoteProxyIx(
 /**
  * **`fill_parlay`** — CPI MM `get_quote_parlay` / `fill_parlay_quote`, open parlay bet PDA + ATA (no netting; **exactly one** MM).
  *
- * **Rust:** `aggregator::instructions::fill_parlay::fill_parlay` (`FILL_PARLAY_IX_DISCRIMINATOR` = 4). Fixed header matches `fill_bet`; bet PDA seeds are **`["parlay", user, bet_id]`** (not `"bet"`). Per MM: program, config, parlay quote buffer, encumbrance, liability ATA, MM token ATA, then `(market_data, event_state)` × `num_legs`.
+ * **Rust:** `aggregator::instructions::fill_parlay::fill_parlay` (`FILL_PARLAY_IX_DISCRIMINATOR` = 11). Fixed header matches `fill_bet`; bet PDA seeds are **`["parlay", user, bet_id]`** (not `"bet"`). Per MM: program, config, parlay quote buffer, encumbrance, liability ATA, MM token ATA, then `(market_data, event_state)` × `num_legs`.
  *
  * @param fill - **TS:** {@link FillParlayIxData}. **Rust:** `FillParlayIxData` after router discriminator.
  * @param mmProgram - **TS:** `mmProgram`. **Rust:** `6 + 2 * num_legs` accounts for MM.
@@ -672,7 +807,7 @@ export async function getMmGetQuoteIx(
 /**
  * **`grade_bets`** — admin sets `BetResult` on many bet PDAs (no token movement).
  *
- * **Rust:** `aggregator::instructions::grade_bets::process` (`GRADE_BETS_IX_DISCRIMINATOR` = 5). Data: one `u8` result per bet account (`data.len() == bet_accounts.len()`).
+ * **Rust:** `aggregator::instructions::grade_bets::process` (`GRADE_BETS_IX_DISCRIMINATOR` = 20). Data: one `u8` result per bet account (`data.len() == bet_accounts.len()`).
  *
  * @param admin - **TS:** `Address` — config admin signer. **Rust:** `admin` (signer).
  * @param betResults - **TS:** `Uint8Array` — one byte per bet, valid graded `BetResult` discriminant. **Rust:** `&[u8]` same length as bet accounts.
@@ -697,9 +832,32 @@ export async function getGradeBetsIx(
 }
 
 /**
+ * **`grade_parlay`** — operator or admin grades one or more legs per parlay (`255` = skip leg).
+ *
+ * **Rust:** `aggregator::instructions::grade_parlay::process` (`GRADE_PARLAY_IX_DISCRIMINATOR` = 21).
+ * Data: `[u8; 5]` per parlay account.
+ */
+export async function getGradeParlayIx(
+   authority: Address,
+   legGradeMasks: readonly Uint8Array[],
+   parlayBetAccounts: readonly Address[],
+): Promise<Instruction> {
+   validateGradeParlayMasks(legGradeMasks, 'legGradeMasks');
+   if (parlayBetAccounts.length !== legGradeMasks.length) {
+      throw new RangeError('parlayBetAccounts.length must match legGradeMasks.length');
+   }
+   const [configPda] = await getConfigPda();
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [rs(authority), ro(configPda), ...parlayBetAccounts.map((address) => rw(address))],
+      data: encodeAggregatorInstructionData({ kind: 'gradeParlay', legGradeMasks }),
+   };
+}
+
+/**
  * **`settle_bet`** — pay winner, release encumbrances to fillers, close bet PDA + bet ATA to feepayer (bet must not be `Pending`).
  *
- * **Rust:** `aggregator::instructions::settle_bet::process` (`SETTLE_BET_IX_DISCRIMINATOR` = 6). Instruction data: none after router discriminator.
+ * **Rust:** `aggregator::instructions::settle_bet::process` (`SETTLE_BET_IX_DISCRIMINATOR` = 25). Instruction data: none after router discriminator.
  *
  * @param bet - **TS:** {@link BetAccountData} — decoded on-chain bet layout (owner, feepayer, fillers, result, etc.). **Rust:** `BetAccountData` read from `bet_account` account.
  * @param signer - **TS:** `Address` — any signer paying/authorizing the settle flow as implemented on-chain. **Rust:** `signer` (signer).
@@ -745,7 +903,7 @@ export async function getSettleBetIx(
 /**
  * **`settle_parlay`** — settle a graded parlay bet; same data shape as `settle_bet` (no payload after router discriminator).
  *
- * **Rust:** `aggregator::instructions::settle_parlay::process` (`SETTLE_PARLAY_IX_DISCRIMINATOR` = 7). Instruction data: none after router discriminator.
+ * **Rust:** `aggregator::instructions::settle_parlay::process` (`SETTLE_PARLAY_IX_DISCRIMINATOR` = 26). Instruction data: none after router discriminator.
  *
  * @param parlay - **TS:** {@link ParlayBetAccountData}. **Rust:** `ParlayBetAccountData` from parlay bet PDA.
  * @param signer - **TS:** `Address`. **Rust:** `signer` (signer).
@@ -792,7 +950,7 @@ export async function getSettleParlayIx(
 /**
  * **`create_netting_account`** — MM admin creates per-event netting PDA under the aggregator for liability netting.
  *
- * **Rust:** `aggregator::instructions::create_netting_account::process` (`CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 50). Data: `EventId` wire bytes only (after discriminator).
+ * **Rust:** `aggregator::instructions::create_netting_account::process` (`CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 40). Data: `EventId` wire bytes only (after discriminator).
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `EventId` decoded from instruction data.
  * @param mmAdmin - **TS:** `Address` — must match MM config admin. **Rust:** `mm_admin` (writable signer).
@@ -817,7 +975,7 @@ export async function getCreateNettingAccountIx(
 /**
  * **`add_line_to_netting_account`** — MM admin adds `(event_id, period, mkt)` line to an existing netting account.
  *
- * **Rust:** `aggregator::instructions::add_line_to_netting_account::process` (`ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 51). Payload: `EventId` + `period: u8` + `mkt: u16` (`AddLineToLiabilityNettingIxData`).
+ * **Rust:** `aggregator::instructions::add_line_to_netting_account::process` (`ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 41). Payload: `EventId` + `period: u8` + `mkt: u16` (`AddLineToLiabilityNettingIxData`).
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `event_id` in parsed ix data.
  * @param period - **TS:** `number` — `u8` market period. **Rust:** `u8` / `period`.
@@ -851,7 +1009,7 @@ export async function getAddLineToNettingAccountIx(
 /**
  * **`remove_line_from_netting_account`** — MM admin removes a netting line keyed by `(event_id, period, mkt)`.
  *
- * **Rust:** `aggregator::instructions::remove_line_from_netting_account::process` (`REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 52). Same payload shape as add-line.
+ * **Rust:** `aggregator::instructions::remove_line_from_netting_account::process` (`REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 42). Same payload shape as add-line.
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `event_id`.
  * @param period - **TS:** `number` — `u8`. **Rust:** `u8`.
@@ -885,7 +1043,7 @@ export async function getRemoveLineFromNettingAccountIx(
 /**
  * **`close_netting_account`** — MM admin closes netting PDA for an event and returns rent (requires `EventId` in data).
  *
- * **Rust:** `aggregator::instructions::close_netting_account::process` (`CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 53). Data: `EventId` wire bytes after discriminator.
+ * **Rust:** `aggregator::instructions::close_netting_account::process` (`CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 43). Data: `EventId` wire bytes after discriminator.
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `EventId` from instruction data.
  * @param admin - **TS:** `Address` — MM admin (writable signer). **Rust:** `admin`.
@@ -910,7 +1068,7 @@ export async function getCloseNettingAccountIx(
 /**
  * **`withdraw_from_liability_account`** — MM admin pulls free liability vault balance to the MM collateral token account (subject to encumbrance accounting on-chain).
  *
- * **Rust:** `aggregator::instructions::withdraw_from_liability_account::process` (`WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR` = 100). Data: `amount: u64` (LE) after discriminator.
+ * **Rust:** `aggregator::instructions::withdraw_from_liability_account::process` (`WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR` = 50). Data: `amount: u64` (LE) after discriminator.
  *
  * @param amount - **TS:** `bigint` — must fit `u64` and be > 0 where enforced. **Rust:** `u64` read from ix data.
  * @param mmAdmin - **TS:** `Address` — MM admin signer. **Rust:** `mm_admin` (writable signer).
@@ -999,6 +1157,21 @@ export type AggregatorInstructionInput =
         mmProgram: Address;
      }
    | {
+        kind: 'fillRfqBet';
+        fill: FillRfqBetIxData;
+        feepayer: Address;
+        user: Address;
+        mmProgram: Address;
+        mmNetting?: Address;
+     }
+   | {
+        kind: 'fillRfqParlay';
+        fill: FillRfqParlayIxData;
+        feepayer: Address;
+        user: Address;
+        mmProgram: Address;
+     }
+   | {
         kind: 'getMarketQuotesProxy';
         quote: FillBetIxData;
         user: Address;
@@ -1009,6 +1182,12 @@ export type AggregatorInstructionInput =
         betResults: Uint8Array;
         admin: Address;
         betAccounts: readonly Address[];
+     }
+   | {
+        kind: 'gradeParlay';
+        legGradeMasks: readonly Uint8Array[];
+        authority: Address;
+        parlayBetAccounts: readonly Address[];
      }
    | { kind: 'settleBet'; bet: BetAccountData; signer: Address; betPda: Address }
    | { kind: 'settleParlay'; parlay: ParlayBetAccountData; signer: Address; betPda: Address }
@@ -1058,10 +1237,22 @@ export async function getInstructionIx(input: AggregatorInstructionInput, _rpc: 
          return getFillBetIx(input.fill, input.feepayer, input.user, input.mmPrograms);
       case 'fillParlay':
          return getFillParlayIx(input.fill, input.feepayer, input.user, input.mmProgram);
+      case 'fillRfqBet':
+         return getFillRfqBetIx(
+            input.fill,
+            input.feepayer,
+            input.user,
+            input.mmProgram,
+            input.mmNetting,
+         );
+      case 'fillRfqParlay':
+         return getFillRfqParlayIx(input.fill, input.feepayer, input.user, input.mmProgram);
       case 'getMarketQuotesProxy':
          return getGetMarketQuotesProxyIx(input.quote, input.user, input.mmPrograms);
       case 'gradeBets':
          return getGradeBetsIx(input.admin, input.betResults, input.betAccounts);
+      case 'gradeParlay':
+         return getGradeParlayIx(input.authority, input.legGradeMasks, input.parlayBetAccounts);
       case 'settleBet':
          return getSettleBetIx(input.signer, input.betPda, input.bet);
       case 'settleParlay':

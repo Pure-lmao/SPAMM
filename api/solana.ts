@@ -3,10 +3,9 @@ import { AccountRole, type Instruction } from "@solana/instructions";
 import { address, getU32Encoder, getU64Encoder, sol, solToLamports, type Address } from "@solana/kit";
 import { buildSignV0Transaction, createRpcClients, sendAndConfirmInstructions, sendAndConfirmSignedTransaction, simulateTransaction } from "../aggregator/client/txSend";
 import { loadKeypairSignerFromJsonFile } from "../aggregator/client/utils";
-import { fetchGradedStartedEvents } from "localDb";
-import { BetResult, getBetsData, getGradeBetsIx, getParlaysData, type BetAccountData } from "spamm-aggregator-sdk";
-import type { Event } from "types";
-import { round } from "utils";
+import { fetchGradedStartedEvents } from "./localDb";
+import { BetResult, GRADE_PARLAY_LEG_SKIP, getBetsData, getGradeBetsIx, getGradeParlayIx, getParlaysData, type BetAccountData } from "spamm-aggregator-sdk";
+import { round } from "./utils";
 import { ADMIN_SIGNER } from "../aggregator/client/admin";
 
 const SYSTEM_PROGRAM_ID: Address = address("11111111111111111111111111111111");
@@ -109,10 +108,15 @@ export async function gradeParlays() {
    const allEvents = fetchGradedStartedEvents();
    console.log("Events fetched", allEvents.size);
 
-   const resultAddresses = [];
+   const gradeJobs: { mask: Uint8Array; address: Address }[] = [];
    for (const bet of parlayBets) {
-      const legResults = [];
-      for (const leg of bet.data.legs) {
+      const mask = new Uint8Array(5).fill(GRADE_PARLAY_LEG_SKIP);
+      let anyGrade = false;
+      for (let i = 0; i < bet.data.numLegs; i++) {
+         const leg = bet.data.legs[i]!;
+         if (leg.result !== BetResult.Pending) {
+            continue;
+         }
          if (leg.marketId.eventId.sport === 0 &&
             leg.marketId.eventId.league === 0 &&
             leg.marketId.eventId.event === 0n &&
@@ -123,13 +127,10 @@ export async function gradeParlays() {
             continue;
          }
          if (leg.marketId.mkt === 9) {
-            legResults.push(null);
             continue;
          }
          const event = allEvents.get(`${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event}`);
          if (!event) {
-            console.log(`Leg ${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event} not found`);
-            legResults.push(null);
             continue;
          }
          const legResult = getBetResult(
@@ -141,34 +142,25 @@ export async function gradeParlays() {
             event.home_score!,
             event.away_score!,
          );
-         if (legResult) {
-            legResults.push(legResult);
-         } else {
-            console.log(`Leg ${leg.marketId.eventId.sport}:${leg.marketId.eventId.league}:${leg.marketId.eventId.event} result not found`);
-            legResults.push(null);
+         if (legResult != null) {
+            mask[i] = legResult;
+            anyGrade = true;
          }
       }
-      if (legResults.every(result => result !== null)) {
-         if (legResults.every(result => result === BetResult.Won)) {
-            resultAddresses.push([BetResult.Won, bet.address]);
-         } else if (legResults.some(result => result === BetResult.Lost)) {
-            resultAddresses.push([BetResult.Lost, bet.address]);
-         } else if (legResults.some(result => (result === BetResult.Push || result === BetResult.Cancelled || result === BetResult.RolledBack))) {
-            resultAddresses.push([BetResult.Cancelled, bet.address]);
-         }
+      if (anyGrade) {
+         gradeJobs.push({ mask, address: bet.address });
       }
    }
 
    const MAX_RESULTS_PER_TX = 25;
-   if (resultAddresses.length > 0) {
-      for (let i = 0; i < resultAddresses.length; i += MAX_RESULTS_PER_TX) {
-         const results = resultAddresses.slice(i, i + MAX_RESULTS_PER_TX);
-         const u8Results = results.map(result => result[0] as number);
-         const addresses = results.map(result => result[1] as Address);
-         const ix = await getGradeBetsIx(ADMIN_SIGNER.address, new Uint8Array(u8Results), addresses);
-         // await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
+   if (gradeJobs.length > 0) {
+      for (let i = 0; i < gradeJobs.length; i += MAX_RESULTS_PER_TX) {
+         const batch = gradeJobs.slice(i, i + MAX_RESULTS_PER_TX);
+         const masks = batch.map((job) => job.mask);
+         const addresses = batch.map((job) => job.address);
+         const ix = await getGradeParlayIx(ADMIN_SIGNER.address, masks, addresses);
          const sig = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
-         console.log(`Grade bets tx: ${sig}`);
+         console.log(`Grade parlay tx: ${sig}`);
       }
    }
    console.log("Parlays graded");

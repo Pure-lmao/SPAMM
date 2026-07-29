@@ -41,20 +41,17 @@ use pinocchio_token::instructions::Transfer;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
-   ID,
-   constants::{MAX_PARLAY_LEGS, MAX_PARLAY_QUOTE_CPI_ACCOUNTS},
-   helpers::{
+   ID, constants::{MAX_PARLAY_QUOTE_CPI_ACCOUNTS}, helpers::{
       calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_instructions_sysvar, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_parlay_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program
-   },
-   instructions::fill_helpers::parse_quote_return_for_mm,
-   parsers::{ParsedFillParlay, get_encumbrance, get_token_account_balance, parse_fill_parlay_data},
-   state::{
+   }, instructions::fill_helpers::{
+      compute_liability_shortfall, ensure_bet_pda_unused, parse_parlay_quote_return_for_mm,
+      parse_quote_return_for_mm,
+   }, parlay_helpers::{apply_leg_odds_to_table, ensure_parlay_odds_product_matches}, parsers::{ParsedFillParlay, get_encumbrance, get_token_account_balance, parse_fill_parlay_data}, state::{
       FILL_QUOTE_PARLAY_IX_DISCRIMINATOR, FillParlayQuoteIxData, GET_QUOTE_PARLAY_IX_DISCRIMINATOR, GetQuoteParlayIxData, PARLAY_BET_ACCOUNT_DISCRIMINATOR, PARLAY_BET_ACCOUNT_LEN, PARLAY_BET_ACCOUNT_SEED, ParlayBetAccountData, ParlayLegTable, ParlayLegWire, account_bet::BetResult, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
-   },
-   writers::write_i64_le_unchecked,
+   }, writers::write_i64_le_unchecked,
 };
 
-pub const FILL_PARLAY_IX_DISCRIMINATOR: u8 = 4;
+pub const FILL_PARLAY_IX_DISCRIMINATOR: u8 = 11;
 
 /// Router payload for `fill_parlay` (bytes after the router discriminator in `lib.rs`).
 #[derive(Copy, Clone, ZeroPod)]
@@ -128,7 +125,7 @@ fn cpi_get_quote_parlay(
    mm_liability_token_account: &AccountView,
    mm_token_account: &AccountView,
    leg_accounts: &mut [AccountView],
-) -> Result<(u64, u32, Address), ProgramError> {
+) -> Result<(u64, u32, Address, ParlayLegTable), ProgramError> {
    if !verify_mm_config_pda(mm_config_pda, mm_program_account) {
       #[cfg(feature = "log")]
       log!("fill_parlay: invalid mm config pda");
@@ -238,7 +235,13 @@ fn cpi_get_quote_parlay(
 
    let mut max_amount = 0u64;
    let mut odds_scaled = 0u32;
-   if let Some(parsed_ret) = parse_quote_return_for_mm(mm_program_account) {
+   let mut quoted_legs = legs;
+   if let Some((amt, odds, _num, leg_odds)) = parse_parlay_quote_return_for_mm(mm_program_account) {
+      max_amount = amt;
+      odds_scaled = odds;
+      apply_leg_odds_to_table(num_legs, &mut quoted_legs, leg_odds);
+      ensure_parlay_odds_product_matches(num_legs, &quoted_legs, odds_scaled)?;
+   } else if let Some(parsed_ret) = parse_quote_return_for_mm(mm_program_account) {
       (max_amount, odds_scaled) = parsed_ret;
    }
 
@@ -256,7 +259,7 @@ fn cpi_get_quote_parlay(
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   Ok((max_amount, odds_scaled, *mm_program_account.address()))
+   Ok((max_amount, odds_scaled, *mm_program_account.address(), quoted_legs))
 }
 
 /// CPI `fill_parlay_quote`, refund check, encumbrance write. Fill ix buffer + metas live only in this frame.
@@ -291,9 +294,6 @@ fn cpi_fill_parlay_quote_apply(
       log!("fill_parlay: failed to get mm liability account balance before");
       return Err(ProgramError::InvalidAccountData);
    };
-   let Ok(mm_liability_account_balance_i64): Result<i64, _> = mm_liability_account_balance_before.try_into() else {
-      return Err(ProgramError::InvalidAccountData);
-   };
 
    let Ok(outstanding_liability) = get_encumbrance(mm_encumbrance_pda) else {
       return Err(ProgramError::InvalidAccountData);
@@ -304,22 +304,11 @@ fn cpi_fill_parlay_quote_apply(
    };
    let gross_margin_i64: i64 = gross_margin_u64.try_into().map_err(|_| ProgramError::InvalidInstructionData)?;
 
-   let encumbered_i64: i64 = if outstanding_liability < 0 {
-      0
-   } else {
-      outstanding_liability
-   };
-   let free_i64: i64 = mm_liability_account_balance_i64.saturating_sub(encumbered_i64);
-   let shortfall_i64: i64 = gross_margin_i64.saturating_sub(free_i64);
-   let amount_to_send: u64 = if shortfall_i64 <= 0 {
-      0u64
-   } else {
-      shortfall_i64.try_into().map_err(|_| ProgramError::InvalidInstructionData)?
-   };
-
-   let new_outstanding_liability: i64 = outstanding_liability
-      .checked_add(gross_margin_i64)
-      .ok_or(ProgramError::InvalidInstructionData)?;
+   let (amount_to_send, new_outstanding_liability) = compute_liability_shortfall(
+      mm_liability_account_balance_before,
+      outstanding_liability,
+      gross_margin_i64,
+   )?;
 
    let fill_ix_data = FillParlayQuoteIxData {
       instruction_discriminator: FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
@@ -514,6 +503,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_mint(mint)?;
    verify_token_account(true, user_ata, user, mint, token_program)?;
    verify_config_pda(config_pda, true)?;
+   ensure_bet_pda_unused(bet_pda, "fill_parlay")?;
 
    let ParsedFillParlay {
       bet_id,
@@ -523,11 +513,6 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       legs,
    } = parse_fill_parlay_data(data)?;
    let num_legs = num_legs_u8 as usize;
-   if num_legs > MAX_PARLAY_LEGS {
-      #[cfg(feature = "log")]
-      log!("fill_parlay: num legs must be less than or equal to MAX_PARLAY_LEGS");
-      return Err(ProgramError::InvalidInstructionData);
-   }
 
    let expected_leg_accounts = num_legs.saturating_mul(2);
    if leg_accounts.len() != expected_leg_accounts {
@@ -538,7 +523,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    let bet_id_bytes = bet_id.to_le_bytes();
 
-   let (max_amount, odds_scaled, mm_address) = cpi_get_quote_parlay(
+   let (max_amount, odds_scaled, mm_address, quoted_legs) = cpi_get_quote_parlay(
       num_legs,
       amount,
       min_odds_scaled,
@@ -588,7 +573,7 @@ pub fn fill_parlay(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       filled_amount,
       filled_payout,
       num_legs,
-      legs,
+      quoted_legs,
       mm_address,
    )
 }

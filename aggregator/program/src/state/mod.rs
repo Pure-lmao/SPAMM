@@ -4,8 +4,10 @@ pub mod account_parlay_bet;
 pub mod mm_parlay_quote;
 pub mod mm_account_config;
 pub mod mm_get_quote;
+pub mod mm_fill_rfq;
 pub mod mm_fill_quote;
 pub mod mm_quote;
+pub mod rfq_message;
 pub mod other;
 pub mod ids;
 
@@ -26,7 +28,17 @@ pub use account_netting::{
 };
 
 pub use mm_account_config::{
-   MmAccountConfig, MmAccountConfigZc, MM_ACCOUNT_CONFIG_DISCRIMINATOR, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED,
+   MmAccountConfig, MmAccountConfigZc, MM_ACCOUNT_CONFIG_DISCRIMINATOR, MM_ACCOUNT_CONFIG_MIN_LEN,
+   MM_ACCOUNT_CONFIG_SEED, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET,
+};
+pub use mm_fill_rfq::{
+   FillRfqIxData, FILL_BET_RFQ_IX_DISCRIMINATOR, FILL_PARLAY_RFQ_IX_DISCRIMINATOR,
+};
+pub use rfq_message::{
+   build_rfq_bet_message, build_rfq_parlay_message, RFQ_BET_MESSAGE_LEN, RFQ_PARLAY_MESSAGE_LEN,
+};
+pub use crate::constants::{
+   RFQ_NETWORK_DOMAIN, RFQ_NETWORK_DEVNET, RFQ_NETWORK_LOCAL, RFQ_NETWORK_MAINNET,
 };
 pub use mm_parlay_quote::{
    FillParlayQuoteIxData, FillParlayQuoteIxDataZc, FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
@@ -35,11 +47,12 @@ pub use mm_parlay_quote::{
    ParlayLegTable, ParlayLegWire, PARLAY_LEG_WIRE_LEN,
 };
 pub use mm_quote::{
-   MM_QUOTE_BUFFER_LEN, MMQuote, MMQuoteParlay, MMQuoteBuffer, MMQuoteBufferZc,
+   GetParlayQuoteReturnWire, MM_QUOTE_BUFFER_LEN, MMQuote, MMQuoteParlay, MMQuoteBuffer, MMQuoteBufferZc,
+   PARLAY_QUOTE_RETURN_WIRE_LEN, PROXY_PARLAY_QUOTE_DATA_LEN, ProxyParlayQuoteData,
 };
 pub use mm_get_quote::{GetQuoteIxData, GetQuoteIxDataZc, GET_QUOTE_IX_DISCRIMINATOR};
 pub use mm_fill_quote::{FillQuoteIxData, FillQuoteIxDataZc, FILL_QUOTE_IX_DISCRIMINATOR};
-pub use ids::{EventId, MarketId, Sport};
+pub use ids::{EventId, MarketId, Sport, market_id_pda_seed_parts};
 pub use other::{
    CONFIG_PDA_DISCRIMINATOR, CONFIG_PDA_LEN, CONFIG_PDA_LOOKUP_TABLE_OFFSET,
    EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED,

@@ -57,7 +57,10 @@ use pinocchio_token::instructions::Transfer;
 use crate::{ID, 
    constants::MAX_NUMBER_OF_MMS, 
    helpers::{calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program, verify_config_pda, verify_event_state, verify_instructions_sysvar, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_netting_pda_or_placeholder, verify_quote_buffer, verify_signer, verify_system_program, verify_token_account, verify_token_program}, 
-   instructions::fill_helpers::{parse_quote_return_for_mm, refund_liability_deposit_mismatch},
+   instructions::fill_helpers::{
+      compute_liability_shortfall, ensure_bet_pda_unused, parse_quote_return_for_mm,
+      refund_liability_deposit_mismatch,
+   },
    parsers::{get_encumbrance, get_token_account_balance, parse_fill_bet_data}, 
    state::{
       BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, EventGameState, FILL_QUOTE_IX_DISCRIMINATOR, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, MarketId, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting}, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
@@ -65,7 +68,7 @@ use crate::{ID,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
 
-pub const FILL_BET_IX_DISCRIMINATOR: u8 = 3;
+pub const FILL_BET_IX_DISCRIMINATOR: u8 = 10;
 
 #[inline(never)]
 pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -103,7 +106,7 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_mint(&mint)?;
    verify_token_account(true, user_ata, user, mint, token_program)?;
    verify_config_pda(&config_pda, true)?;
-   // verify_clock_program(&clock_program)?; checked by from_account_view_unchecked
+   ensure_bet_pda_unused(bet_pda, "fill_bet")?;
 
    // Amount, odds, side, sport, and event_state_sequence vs is_pregame are validated in `parse_fill_bet_data`.
    let parsed_data = parse_fill_bet_data(data)?;
@@ -388,14 +391,6 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          continue;
       };
 
-      let Ok(mm_liability_account_balance_i64): Result<i64, _> =
-         mm_liability_account_balance_before.try_into()
-      else {
-         #[cfg(feature = "log")]
-         log!("fill_bet: failed to convert mm liability account balance before to i64");
-         continue;
-      };
-
       let mm_encumbrance_pda = &mut mm_accounts[quote.encumbrance_pda_index];
 
       let Ok(outstanding_liability) = get_encumbrance(&mm_encumbrance_pda) else {
@@ -441,26 +436,12 @@ pub fn fill_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          gross_margin_i64
       };
 
-      let encumbered_i64: i64 = if outstanding_liability < 0 {
-         0
-      } else {
-         outstanding_liability
-      };
-      let free_i64: i64 = mm_liability_account_balance_i64.saturating_sub(encumbered_i64);
-
-      let shortfall_i64: i64 = encumbrance_delta_i64.saturating_sub(free_i64);
-      let amount_to_send: u64 = if shortfall_i64 <= 0 {
-         0u64
-      } else {
-         match shortfall_i64.try_into() {
-            Ok(v) => v,
-            Err(_) => continue,
-         }
-      };
-
-      let new_outstanding_liability: i64 = match outstanding_liability.checked_add(encumbrance_delta_i64) {
-         Some(v) => v,
-         None => continue,
+      let Ok((amount_to_send, new_outstanding_liability)) = compute_liability_shortfall(
+         mm_liability_account_balance_before,
+         outstanding_liability,
+         encumbrance_delta_i64,
+      ) else {
+         continue;
       };
 
       let fill_quote_ix_data = FillQuoteIxData {

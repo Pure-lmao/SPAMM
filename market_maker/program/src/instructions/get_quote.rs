@@ -142,7 +142,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Ok(());
    }
    // Market data: [disc][bump][u32 seq][body]; odds start at byte 6 (`init_market`).
-   let body = &market_data[6..];
+   let body = &market_data[6..] as &[u8];
    log!("get_quote: body_len {} side {}", body.len(), side);
    let odds_scaled = match odds_from_market_data_body(&market_id, body, side) {
       Ok(o) => o,

@@ -8,6 +8,7 @@ import {
    decodeBetAccountDataStrict,
    decodeConfigPdaData,
    decodeEventStateData,
+   decodeMmAccountConfig,
    decodeMmEncumbrancePdaData,
    decodeMmListPdaData,
    decodeMmParlayQuoteBuffer,
@@ -40,6 +41,7 @@ import {
    type EventId,
    type EventStateData,
    type MarketId,
+   type MmAccountConfig,
    type MmEncumbrancePdaData,
    type MmListPdaData,
    type MmParlayQuoteBuffer,
@@ -255,6 +257,19 @@ export async function getAggregatorConfigData(rpc: Rpc<SolanaRpcApi>): Promise<C
       throw new Error('Aggregator config account not found');
    }
    return decodeConfigPdaData(raw);
+}
+
+/** MM program `["config"]` PDA — includes `rfqSigner` used for RFQ ed25519 verify. */
+export async function getMmAccountConfigData(
+   rpc: Rpc<SolanaRpcApi>,
+   mmProgramId: Address,
+): Promise<MmAccountConfig> {
+   const [addr] = await getMmConfigPda(mmProgramId);
+   const raw = await readAccountDataRaw(rpc, addr);
+   if (raw === null) {
+      throw new Error(`MM account config not found for ${mmProgramId}`);
+   }
+   return decodeMmAccountConfig(raw);
 }
 
 export type GetBetsDataFilters = Readonly<{

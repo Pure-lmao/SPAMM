@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "spamm-aggregator-sdk": ["../sdk/ts/src/index.ts"]
     },

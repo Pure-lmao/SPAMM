@@ -1,9 +1,11 @@
 import { getAddressEncoder, getProgramDerivedAddress, type ProgramDerivedAddressBump, type Address } from '@solana/kit';
 
 import {
+   AGGREGATOR_PROGRAM_ID,
    EVENT_STATE_SEED,
    MINT_ID,
    MM_ACCOUNT_CONFIG_SEED,
+   MM_ENCUMBRANCE_PDA_SEED,
    MM_MARKET_DATA_PDA_SEED,
    MM_PARLAY_QUOTE_BUFFER_SEED,
    MM_QUOTE_BUFFER_SEED,
@@ -11,10 +13,16 @@ import {
    SPL_TOKEN_PROGRAM_ID,
 } from './constants.js';
 import { encodeEventIdWire, getMarketIdEncoder } from './wire_codecs.js';
-import type { EventGameState, EventId, MarketId } from './types.js';
+import { MARKET_ID_BODY_WIRE_SIZE, type EventGameState, type EventId, type MarketId } from './types.js';
 
 const addressEncoder = getAddressEncoder();
 const marketIdEncoder = getMarketIdEncoder();
+
+/** PDA seeds for MM market data: legacy `MarketId` body wire + `operator` address bytes. */
+export function marketIdPdaSeeds(marketId: MarketId): readonly [Uint8Array, Uint8Array] {
+   const wire = marketIdEncoder.encode(marketId);
+   return [wire.subarray(0, MARKET_ID_BODY_WIRE_SIZE), wire.subarray(MARKET_ID_BODY_WIRE_SIZE)] as const;
+}
 
 export async function getMmConfigPda(mmProgramId: Address): Promise<readonly [Address, ProgramDerivedAddressBump]> {
    return await getProgramDerivedAddress({
@@ -50,15 +58,25 @@ export async function getEventStatePda(
 }
 
 /**
- * MM market-data PDA: `["market_data", market_id_wire]` (`market_maker::mm_helpers::find_market_data_pda`).
+ * MM market-data PDA: `["market_data", market_id_body_wire, operator]` (`find_market_data_pda`).
  */
 export async function getMmMarketDataPda(
    mmProgramId: Address,
    marketId: MarketId,
 ): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   const [body, operator] = marketIdPdaSeeds(marketId);
    return await getProgramDerivedAddress({
       programAddress: mmProgramId,
-      seeds: [MM_MARKET_DATA_PDA_SEED, marketIdEncoder.encode(marketId)],
+      seeds: [MM_MARKET_DATA_PDA_SEED, body, operator],
+   });
+}
+
+export async function getMmEncumbrancePda(
+   mmProgramId: Address,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      seeds: [MM_ENCUMBRANCE_PDA_SEED, addressEncoder.encode(mmProgramId)],
    });
 }
 

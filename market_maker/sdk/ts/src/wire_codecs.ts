@@ -5,6 +5,8 @@
  */
 
 import {
+   getAddressDecoder,
+   getAddressEncoder,
    getStructDecoder,
    getStructEncoder,
    getU16Decoder,
@@ -88,6 +90,7 @@ export const getMarketIdEncoder = (): Encoder<MarketId> =>
       ['mkt', getU16Encoder()],
       ['period', getU8Encoder()],
       ['isPregame', getBoolU8Encoder()],
+      ['operator', getAddressEncoder()],
    ]);
 
 export const getMarketIdDecoder = (): Decoder<MarketId> =>
@@ -97,6 +100,7 @@ export const getMarketIdDecoder = (): Decoder<MarketId> =>
       ['mkt', getU16Decoder()],
       ['period', getU8Decoder()],
       ['isPregame', getBoolU8Decoder()],
+      ['operator', getAddressDecoder()],
    ]);
 
 export function encodeEventIdWire(eventId: EventId): Uint8Array {

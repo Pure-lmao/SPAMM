@@ -1,6 +1,5 @@
 {
   "compilerOptions": {
-    "baseUrl": ".",
     "paths": {
       "spamm-market-maker-sdk": ["../sdk/ts/src/index.ts"],
       "spamm-aggregator-sdk": ["../../aggregator/sdk/ts/src/index.ts"]

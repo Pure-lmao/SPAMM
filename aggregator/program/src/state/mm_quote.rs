@@ -125,6 +125,93 @@ pub struct ProxyQuoteData {
 
 pub const PROXY_QUOTE_DATA_LEN: usize = <ProxyQuoteData as ZeroPodFixed>::SIZE;
 
+/// Parlay MM CPI / proxy return payload (`get_quote_parlay`).
+#[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
+pub struct GetParlayQuoteReturnWire {
+   pub max_amount: u64,
+   pub odds_scaled: u32,
+   pub num_legs: u8,
+   pub leg_odds_0: u32,
+   pub leg_odds_1: u32,
+   pub leg_odds_2: u32,
+   pub leg_odds_3: u32,
+   pub leg_odds_4: u32,
+}
+
+pub const PARLAY_QUOTE_RETURN_WIRE_LEN: usize = <GetParlayQuoteReturnWire as ZeroPodFixed>::SIZE;
+
+impl GetParlayQuoteReturnWire {
+   #[inline(always)]
+   pub fn leg_odds(&self) -> [u32; crate::constants::MAX_PARLAY_LEGS] {
+      [
+         self.leg_odds_0,
+         self.leg_odds_1,
+         self.leg_odds_2,
+         self.leg_odds_3,
+         self.leg_odds_4,
+      ]
+   }
+
+   #[inline(always)]
+   pub fn to_zc(self) -> GetParlayQuoteReturnWireZc {
+      GetParlayQuoteReturnWireZc {
+         max_amount: self.max_amount.into(),
+         odds_scaled: self.odds_scaled.into(),
+         num_legs: self.num_legs,
+         leg_odds_0: self.leg_odds_0.into(),
+         leg_odds_1: self.leg_odds_1.into(),
+         leg_odds_2: self.leg_odds_2.into(),
+         leg_odds_3: self.leg_odds_3.into(),
+         leg_odds_4: self.leg_odds_4.into(),
+      }
+   }
+
+   #[inline(always)]
+   pub fn from_zc(z: &GetParlayQuoteReturnWireZc) -> Self {
+      Self {
+         max_amount: z.max_amount.get(),
+         odds_scaled: z.odds_scaled.get(),
+         num_legs: z.num_legs,
+         leg_odds_0: z.leg_odds_0.get(),
+         leg_odds_1: z.leg_odds_1.get(),
+         leg_odds_2: z.leg_odds_2.get(),
+         leg_odds_3: z.leg_odds_3.get(),
+         leg_odds_4: z.leg_odds_4.get(),
+      }
+   }
+}
+
+/// One MM parlay quote from `get_parlay_quote_proxy` return data.
+#[repr(C)]
+#[derive(Copy, Clone, ZeroPod)]
+pub struct ProxyParlayQuoteData {
+   pub mm_address: Address,
+   pub max_amount: u64,
+   pub odds_scaled: u32,
+   pub num_legs: u8,
+   pub leg_odds_0: u32,
+   pub leg_odds_1: u32,
+   pub leg_odds_2: u32,
+   pub leg_odds_3: u32,
+   pub leg_odds_4: u32,
+}
+
+pub const PROXY_PARLAY_QUOTE_DATA_LEN: usize = <ProxyParlayQuoteData as ZeroPodFixed>::SIZE;
+
+impl ProxyParlayQuoteData {
+   #[inline(always)]
+   pub fn leg_odds(&self) -> [u32; crate::constants::MAX_PARLAY_LEGS] {
+      [
+         self.leg_odds_0,
+         self.leg_odds_1,
+         self.leg_odds_2,
+         self.leg_odds_3,
+         self.leg_odds_4,
+      ]
+   }
+}
+
 /// In-memory `repr(C)` size may exceed wire (`u32` tail padding); return data is packed at `PROXY_QUOTE_DATA_LEN`.
 const _: () = assert!(core::mem::size_of::<ProxyQuoteData>() >= PROXY_QUOTE_DATA_LEN);
 

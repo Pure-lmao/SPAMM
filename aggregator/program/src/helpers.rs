@@ -33,8 +33,17 @@ use crate::{
    parsers::get_token_account_balance,
    readers::{read_address_unchecked, read_u8_unchecked},
    state::{
-      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventId, EventStateData, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_LEN, MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, mm_quote::ProxyQuoteData, other::{
-         CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_STATUS_OFFSET, MM_ENCUMBRANCE_PDA_BUMP_OFFSET, MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED
+      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, 
+      EventGameState, EventId, EventStateData, MM_ACCOUNT_CONFIG_MIN_LEN, 
+      MM_ACCOUNT_CONFIG_SEED, MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_LEN, 
+      MarketId, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_MIN_LEN, NETTING_PDA_SEED, 
+      market_id_pda_seed_parts, 
+      mm_account_config::{MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET}, 
+      mm_quote::{ProxyParlayQuoteData, ProxyQuoteData}, 
+      other::{
+         CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_STATUS_OFFSET, MM_ENCUMBRANCE_PDA_BUMP_OFFSET, 
+         MM_ENCUMBRANCE_PDA_LEN, MM_ENCUMBRANCE_PDA_SEED, MM_MARKET_DATA_PDA_BUMP_OFFSET, 
+         MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED
       }
    },
 };
@@ -106,6 +115,38 @@ pub fn verify_clock_program(clock_program: &AccountView) -> ProgramResult {
    Ok(())
 }
 
+/// MM `fill_bet_rfq` / `fill_parlay_rfq` CPI: must run under aggregator `fill_rfq_bet` / `fill_rfq_parlay`.
+/// Returns the parent aggregator instruction discriminator.
+#[inline(always)]
+pub fn verify_invoked_via_aggregator_rfq_ix(instructions_sysvar: &AccountView) -> Result<u8, ProgramError> {
+   verify_instructions_sysvar(instructions_sysvar)?;
+
+   let ix_sys = Instructions::try_from(instructions_sysvar)?;
+   let current_index = ix_sys.load_current_index() as usize;
+   let parent_ix = ix_sys.load_instruction_at(current_index)?;
+
+   if unlikely(!address_eq(parent_ix.get_program_id(), &ID)) {
+      log!("verify_invoked_via_aggregator_rfq_ix: parent program must be aggregator");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+
+   let data = parent_ix.get_instruction_data();
+   if unlikely(data.is_empty()) {
+      log!("verify_invoked_via_aggregator_rfq_ix: parent ix data empty");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   let disc = data[0];
+   if unlikely(
+      disc != crate::instructions::FILL_RFQ_BET_IX_DISCRIMINATOR
+         && disc != crate::instructions::FILL_RFQ_PARLAY_IX_DISCRIMINATOR,
+   ) {
+      log!("verify_invoked_via_aggregator_rfq_ix: parent ix discriminator mismatch");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+
+   Ok(disc)
+}
+
 /// MM `fill_quote` / `fill_parlay_quote` CPI: must run under aggregator `fill_bet` / `fill_parlay`.
 #[inline(always)]
 pub fn verify_invoked_via_aggregator_fill_ix(
@@ -159,9 +200,11 @@ pub fn verify_mm_market_data_pda(mm_market_data_pda: &AccountView, mm_program_ac
    unsafe {
       core::ptr::write(market_wire.as_mut_ptr().cast(), zc);
    }
+   let (body, operator) = market_id_pda_seed_parts(&market_wire);
    let seeds = [
       MM_MARKET_DATA_PDA_SEED,
-      market_wire.as_slice(),
+      body,
+      operator,
    ];
 
    let expected_pda = Address::derive_address(
@@ -348,6 +391,43 @@ pub fn verify_authority(authority: &AccountView, config_pda: &AccountView) -> Pr
       log!("verify_authority: authority must be the config pda authority");
       return Err(ProgramError::IncorrectAuthority);
    }
+   Ok(())
+}
+
+/// Market operator or aggregator config authority (grading).
+#[inline(always)]
+pub fn verify_market_operator_or_authority(
+   authority: &AccountView,
+   config_pda: &AccountView,
+   market_id: &MarketId,
+) -> ProgramResult {
+   if address_eq(authority.address(), &market_id.operator) {
+      return Ok(());
+   }
+   verify_authority(authority, config_pda)
+}
+
+/// Push a bet-ATA transfer into a token batch and track remaining balance.
+#[inline(always)]
+pub fn push_bet_ata_out<'acc, 'buf>(
+   batch: &mut Batch<'acc, 'buf>,
+   bet_ata_remaining: &mut u64,
+   amount: u64,
+   bet_ata: &'acc AccountView,
+   to: &'acc AccountView,
+   bet_authority: &'acc AccountView,
+) -> ProgramResult
+where
+   'acc: 'buf,
+{
+   if amount == 0 {
+      return Ok(());
+   }
+   *bet_ata_remaining = bet_ata_remaining.checked_sub(amount).ok_or_else(|| {
+      log!("push_bet_ata_out: arithmetic overflow");
+      ProgramError::ArithmeticOverflow
+   })?;
+   TokenTransfer::new(bet_ata, to, bet_authority, amount).into_batch(batch)?;
    Ok(())
 }
 
@@ -689,6 +769,35 @@ pub fn set_proxy_return_data(
             q as *const ProxyQuoteData as *const u8,
             out.as_mut_ptr().add(i * PROXY_QUOTE_DATA_LEN),
             PROXY_QUOTE_DATA_LEN,
+         );
+      }
+      pinocchio::cpi::set_return_data(&out[..out_len]);
+   }
+   #[cfg(not(target_os = "solana"))]
+   {
+      let _ = (data, valid_quote_count);
+   }
+}
+
+/// On-chain: write parlay proxy return data for the first `valid_quote_count` quotes.
+#[inline(always)]
+pub fn set_proxy_parlay_return_data(
+   data: [MaybeUninit<ProxyParlayQuoteData>; MAX_NUMBER_OF_MMS_PROXY],
+   valid_quote_count: usize,
+) {
+   #[cfg(target_os = "solana")]
+   unsafe {
+      use crate::state::mm_quote::PROXY_PARLAY_QUOTE_DATA_LEN;
+      let out_len = valid_quote_count
+         .checked_mul(PROXY_PARLAY_QUOTE_DATA_LEN)
+         .unwrap_or(0);
+      let mut out = [0u8; MAX_NUMBER_OF_MMS_PROXY * PROXY_PARLAY_QUOTE_DATA_LEN];
+      for i in 0..valid_quote_count {
+         let q = data[i].assume_init_ref();
+         core::ptr::copy_nonoverlapping(
+            q as *const ProxyParlayQuoteData as *const u8,
+            out.as_mut_ptr().add(i * PROXY_PARLAY_QUOTE_DATA_LEN),
+            PROXY_PARLAY_QUOTE_DATA_LEN,
          );
       }
       pinocchio::cpi::set_return_data(&out[..out_len]);

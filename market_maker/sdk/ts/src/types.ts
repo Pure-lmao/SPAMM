@@ -7,17 +7,21 @@ export const EVENT_GAME_STATE_LEN = 8;
 
 /** `update_event_state` payload length (after discriminator byte). `EventId::WIRE_SIZE` + `u16` + `EventGameState`. */
 export const UPDATE_EVENT_STATE_IX_PAYLOAD_LEN = EVENT_ID_WIRE_SIZE + 2 + EVENT_GAME_STATE_LEN;
-export const MARKET_ID_WIRE_SIZE = EVENT_ID_WIRE_SIZE + 8 + 2 + 1 + 1;
+/** `MarketId` wire without `operator` (legacy pre-operator layout; used as a PDA seed). */
+export const MARKET_ID_BODY_WIRE_SIZE = EVENT_ID_WIRE_SIZE + 8 + 2 + 1 + 1;
+export const MARKET_ID_WIRE_SIZE = MARKET_ID_BODY_WIRE_SIZE + 32;
 export const CONFIG_PDA_LEN = 34;
 /** `EventStateData` on-chain (`other.rs`). */
 export const EVENT_STATE_LEN = 1 + 1 + EVENT_ID_WIRE_SIZE + 2 + EVENT_GAME_STATE_LEN;
 export const MM_QUOTE_BUFFER_LEN = 1 + 1 + 32 + MARKET_ID_WIRE_SIZE + 1 + 8 + 4 + EVENT_GAME_STATE_LEN + 2;
-export const MM_ACCOUNT_CONFIG_MIN_LEN = 34;
-export const INIT_PROGRAM_IX_DATA_LEN = 32;
+export const MM_ACCOUNT_CONFIG_MIN_LEN = 66;
+export const INIT_PROGRAM_IX_DATA_LEN = 64;
+export const SET_RFQ_SIGNER_IX_DATA_LEN = 32;
+export const FILL_RFQ_IX_WIRE_LEN = 9;
 /** Full MM `get_quote` ix data (includes leading discriminator). */
 export const GET_QUOTE_IX_WIRE_LEN = 1 + 8 + 4 + MARKET_ID_WIRE_SIZE + 1 + EVENT_GAME_STATE_LEN + 2;
-export const MAX_PARLAY_LEGS = 8;
-export const PARLAY_LEG_WIRE_LEN = MARKET_ID_WIRE_SIZE + 1 + 2 + EVENT_GAME_STATE_LEN;
+export const MAX_PARLAY_LEGS = 5;
+export const PARLAY_LEG_WIRE_LEN = MARKET_ID_WIRE_SIZE + 1 + 2 + EVENT_GAME_STATE_LEN + 4 + 1;
 export const PARLAY_LEG_TABLE_LEN = MAX_PARLAY_LEGS * PARLAY_LEG_WIRE_LEN;
 export const GET_QUOTE_PARLAY_IX_WIRE_LEN = 1 + 8 + 4 + 1 + PARLAY_LEG_TABLE_LEN;
 export const FILL_QUOTE_PARLAY_IX_WIRE_LEN = 21;
@@ -56,6 +60,7 @@ export type MarketId = {
    mkt: number;
    period: number;
    isPregame: boolean;
+   operator: Address;
 };
 
 /** Packed live snapshot (`aggregator/program` `other.rs`). */
@@ -78,6 +83,8 @@ export type ParlayLegWire = {
    side: number;
    eventStateSequence: number;
    eventGameState: EventGameState;
+   oddsScaled: bigint;
+   result: number;
 };
 
 export type MmParlayQuoteBuffer = {
@@ -124,6 +131,7 @@ export type MmAccountConfig = {
    discriminator: number;
    bump: number;
    admin: Address;
+   rfqSigner: Address;
 };
 
 /** Event state PDA (`EVENT_STATE_DISCRIMINATOR`). */
@@ -172,6 +180,16 @@ export type GetQuoteIxData = {
 
 export type InitProgramIxData = {
    admin: Address;
+   rfqSigner: Address;
+};
+
+export type SetRfqSignerIxData = {
+   rfqSigner: Address;
+};
+
+export type FillRfqIxData = {
+   instructionDiscriminator: number;
+   amountToSend: bigint;
 };
 
 export type MmReturnData = {
@@ -179,9 +197,22 @@ export type MmReturnData = {
    oddsScaled: bigint;
 };
 
+/** MM `get_quote_parlay` CPI return wire (`GetParlayQuoteReturnWire`). */
+export const PARLAY_QUOTE_RETURN_WIRE_LEN = 8 + 4 + 1 + MAX_PARLAY_LEGS * 4;
+
+export type GetParlayQuoteReturnWire = {
+   maxAmount: bigint;
+   oddsScaled: bigint;
+   numLegs: number;
+   legOdds: readonly bigint[];
+};
+
 export type DecodedMarketMakerInstruction =
    | { kind: 'updateOracle'; sequence: bigint; odds0: bigint; odds1: bigint; odds2?: bigint }
    | { kind: 'initProgram'; data: InitProgramIxData }
+   | { kind: 'setRfqSigner'; data: SetRfqSignerIxData }
+   | { kind: 'fillBetRfq'; data: FillRfqIxData }
+   | { kind: 'fillParlayRfq'; data: FillRfqIxData }
    | { kind: 'getQuote'; data: GetQuoteIxData }
    | { kind: 'getQuoteParlay'; data: GetQuoteParlayIxData }
    | { kind: 'fillParlayQuote'; data: FillParlayQuoteIxData }
@@ -195,4 +226,5 @@ export type DecodedMarketMakerInstruction =
      }
    | { kind: 'closeEvent'; eventId: EventId }
    | { kind: 'closeMarket'; marketId: MarketId }
+   | { kind: 'writeArbitraryData'; data: Uint8Array }
    | { kind: 'forceClosePda' };

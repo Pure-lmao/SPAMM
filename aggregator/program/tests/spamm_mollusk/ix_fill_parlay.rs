@@ -11,9 +11,9 @@ use spamm_aggregator::constants::{MAX_PARLAY_LEGS, ODDS_SCALE};
 use crate::common::{
    assert_parlay_after_fill, assert_program_err, bet_token_ata, config_pda, event_id_soccer, event_id_soccer_b,
    event_id_soccer_c, event_id_soccer_d, event_id_soccer_e, encumbrance_pda, fill_parlay_instruction,
-   fill_parlay_metas, market_soccer_ft_pregame, market_spread_pregame, oracle_body_three_outcome,
+   fill_parlay_metas, FILL_MM_GROUP_OFFSET, market_soccer_ft_pregame, market_spread_pregame, oracle_body_three_outcome,
    oracle_body_two_outcome, parlay_bet_pda_for, parlay_leg, parlay_table, read_encumbrance,
-   record_cu_success, system_owned_empty, uniform_parlay_combined_odds, user, admin, Env,
+   record_cu_success, system_owned_empty, uniform_parlay_combined_odds, user, admin, wrong_signer, Env,
 };
 
 fn two_leg_setup() -> (Env, MarketId, MarketId) {
@@ -126,7 +126,7 @@ fn fill_parlay_wrong_mm_program() {
       legs: parlay_table(&[l0, l1]),
    };
    let mut metas = crate::common::fill_parlay_metas(bet, bat, &[m1, m2]);
-   metas[11] = AccountMeta::new_readonly(user(), false);
+   metas[FILL_MM_GROUP_OFFSET] = AccountMeta::new_readonly(user(), false);
    let mut buf = vec![4u8];
    let mut w = [0u8; spamm_aggregator::instructions::FILL_PARLAY_IX_DATA_LEN];
    payload.write_wire(&mut w).unwrap();
@@ -247,7 +247,7 @@ fn fill_parlay_min_odds_at_scale_rejected() {
 }
 
 #[test]
-fn fill_parlay_duplicate_event_id_rejected() {
+fn fill_parlay_same_event_all_zero_odds_rejected() {
    let mut env = Env::new();
    let eid = event_id_soccer();
    let m_spread = market_spread_pregame(eid);
@@ -259,8 +259,10 @@ fn fill_parlay_duplicate_event_id_rejected() {
    let bat = bet_token_ata(&bet);
    env.upsert(bet, system_owned_empty());
    env.upsert(bat, system_owned_empty());
-   let l0 = parlay_leg(m_spread, 0, 1, EventGameState::zeroed());
-   let l1 = parlay_leg(m_ft, 1, 1, EventGameState::zeroed());
+   let mut l0 = parlay_leg(m_spread, 0, 1, EventGameState::zeroed());
+   let mut l1 = parlay_leg(m_ft, 1, 1, EventGameState::zeroed());
+   l0.odds_scaled = 0;
+   l1.odds_scaled = 0;
    let payload = FillParlayIxData {
       bet_id: 215,
       amount: 2_000_000,
@@ -399,4 +401,28 @@ fn fill_parlay_five_legs_success() {
       uniform_parlay_combined_odds(20_000, 5),
    );
    record_cu_success("fill_parlay/5_leg", &r);
+}
+
+#[test]
+fn fill_parlay_mixed_operator_rejected() {
+   let (mut env, m1, m2) = two_leg_setup();
+   let bet = parlay_bet_pda_for(&user(), 222);
+   let bat = bet_token_ata(&bet);
+   env.upsert(bet, system_owned_empty());
+   env.upsert(bat, system_owned_empty());
+   let mut m2_other_operator = m2;
+   m2_other_operator.operator =
+      pinocchio::Address::new_from_array(wrong_signer().to_bytes());
+   let l0 = parlay_leg(m1, 0, 1, EventGameState::zeroed());
+   let l1 = parlay_leg(m2_other_operator, 1, 1, EventGameState::zeroed());
+   let payload = FillParlayIxData {
+      bet_id: 222,
+      amount: 5_000_000,
+      min_odds_scaled: 15_000,
+      num_legs: 2,
+      legs: parlay_table(&[l0, l1]),
+   };
+   let ix = fill_parlay_instruction(&payload, bet, bat, &[m1, m2]);
+   let r = env.run_ix(ix);
+   assert_program_err(&r, ProgramError::InvalidInstructionData);
 }

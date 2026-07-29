@@ -19,7 +19,9 @@ import {
    promotionalMarketToJson,
 } from "./localDb";
 import { safeJSONStringify } from "./utils";
-import { getClosedBetRecordsByUser } from "quickIndexer";
+import { getClosedBetRecordsByUser } from "./quickIndexer";
+import { parseRfqHttpRequestJson, RFQ_MM_WS_PATH } from "spamm-aggregator-sdk";
+import { rfqHub, type MmWsData } from "./rfqHub";
 
 const TTL_MS = 5000;
 
@@ -45,7 +47,7 @@ function corsHeadersFor(req: Request): Record<string, string> {
          : "*";
    return {
       "Access-Control-Allow-Origin": allow,
-      "Access-Control-Allow-Methods": "GET, OPTIONS",
+      "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
       "Access-Control-Allow-Headers": "Content-Type",
       "Vary": "Origin",
    };
@@ -82,6 +84,9 @@ function withCors(req: Request, res: Response): Response {
  * - /api/promos?active=true
  * - /api/promos?sport={sportId}&league={leagueId}&event={eventId}
  * - /api/promos?id={promoId}
+ * - POST /api/rfq — fan-out RFQ to connected MMs (WS), wait 2s, return quotes
+ * - WS  /ws/mm — MM sockets: send signed `mm.hello` (mmProgramId + rfqSigner + timestamp);
+ *   server checks mm_list, on-chain config, recent timestamp, ed25519
  */
 export class ApiServer {
    private async handleGetEvents(params: URLSearchParams): Promise<Response> {
@@ -225,8 +230,44 @@ export class ApiServer {
       });
    }
 
-   fetch(req: Request): Response | Promise<Response> {
+   private async handlePostRfq(req: Request): Promise<Response> {
+      let body: unknown;
+      try {
+         body = await req.json();
+      } catch {
+         return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+
+      let parsed;
+      try {
+         parsed = parseRfqHttpRequestJson(body);
+      } catch (e) {
+         const message = e instanceof Error ? e.message : String(e);
+         return Response.json({ error: message }, { status: 400 });
+      }
+
+      const result = await rfqHub.collectQuotes(parsed);
+      return new Response(safeJSONStringify(result), {
+         headers: { "Content-Type": "application/json" },
+      });
+   }
+
+   /**
+    * HTTP fetch handler. Pass `server` from `Bun.serve` so `/ws/mm` can upgrade.
+    * Returns `undefined` when a WebSocket upgrade succeeds (Bun sends 101).
+    */
+   fetch(req: Request, server?: Bun.Server<MmWsData>): Response | Promise<Response> | undefined {
       const url = new URL(req.url);
+
+      if (url.pathname === RFQ_MM_WS_PATH && server != null) {
+         const upgraded = server.upgrade(req, {
+            data: { mmProgramId: null, rfqSigner: null },
+         });
+         if (upgraded) {
+            return undefined;
+         }
+         return new Response("WebSocket upgrade failed", { status: 400 });
+      }
 
       if (req.method === "OPTIONS" && url.pathname.startsWith("/api")) {
          return new Response(null, { status: 204, headers: corsHeadersFor(req) });
@@ -260,6 +301,9 @@ export class ApiServer {
       }
       if (url.pathname === "/api/promos") {
          return this.handleGetPromos(params).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/rfq" && req.method === "POST") {
+         return this.handlePostRfq(req).then((r) => withCors(req, r));
       }
 
       return withCors(req, new Response("Not Found", { status: 404 }));

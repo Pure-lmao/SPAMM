@@ -1,19 +1,18 @@
-//! Shared logic for [`super::fill_bet::fill_bet`] and [`super::fill_parlay::fill_parlay`].
+//! Shared logic for fill / RFQ fill / settle token-batch helpers.
 
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer, get_return_data},
-   hint::{likely, unlikely},
+   error::ProgramError, hint::{likely, unlikely},
 };
-#[cfg(feature = "log")]
 use pinocchio_log::log;
 use pinocchio_token::instructions::Transfer;
 
 use crate::{
-   parsers::parse_quote_data,
+   parsers::{parse_parlay_quote_data, parse_quote_data},
    state::other::MM_ENCUMBRANCE_PDA_SEED,
 };
 
-/// Parse CPI return data from a prior MM `get_quote` / `get_quote_parlay` when the return program id matches.
+/// Parse CPI return data from a prior MM `get_quote` when the return program id matches.
 #[inline(always)]
 pub fn parse_quote_return_for_mm(mm_program_account: &AccountView) -> Option<(u64, u32)> {
    let return_data = match get_return_data() {
@@ -40,8 +39,65 @@ pub fn parse_quote_return_for_mm(mm_program_account: &AccountView) -> Option<(u6
    }
 }
 
+/// Parse parlay CPI return (`GetParlayQuoteReturnWire`).
+#[inline(always)]
+pub fn parse_parlay_quote_return_for_mm(
+   mm_program_account: &AccountView,
+) -> Option<(u64, u32, u8, [u32; crate::constants::MAX_PARLAY_LEGS])> {
+   let return_data = get_return_data()?;
+   if unlikely(!address_eq(return_data.program_id(), mm_program_account.address())) {
+      return None;
+   }
+   parse_parlay_quote_data(return_data.as_slice()).ok()
+}
+
+/// Bet / parlay PDA must be empty before `CreateAccount` (fail early before quote/fill CPIs).
+#[inline(always)]
+pub fn ensure_bet_pda_unused(bet_pda: &AccountView, label: &str) -> ProgramResult {
+   if unlikely(bet_pda.lamports() > 0 || bet_pda.data_len() > 0) {
+      log!("{}: bet pda already initialized", label);
+      return Err(ProgramError::AccountAlreadyInitialized);
+   }
+   Ok(())
+}
+
+/// Free collateral vs encumbrance: returns `(amount_to_send, new_outstanding_liability)`.
+#[inline(always)]
+pub fn compute_liability_shortfall(
+   liability_balance: u64,
+   outstanding_liability: i64,
+   encumbrance_delta: i64,
+) -> Result<(u64, i64), ProgramError> {
+   let balance_i64: i64 = liability_balance.try_into().map_err(|_| {
+      log!("fill_helpers: liability balance does not fit i64");
+      ProgramError::InvalidAccountData
+   })?;
+   let encumbered_i64: i64 = if outstanding_liability < 0 {
+      0
+   } else {
+      outstanding_liability
+   };
+   let free_i64: i64 = balance_i64.saturating_sub(encumbered_i64);
+   let shortfall_i64: i64 = encumbrance_delta.saturating_sub(free_i64);
+   let amount_to_send: u64 = if shortfall_i64 <= 0 {
+      0u64
+   } else {
+      shortfall_i64.try_into().map_err(|_| {
+         log!("fill_helpers: shortfall does not fit u64");
+         ProgramError::InvalidInstructionData
+      })?
+   };
+   let new_outstanding: i64 = outstanding_liability
+      .checked_add(encumbrance_delta)
+      .ok_or_else(|| {
+         log!("fill_helpers: outstanding liability overflow");
+         ProgramError::InvalidInstructionData
+      })?;
+   Ok((amount_to_send, new_outstanding))
+}
+
 /// If the MM liability ATA increased by something other than `amount_to_send`, sweep that deposit back
-/// to the MM token account (same policy as `fill_bet`).
+/// to the MM token account (multi-MM `fill_bet` soft-continue path only).
 #[inline(always)]
 pub fn refund_liability_deposit_mismatch(
    mm_encumbrance_pda: &mut AccountView,

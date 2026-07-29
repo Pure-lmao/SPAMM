@@ -11,6 +11,7 @@ import {
    type ParlayBetAccountData,
 } from "spamm-aggregator-sdk";
 import { type BetRecord, type Selection } from "../../../api/quickIndexer";
+import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
@@ -198,6 +199,7 @@ export function selectionToMarketId(sel: Selection): MarketId {
       mkt: sel.mkt_id,
       period: sel.period_id,
       isPregame: Boolean(sel.is_pregame),
+      operator: DEFAULT_MARKET_OPERATOR,
    };
 }
 

@@ -29,20 +29,20 @@ use pinocchio_log::log;
 use crate::{
    constants::{MAX_NUMBER_OF_MMS_PROXY, MAX_PARLAY_LEGS, MAX_PARLAY_QUOTE_CPI_ACCOUNTS},
    helpers::{
-      set_proxy_return_data, verify_event_state, verify_mm_config_pda, verify_mm_market_data_pda,
+      set_proxy_parlay_return_data, verify_event_state, verify_mm_config_pda, verify_mm_market_data_pda,
       verify_parlay_quote_buffer,
    },
-   instructions::fill_helpers::parse_quote_return_for_mm,
+   instructions::fill_helpers::parse_parlay_quote_return_for_mm,
    parsers::parse_fill_parlay_data,
    state::{
       GET_QUOTE_PARLAY_IX_DISCRIMINATOR, GetQuoteParlayIxData, ParlayLegTable,
-      mm_quote::ProxyQuoteData,
+      mm_quote::ProxyParlayQuoteData,
    },
 };
 
 const MM_PARLAY_PROXY_FIXED_ACCOUNTS: usize = 3;
 
-pub const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 9;
+pub const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 31;
 
 #[inline(always)]
 fn mm_accounts_per_mm(num_legs: usize) -> usize {
@@ -62,7 +62,7 @@ fn cpi_get_quote_parlay_for_proxy(
    mm_config_pda: &AccountView,
    mm_parlay_quote_buffer: &AccountView,
    leg_accounts: &[AccountView],
-) -> Option<(u64, u32)> {
+) -> Option<(u64, u32, u8, [u32; MAX_PARLAY_LEGS])> {
    if !verify_mm_config_pda(mm_config_pda, mm_program_account) {
       #[cfg(feature = "log")]
       log!("get_parlay_quote_proxy: invalid mm config pda");
@@ -220,8 +220,13 @@ fn cpi_get_quote_parlay_for_proxy(
 
    let mut max_amount = 0u64;
    let mut odds_scaled = 0u32;
-   if let Some(parsed_ret) = parse_quote_return_for_mm(mm_program_account) {
-      (max_amount, odds_scaled) = parsed_ret;
+   let mut num_legs_ret = 0u8;
+   let mut leg_odds = [0u32; MAX_PARLAY_LEGS];
+   if let Some((amt, odds, n, odds_arr)) = parse_parlay_quote_return_for_mm(mm_program_account) {
+      max_amount = amt;
+      odds_scaled = odds;
+      num_legs_ret = n;
+      leg_odds = odds_arr;
    }
 
    #[cfg(feature = "log")]
@@ -235,7 +240,7 @@ fn cpi_get_quote_parlay_for_proxy(
       return None;
    }
 
-   Some((max_amount, odds_scaled))
+   Some((max_amount, odds_scaled, num_legs_ret, leg_odds))
 }
 
 #[inline(never)]
@@ -272,7 +277,7 @@ pub fn get_parlay_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> Prog
       return Err(ProgramError::NotEnoughAccountKeys);
    }
 
-   let mut mm_quotes = [const { MaybeUninit::<ProxyQuoteData>::uninit() }; MAX_NUMBER_OF_MMS_PROXY];
+   let mut mm_quotes = [const { MaybeUninit::<ProxyParlayQuoteData>::uninit() }; MAX_NUMBER_OF_MMS_PROXY];
    let mut valid_quote_count = 0usize;
 
    for i in 0..number_of_mms {
@@ -282,7 +287,7 @@ pub fn get_parlay_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> Prog
       let mm_parlay_quote_buffer = &mm_accounts[base + 2];
       let leg_accounts = &mm_accounts[base + MM_PARLAY_PROXY_FIXED_ACCOUNTS..base + accounts_per_mm];
 
-      let Some((max_amount, odds_scaled)) = cpi_get_quote_parlay_for_proxy(
+      let Some((max_amount, odds_scaled, num_legs_ret, leg_odds)) = cpi_get_quote_parlay_for_proxy(
          num_legs,
          amount,
          min_odds_scaled,
@@ -301,10 +306,16 @@ pub fn get_parlay_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> Prog
          break;
       }
 
-      mm_quotes[valid_quote_count].write(ProxyQuoteData {
+      mm_quotes[valid_quote_count].write(ProxyParlayQuoteData {
+         mm_address: *mm_program_account.address(),
          max_amount,
          odds_scaled,
-         mm_address: *mm_program_account.address(),
+         num_legs: num_legs_ret,
+         leg_odds_0: leg_odds[0],
+         leg_odds_1: leg_odds[1],
+         leg_odds_2: leg_odds[2],
+         leg_odds_3: leg_odds[3],
+         leg_odds_4: leg_odds[4],
       });
       valid_quote_count += 1;
    }  
@@ -314,6 +325,6 @@ pub fn get_parlay_quote_proxy(accounts: &mut [AccountView], data: &[u8]) -> Prog
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   set_proxy_return_data(mm_quotes, valid_quote_count);
+   set_proxy_parlay_return_data(mm_quotes, valid_quote_count);
    Ok(())
 }
