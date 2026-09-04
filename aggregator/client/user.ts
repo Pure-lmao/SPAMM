@@ -1,7 +1,8 @@
 import { loadKeypairSignerFromJsonFile } from "./utils.ts";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
-import { decodeMmReturnData, getBetData, getBetPda, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, getEventGameState, LOOKUP_TABLE_ID, ODDS_SCALE, Sport, getGetQuoteProxyIx, decodeProxyQuoteReturnData, getGetMarketQuotesProxyIx, decodeMarketQuotesProxyReturnData, numSidesForMkt } from "spamm-aggregator-sdk";
-import type { Address } from "@solana/kit";
+import { decodeMmReturnData, getBetData, getBetPda, getFillBetIx, getFillParlayIx, getMmGetQuoteIx, getMmListData, getParlayBetPda, getParlayData, getSettleBetIx, getSettleParlayIx, getEventGameState, ODDS_SCALE, Sport, getGetQuoteProxyIx, decodeProxyQuoteReturnData, getGetMarketQuotesProxyIx, decodeMarketQuotesProxyReturnData, numSidesForMkt, type MarketId } from "spamm-aggregator-sdk";
+import type { Address, Base64EncodedDataResponse } from "@solana/kit";
+import { getBase64Encoder } from "@solana/kit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
@@ -14,10 +15,11 @@ export const USER_SIGNER = await loadKeypairSignerFromJsonFile(
 );
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
 const WCMarketMaker = "WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address;
+const Operator = "OP_1" as Address;
 
 const betId = 10n;
 const sport = 1 as Sport;
-const marketId = {
+const marketId: MarketId = {
    eventId: {
       event: 760465n,
       league: 21900,
@@ -27,8 +29,9 @@ const marketId = {
    period: 1,
    isPregame: true,
    player: 0n,
+   operator: Operator,
 };
-const marketId2 = {
+const marketId2: MarketId = {
    eventId: {
       event: 2n,
       league: 1,
@@ -38,6 +41,7 @@ const marketId2 = {
    period: 1,
    isPregame: true,
    player: 0n,
+   operator: Operator,
 };
 
 const side = 0;
@@ -73,9 +77,10 @@ async function placeBet() {
       USER_SIGNER.address,
       USER_SIGNER.address,
       [DumbMarketMaker],
+      false,
    );
 
-   const simResult = await simulateTransaction(clients.rpc, [ix], [USER_SIGNER], false);
+   const simResult = await simulateTransaction(clients.rpc, [ix], [USER_SIGNER]);
    console.log(simResult);
 
    // const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER], addressesByLookupTable);
@@ -99,7 +104,7 @@ async function getQuotesFromProxy() {
       mmList.mmProgramAddresses,
    )
 
-   const returnData = await simulateTransaction(clients.rpc, [quoteProxyIx], [USER_SIGNER], true);
+   const returnData = await simulateTransaction(clients.rpc, [quoteProxyIx], [USER_SIGNER]);
    if (!returnData) {
       throw new Error("No return data");
    }
@@ -118,7 +123,7 @@ async function getQuote() {
       eventStateSequence,
    }, WCMarketMaker, USER_SIGNER.address);
    console.log(quote.accounts);
-   const returnData = await simulateTransaction(clients.rpc, [quote], [USER_SIGNER], true);
+   const returnData = await simulateTransaction(clients.rpc, [quote], [USER_SIGNER]);
    if (!returnData) {
       throw new Error("No return data");
    }
@@ -142,7 +147,7 @@ async function getMarketQuotesFromProxy() {
       USER_SIGNER.address,
       mmList.mmProgramAddresses,
    );
-   const returnData = await simulateTransaction(clients.rpc, [marketQuotesProxyIx], [USER_SIGNER], true);
+   const returnData = await simulateTransaction(clients.rpc, [marketQuotesProxyIx], [USER_SIGNER]);
    if (!returnData) {
       throw new Error("No return data");
    }
@@ -173,7 +178,9 @@ async function placeBetWithBestMm() {
    }
    const parsedReturnData = decodeProxyQuoteReturnData(Buffer.from(...returnData));
    // console.log(parsedReturnData);
-   const validMms = parsedReturnData.filter((mm) => mm.maxAmount > 0n && mm.oddsScaled > 0n).sort((a, b) => Number(a.maxAmount) - Number(b.maxAmount));
+   const validMms = parsedReturnData
+      .filter((mm) => mm.maxAmount > 0n && mm.oddsScaled > 0n)
+      .sort((a, b) => Number(b.oddsScaled - a.oddsScaled) || Number(b.maxAmount - a.maxAmount));
    if (validMms.length === 0) {
       throw new Error("No valid MMs found");
    }
@@ -186,7 +193,7 @@ async function placeBetWithBestMm() {
          minOddsScaled,
          eventStateSequence,
          eventGameState,
-      }, USER_SIGNER.address, USER_SIGNER.address, validMms.slice(0, 5).map((mm) => mm.mmAddress),
+      }, USER_SIGNER.address, USER_SIGNER.address, validMms.slice(0, 5).map((mm) => mm.mmAddress), false,
    );
    // console.log(ix.accounts);
    // const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);

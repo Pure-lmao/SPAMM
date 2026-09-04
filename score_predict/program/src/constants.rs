@@ -1,5 +1,9 @@
 use pinocchio::Address;
 
+pub const ADDRESS_LEN: usize = core::mem::size_of::<Address>();
+pub const U32_LEN: usize = core::mem::size_of::<u32>();
+pub const U64_LEN: usize = core::mem::size_of::<u64>();
+
 /// Program id — update in SDK after deploy (`solana program deploy`).
 // WcPREDR1bNAkqn61cvoFLLMf3HdXiRmvMM86PTAvmsW
 pub const ID: Address = Address::new_from_array([

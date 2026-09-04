@@ -42,8 +42,8 @@ type PlacedBetSummary = Readonly<{
    detailErr?: string;
 }>;
 
-function primaryFill(b: BetAccountData): BetAccountData["filler0"] | undefined {
-   return [b.filler0, b.filler1, b.filler2, b.filler3, b.filler4].find((f) => f.amount > 0n);
+function primaryFill(b: BetAccountData): BetAccountData["fillers"][number] | undefined {
+   return b.fillers.find((f) => f.amount > 0n);
 }
 
 export function BetSlipTray(): ReactElement | null {

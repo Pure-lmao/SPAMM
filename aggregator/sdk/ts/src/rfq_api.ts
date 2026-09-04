@@ -7,7 +7,7 @@
 
 import { address, type Address } from '@solana/kit';
 
-import { MAX_PARLAY_LEGS } from './constants.js';
+import { MAX_RFQ_PARLAY_LEGS } from './constants.js';
 import { RFQ_SIGNATURE_LEN, type EventGameState, type MarketId } from './types.js';
 
 /** How long the API waits for MM quote replies before responding to POST `/api/rfq`. */
@@ -16,7 +16,7 @@ export const RFQ_COLLECT_TIMEOUT_MS = 2000;
 /** MM WebSocket path on the aggregator API (`Bun.serve` upgrade). */
 export const RFQ_MM_WS_PATH = '/ws/mm';
 
-/** One selection in an RFQ (single = 1 leg, parlay = 2..{@link MAX_PARLAY_LEGS}). */
+/** One selection in an RFQ (single = 1 leg, parlay = 2..{@link MAX_RFQ_PARLAY_LEGS}). */
 export type RfqSelectionJson = {
    marketId: MarketIdJson;
    side: number;
@@ -74,6 +74,52 @@ export type RfqHttpResponseJson = {
    mmCount: number;
 };
 
+/** One cashout selection context (single = market + live snapshot; parlay = per-leg snapshots). */
+export type RfqCashoutSnapshotJson = {
+   eventStateSequence: number;
+   eventGameState: EventGameState;
+};
+
+/** `POST /api/rfq/cashout` request body (JSON). */
+export type RfqCashoutHttpRequestJson = {
+   user: string;
+   /** Original ticket `bet_id` / parlay `bet_id`. */
+   origBetId: string;
+   /** Client-chosen cashout id for the novated PDA. */
+   cashoutId: string;
+   /** Stake slice to cash (≤ remaining ticket amount). */
+   amount: string;
+   /** Floor on MM payment (slippage). */
+   minPayout: string;
+   /**
+    * Single-bet: one entry (quoted live snapshot).
+    * Parlay: one entry per open leg (orig sequences for validation; quoted may match).
+    */
+   snapshots: RfqCashoutSnapshotJson[];
+   /** Optional market id for single-bet cashout fan-out / MM context. */
+   marketId?: MarketIdJson;
+   side?: number;
+};
+
+/** One MM cashout quote returned to the user (and sent by MMs over WS). */
+export type RfqCashoutQuoteJson = {
+   mmProgramId: string;
+   /** Full cash payment the MM will pay (≤ payout removed from ticket). */
+   maxPayment: string;
+   /** Unix seconds; on-chain rejects after this. */
+   offerExpiry: number;
+   /** Ed25519 signature over the canonical cashout RFQ message (base64, 64 bytes). */
+   signature: string;
+};
+
+/** `POST /api/rfq/cashout` response body. */
+export type RfqCashoutHttpResponseJson = {
+   requestId: string;
+   quotes: RfqCashoutQuoteJson[];
+   timedOut: boolean;
+   mmCount: number;
+};
+
 /** API → MM: fan-out payload. */
 export type RfqWsRequestMessage = {
    type: 'rfq.request';
@@ -82,6 +128,20 @@ export type RfqWsRequestMessage = {
    betId: string;
    amount: string;
    selections: RfqSelectionJson[];
+};
+
+/** API → MM: cashout fan-out payload. */
+export type RfqWsCashoutRequestMessage = {
+   type: 'rfq.cashout.request';
+   requestId: string;
+   user: string;
+   origBetId: string;
+   cashoutId: string;
+   amount: string;
+   minPayout: string;
+   snapshots: RfqCashoutSnapshotJson[];
+   marketId?: MarketIdJson;
+   side?: number;
 };
 
 /** MM → API: signed quote for a pending request. */
@@ -95,6 +155,16 @@ export type RfqWsQuoteMessage = {
    signature: string;
    /** Per-leg odds × ODDS_SCALE; length must match the request selection count. */
    legOddsScaled: string[];
+};
+
+/** MM → API: signed cashout quote for a pending cashout request. */
+export type RfqWsCashoutQuoteMessage = {
+   type: 'rfq.cashout.quote';
+   requestId: string;
+   mmProgramId: string;
+   maxPayment: string;
+   offerExpiry: number;
+   signature: string;
 };
 
 /** API → MM: hello accepted. */
@@ -116,8 +186,14 @@ export type RfqWsHelloMessage = {
    signature: string;
 };
 
-export type RfqWsServerMessage = RfqWsHelloAckMessage | RfqWsRequestMessage;
-export type RfqWsClientMessage = RfqWsHelloMessage | RfqWsQuoteMessage;
+export type RfqWsServerMessage =
+   | RfqWsHelloAckMessage
+   | RfqWsRequestMessage
+   | RfqWsCashoutRequestMessage;
+export type RfqWsClientMessage =
+   | RfqWsHelloMessage
+   | RfqWsQuoteMessage
+   | RfqWsCashoutQuoteMessage;
 
 /** Domain tag for MM WebSocket hello auth signatures. */
 export const MM_HELLO_AUTH_DOMAIN = 'spamm.rfq.mm.hello.v1';
@@ -283,8 +359,8 @@ export function parseRfqHttpRequestJson(raw: unknown): RfqHttpRequestJson {
    if (!Array.isArray(selectionsRaw) || selectionsRaw.length === 0) {
       throw new RangeError('selections must be a non-empty array');
    }
-   if (selectionsRaw.length > MAX_PARLAY_LEGS) {
-      throw new RangeError(`selections.length must be <= ${MAX_PARLAY_LEGS}`);
+   if (selectionsRaw.length > MAX_RFQ_PARLAY_LEGS) {
+      throw new RangeError(`selections.length must be <= ${MAX_RFQ_PARLAY_LEGS}`);
    }
    const selections = selectionsRaw.map(parseSelectionJson);
    // Touch-parse addresses / bigints early so bad input fails before fan-out.
@@ -383,6 +459,102 @@ export function quoteJsonFromWsMessage(msg: RfqWsQuoteMessage): RfqQuoteJson {
       offerExpiry: msg.offerExpiry,
       signature: msg.signature,
       legOddsScaled: msg.legOddsScaled,
+   };
+}
+
+function parseCashoutSnapshotJson(raw: unknown, index: number): RfqCashoutSnapshotJson {
+   if (!isRecord(raw)) {
+      throw new RangeError(`snapshots[${index}] must be an object`);
+   }
+   return {
+      eventStateSequence: requireNumber(raw, 'eventStateSequence'),
+      eventGameState: parseEventGameState(raw.eventGameState, `snapshots[${index}]`),
+   };
+}
+
+/** Parse + validate `POST /api/rfq/cashout` JSON body. */
+export function parseRfqCashoutHttpRequestJson(raw: unknown): RfqCashoutHttpRequestJson {
+   if (!isRecord(raw)) {
+      throw new RangeError('RFQ cashout body must be a JSON object');
+   }
+   const snapshotsRaw = raw.snapshots;
+   if (!Array.isArray(snapshotsRaw) || snapshotsRaw.length === 0) {
+      throw new RangeError('snapshots must be a non-empty array');
+   }
+   if (snapshotsRaw.length > MAX_RFQ_PARLAY_LEGS) {
+      throw new RangeError(`snapshots.length must be <= ${MAX_RFQ_PARLAY_LEGS}`);
+   }
+   const snapshots = snapshotsRaw.map(parseCashoutSnapshotJson);
+   address(requireString(raw, 'user'));
+   BigInt(requireString(raw, 'origBetId'));
+   BigInt(requireString(raw, 'cashoutId'));
+   BigInt(requireString(raw, 'amount'));
+   BigInt(requireString(raw, 'minPayout'));
+   let marketId: MarketIdJson | undefined;
+   if (raw.marketId !== undefined) {
+      marketId = parseMarketIdJson(raw.marketId, 'marketId');
+      marketIdFromJson(marketId);
+   }
+   const side = raw.side === undefined ? undefined : requireNumber(raw, 'side');
+   return {
+      user: requireString(raw, 'user'),
+      origBetId: requireString(raw, 'origBetId'),
+      cashoutId: requireString(raw, 'cashoutId'),
+      amount: requireString(raw, 'amount'),
+      minPayout: requireString(raw, 'minPayout'),
+      snapshots,
+      marketId,
+      side,
+   };
+}
+
+/** Parse MM `rfq.cashout.quote` WS message; throws on malformed payloads. */
+export function parseRfqWsCashoutQuoteMessage(raw: unknown): RfqWsCashoutQuoteMessage {
+   if (!isRecord(raw) || raw.type !== 'rfq.cashout.quote') {
+      throw new RangeError('expected type rfq.cashout.quote');
+   }
+   const mmProgramId = requireString(raw, 'mmProgramId');
+   address(mmProgramId);
+   decodeRfqSignatureBase64(requireString(raw, 'signature'));
+   BigInt(requireString(raw, 'maxPayment'));
+   const offerExpiry = requireNumber(raw, 'offerExpiry');
+   if (!Number.isInteger(offerExpiry) || offerExpiry < 0) {
+      throw new RangeError('offerExpiry must be a non-negative integer (unix seconds)');
+   }
+   return {
+      type: 'rfq.cashout.quote',
+      requestId: requireString(raw, 'requestId'),
+      mmProgramId,
+      maxPayment: requireString(raw, 'maxPayment'),
+      offerExpiry,
+      signature: requireString(raw, 'signature'),
+   };
+}
+
+export function cashoutWsRequestFromHttp(
+   requestId: string,
+   body: RfqCashoutHttpRequestJson,
+): RfqWsCashoutRequestMessage {
+   return {
+      type: 'rfq.cashout.request',
+      requestId,
+      user: body.user,
+      origBetId: body.origBetId,
+      cashoutId: body.cashoutId,
+      amount: body.amount,
+      minPayout: body.minPayout,
+      snapshots: body.snapshots,
+      marketId: body.marketId,
+      side: body.side,
+   };
+}
+
+export function cashoutQuoteJsonFromWsMessage(msg: RfqWsCashoutQuoteMessage): RfqCashoutQuoteJson {
+   return {
+      mmProgramId: msg.mmProgramId,
+      maxPayment: msg.maxPayment,
+      offerExpiry: msg.offerExpiry,
+      signature: msg.signature,
    };
 }
 

@@ -5,11 +5,12 @@ use solana_program_pack::Pack;
 use spl_token_interface::state::Account as TokenAccount;
 
 use crate::common::{
-   address_lookup_table_program_pubkey, admin, assert_encumbrance_discriminator, assert_program_err,
-   config_pda, encumbrance_pda, liability_token_ata, lookup_table_pubkey, mm_admin, mm_collateral_ata,
-   mm_config_pda, mm_list_pda, mm_list_peer_program, mm_parlay_quote_buffer_pda, mm_program_id,
-   mm_quote_buffer_pda, mint_pubkey, patch_mm_list_entries, read_encumbrance, read_mm_list_tail,
-   record_cu_success, wrong_signer, Env,
+   admin, assert_encumbrance_discriminator, assert_program_err,
+   bet_pda_for, bet_token_ata, config_pda, encumbrance_pda, event_id_soccer, fill_bet_instruction,
+   fill_bet_netting_placeholder, liability_token_ata, market_spread_pregame,
+   mm_admin, mm_collateral_ata, mm_config_pda, mm_list_pda, mm_list_peer_program,
+   mm_parlay_quote_buffer_pda, mm_program_id, mm_quote_buffer_pda, mint_pubkey, patch_mm_list_entries,
+   read_encumbrance, read_mm_list_tail, record_cu_success, rent_sysvar_pubkey, system_owned_empty, user, wrong_signer, Env,
 };
 use mollusk_svm_programs_token::{associated_token, token};
 
@@ -27,9 +28,8 @@ fn deregister_metas(agg_admin: solana_pubkey::Pubkey, mm_admin_pk: solana_pubkey
       AccountMeta::new_readonly(mint_pubkey(), false),
       AccountMeta::new_readonly(token::ID, false),
       AccountMeta::new_readonly(associated_token::ID, false),
+      AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
-      AccountMeta::new(lookup_table_pubkey(), false),
-      AccountMeta::new_readonly(address_lookup_table_program_pubkey(), false),
       AccountMeta::new(mm_collateral_ata(), false),
       AccountMeta::new_readonly(mm_quote_buffer_pda(), false),
       AccountMeta::new_readonly(mm_parlay_quote_buffer_pda(), false),
@@ -64,7 +64,7 @@ fn deregister_mm_success() {
    let mut env = Env::new();
    setup_register_then_deregister_prep(&mut env);
 
-   let dereg = env.agg_ix(54, vec![], deregister_metas(admin(), mm_admin()));
+   let dereg = env.agg_ix(3, vec![], deregister_metas(admin(), mm_admin()));
    let r = env.run_ix(dereg);
    assert!(r.program_result.is_ok(), "deregister_mm {:?}", r);
 
@@ -84,7 +84,7 @@ fn deregister_mm_wrong_aggregator_admin() {
    let mut env = Env::new();
    setup_register_then_deregister_prep(&mut env);
 
-   let dereg = env.agg_ix(54, vec![], deregister_metas(wrong_signer(), mm_admin()));
+   let dereg = env.agg_ix(3, vec![], deregister_metas(wrong_signer(), mm_admin()));
    let r = env.run_ix(dereg);
    assert_program_err(&r, solana_program_error::ProgramError::IncorrectAuthority);
 }
@@ -106,7 +106,7 @@ fn deregister_mm_removes_first_of_two_preserves_peer() {
    assert_eq!(addrs[0], mm_program_id());
    assert_eq!(addrs[1], peer);
 
-   let dereg = env.agg_ix(54, vec![], deregister_metas(admin(), mm_admin()));
+   let dereg = env.agg_ix(3, vec![], deregister_metas(admin(), mm_admin()));
    let r = env.run_ix(dereg);
    assert!(r.program_result.is_ok(), "deregister_mm {:?}", r);
 
@@ -121,7 +121,41 @@ fn deregister_mm_nonempty_ix_data() {
    let mut env = Env::new();
    setup_register_then_deregister_prep(&mut env);
 
-   let dereg = env.agg_ix(54, vec![1], deregister_metas(admin(), mm_admin()));
+   let dereg = env.agg_ix(3, vec![1], deregister_metas(admin(), mm_admin()));
    let r = env.run_ix(dereg);
    assert_program_err(&r, solana_program_error::ProgramError::InvalidInstructionData);
+}
+
+#[test]
+fn deregister_mm_rejects_nonzero_encumbrance() {
+   let mut env = Env::new();
+   env.bootstrap_default_mm_spread();
+   let mid = market_spread_pregame(event_id_soccer());
+   let bet = bet_pda_for(&user(), 885);
+   let bat = bet_token_ata(&bet);
+   env.upsert(bet, system_owned_empty());
+   env.upsert(bat, system_owned_empty());
+   let data = spamm_aggregator::instructions::FillBetIxData {
+      bet_id: 885,
+      market_id: mid,
+      side: 0,
+      amount: 1_000_000,
+      min_odds_scaled: 15_000,
+      event_state_sequence: 1,
+      event_game_state: spamm_aggregator::state::EventGameState::zeroed(),
+   };
+   assert!(env
+      .run_ix(fill_bet_instruction(
+         &data,
+         bet,
+         bat,
+         &mid,
+         fill_bet_netting_placeholder(),
+      ))
+      .program_result
+      .is_ok());
+   assert!(read_encumbrance(&env, &encumbrance_pda()) != 0);
+   let dereg = env.agg_ix(3, vec![], deregister_metas(admin(), mm_admin()));
+   let r = env.run_ix(dereg);
+   assert_program_err(&r, solana_program_error::ProgramError::InvalidAccountData);
 }

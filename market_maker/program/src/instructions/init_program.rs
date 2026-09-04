@@ -1,7 +1,7 @@
 //! One-time setup: create `["config"]`, then `["mm_quote_buffer"]`, then `["mm_parlay_quote_buffer"]`,
 //! then the MM collateral ATA whose **authority is the config PDA** (SPAMM framework README; matches aggregator token checks).
 //!
-//! Accounts **(9)** — order matters for ATA creation:
+//! Accounts **(10)** — order matters for ATA creation:
 //! 0. `feepayer` (signer)
 //! 1. `config_pda` (writable, empty)
 //! 2. `mm_quote_buffer_pda` (writable, empty)
@@ -10,32 +10,40 @@
 //! 5. `mint` (readonly)
 //! 6. `token_program` (readonly)
 //! 7. `associated_token_program` (readonly)
-//! 8. `system_program` (readonly)
+//! 8. `rent_sysvar` (readonly)
+//! 9. `system_program` (readonly)
 //!
 //! Instruction `data`: [`InitProgramIxPayload`] — `admin` + `rfq_signer` pubkeys (`admin` must equal `feepayer`).
 
-use pinocchio::ProgramResult;
-use pinocchio::address::address_eq;
-use pinocchio::cpi::Seed;
-use pinocchio::cpi::Signer;
-use pinocchio::error::ProgramError;
-use pinocchio::hint::unlikely;
-use pinocchio::{AccountView, Address};
+use pinocchio::{
+   AccountView, Address, ProgramResult,
+   address::address_eq,
+   cpi::{Seed, Signer},
+   error::ProgramError,
+   hint::unlikely,
+};
 use pinocchio_log::log;
 use pinocchio_associated_token_account::instructions::Create as CreateAssociatedTokenAccount;
 use pinocchio_system::instructions::CreateAccount;
 
-use spamm_aggregator::helpers::verify_associated_token_program;
-use spamm_aggregator::helpers::{get_rent_local, verify_signer, verify_system_program, verify_token_program};
-use spamm_aggregator::state::{
-   MmAccountConfigZc, MM_ACCOUNT_CONFIG_MIN_LEN, MM_ACCOUNT_CONFIG_SEED, MM_ACCOUNT_CONFIG_DISCRIMINATOR,
-   MM_QUOTE_BUFFER_LEN, MM_PARLAY_QUOTE_BUFFER_LEN,
+use crate::{
+   constants::{MM_PARLAY_QUOTE_BUFFER_SEED, MM_QUOTE_BUFFER_SEED},
+   state::InitProgramIxPayload,
+};
+use spamm_aggregator::{
+   helpers::{
+      get_rent, verify_associated_token_program, verify_rent_sysvar, verify_signer,
+      verify_system_program, verify_token_program,
+   },
+   state::{
+      MmAccountConfigZc, MM_CONFIG_PDA_HEADER_LEN, MM_ACCOUNT_CONFIG_SEED,
+      MM_ACCOUNT_CONFIG_DISCRIMINATOR, MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR,
+      MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_DISCRIMINATOR, MM_QUOTE_BUFFER_LEN,
+   },
+   writers::write_u8_unchecked,
 };
 
-use crate::constants::{MM_PARLAY_QUOTE_BUFFER_SEED, MM_QUOTE_BUFFER_SEED};
-use crate::state::InitProgramIxPayload;
-
-pub const INIT_PROGRAM_IX_DISCRIMINATOR: u8 = 1;
+pub const INIT_PROGRAM_IX_DISCRIMINATOR: u8 = 100;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let parsed = InitProgramIxPayload::decode(data)?;
@@ -48,6 +56,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       mint,
       token_program,
       associated_token_program,
+      rent_sysvar,
       system_program,
    ] = accounts else {
       log!("init_program: accounts mismatch");
@@ -55,6 +64,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    };
 
    verify_signer(feepayer)?;
+   verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_token_program(token_program)?;
    verify_associated_token_program(associated_token_program)?;
@@ -103,11 +113,11 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       ];
       let signers = [Signer::from(&config_signer)];
 
-      let config_space = MM_ACCOUNT_CONFIG_MIN_LEN as u64;
+      let config_space = MM_CONFIG_PDA_HEADER_LEN as u64;
       CreateAccount {
          from: feepayer,
          to: config_pda,
-         lamports: get_rent_local(config_space),
+         lamports: get_rent(rent_sysvar, config_space)?,
          space: config_space,
          owner: program_id,
       }
@@ -139,11 +149,18 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       CreateAccount {
          from: feepayer,
          to: mm_quote_buffer_pda,
-         lamports: get_rent_local(buf_space),
+         lamports: get_rent(rent_sysvar, buf_space)?,
          space: buf_space,
          owner: program_id,
       }
       .invoke_signed(&signers)?;
+      unsafe {
+         write_u8_unchecked(
+            mm_quote_buffer_pda.data_mut_ptr(),
+            0,
+            MM_QUOTE_BUFFER_DISCRIMINATOR,
+         );
+      }
    }
 
    {
@@ -158,10 +175,17 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       CreateAccount {
          from: feepayer,
          to: mm_parlay_quote_buffer_pda,
-         lamports: get_rent_local(p_space),
+         lamports: get_rent(rent_sysvar, p_space)?,
          space: p_space,
          owner: program_id,
       }.invoke_signed(&signers)?;
+      unsafe {
+         write_u8_unchecked(
+            mm_parlay_quote_buffer_pda.data_mut_ptr(),
+            0,
+            MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR,
+         );
+      }
    }
 
    CreateAssociatedTokenAccount {

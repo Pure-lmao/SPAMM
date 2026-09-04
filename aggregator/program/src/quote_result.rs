@@ -1,4 +1,4 @@
-//! Types for MM `get_quote` / `get_quote_parlay` handlers (SPAMM framework contract).
+//! Types for MM `get_quote` / `get_quote_parlay` handlers.
 
 use core::convert::Infallible;
 

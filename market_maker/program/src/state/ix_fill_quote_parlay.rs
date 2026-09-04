@@ -1,8 +1,6 @@
 use pinocchio::error::ProgramError;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use spamm_aggregator::state::{FillParlayQuoteIxData};
-
 /// `fill_parlay_quote` instruction payload (bytes after the MM router discriminator), matching
 /// [`FillParlayQuoteIxData`] minus `instruction_discriminator`.
 #[derive(Copy, Clone, ZeroPod)]
@@ -29,5 +27,3 @@ impl FillParlayQuoteIxPayload {
       })
    }
 }
-
-const _: () = assert!(FILL_QUOTE_PARLAY_IX_PAYLOAD_LEN == FillParlayQuoteIxData::WIRE_LEN - 1);

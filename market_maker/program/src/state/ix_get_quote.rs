@@ -21,6 +21,18 @@ pub const GET_QUOTE_IX_PAYLOAD_LEN: usize = <GetQuoteIxPayload as ZeroPodFixed>:
 
 impl GetQuoteIxPayload {
    #[inline(always)]
+   pub fn from_zc(z: &GetQuoteIxPayloadZc) -> Option<Self> {
+      Some(Self {
+         amount: z.amount.get(),
+         odds_scaled: z.odds_scaled.get(),
+         market_id: MarketId::from_zc(&z.market_id)?,
+         side: z.side,
+         event_game_state: EventGameState::from_zc(&z.event_game_state),
+         event_state_sequence: z.event_state_sequence.get(),
+      })
+   }
+
+   #[inline(always)]
    pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
       if data.len() != GET_QUOTE_IX_PAYLOAD_LEN {
          log!(
@@ -30,27 +42,13 @@ impl GetQuoteIxPayload {
          );
          return Err(ProgramError::InvalidInstructionData);
       }
-      let zc = match <Self as ZeroPodFixed>::from_bytes(data) {
-         Ok(z) => z,
-         Err(_) => {
-            log!("get_quote: ix payload from_bytes failed");
-            return Err(ProgramError::InvalidInstructionData);
-         }
-      };
-      let market_id = match MarketId::from_zc(&zc.market_id) {
-         Some(m) => m,
-         None => {
-            log!("get_quote: ix payload market_id from_zc failed");
-            return Err(ProgramError::InvalidInstructionData);
-         }
-      };
-      Ok(Self {
-         side: zc.side,
-         event_state_sequence: zc.event_state_sequence.get(),
-         odds_scaled: zc.odds_scaled.get(),
-         amount: zc.amount.get(),
-         market_id,
-         event_game_state: EventGameState::from_zc(&zc.event_game_state),
+      let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| {
+         log!("get_quote: ix payload from_bytes failed");
+         ProgramError::InvalidInstructionData
+      })?;
+      Self::from_zc(&z).ok_or_else(|| {
+         log!("get_quote: ix payload from_zc failed");
+         ProgramError::InvalidInstructionData
       })
    }
 }

@@ -1,7 +1,7 @@
 use pinocchio::{Address, error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
 
-use crate::constants::TWEET_LINK_LEN;
+use crate::constants::{ADDRESS_LEN, TWEET_LINK_LEN, U32_LEN, U64_LEN};
 
 pub struct CreatePredictionIxData {
    pub prediction_id: u64,
@@ -12,8 +12,9 @@ pub struct CreatePredictionIxData {
 }
 
 /// Wire layout after router discriminator: prediction_id u64, contest_id u32,
-/// prediction [u8;2], open_bet [32], tweet_link [70]. Timestamp comes from Clock sysvar.
-pub const CREATE_PREDICTION_IX_DATA_LEN: usize = 8 + 4 + 2 + 32 + TWEET_LINK_LEN;
+/// prediction [u8;2], open_bet Address, tweet_link. Timestamp comes from Clock sysvar.
+pub const CREATE_PREDICTION_IX_DATA_LEN: usize =
+   U64_LEN + U32_LEN + 2 + ADDRESS_LEN + TWEET_LINK_LEN;
 
 pub fn parse_create_prediction_data(data: &[u8]) -> Result<CreatePredictionIxData, ProgramError> {
    if unlikely(data.len() != CREATE_PREDICTION_IX_DATA_LEN) {
@@ -22,16 +23,16 @@ pub fn parse_create_prediction_data(data: &[u8]) -> Result<CreatePredictionIxDat
    }
 
    let mut off = 0;
-   let prediction_id = u64::from_le_bytes(data[off..off + 8].try_into().unwrap());
-   off += 8;
-   let contest_id = u32::from_le_bytes(data[off..off + 4].try_into().unwrap());
-   off += 4;
+   let prediction_id = u64::from_le_bytes(data[off..off + U64_LEN].try_into().unwrap());
+   off += U64_LEN;
+   let contest_id = u32::from_le_bytes(data[off..off + U32_LEN].try_into().unwrap());
+   off += U32_LEN;
    let prediction = [data[off], data[off + 1]];
    off += 2;
-   let mut open_bet_bytes = [0u8; 32];
-   open_bet_bytes.copy_from_slice(&data[off..off + 32]);
+   let mut open_bet_bytes = [0u8; ADDRESS_LEN];
+   open_bet_bytes.copy_from_slice(&data[off..off + ADDRESS_LEN]);
    let open_bet = Address::new_from_array(open_bet_bytes);
-   off += 32;
+   off += ADDRESS_LEN;
    let mut tweet_link = [0u8; TWEET_LINK_LEN];
    tweet_link.copy_from_slice(&data[off..off + TWEET_LINK_LEN]);
 

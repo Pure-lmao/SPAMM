@@ -1,114 +1,177 @@
 //! Settle the graded bet and move funds to the winner then close bet/ata to the feepayer.
-//! SPL token moves use a single token program batch CPI (p-token) including dust sweep and ATA close.
 //!
-//! Accounts: **9** then **5** per filler but can be blank if no fillers
+//! One pipeline:
+//! 1. Verify the bet is graded and the accounts match.
+//! 2. For each filler MM: move that MM's tokens (one SPL token batch CPI).
+//! 3. Unwind each filler's encumbrance.
+//! 4. Close the bet PDA; rent to the original feepayer.
+//!
+//! Accounts: **11** then **5 × N** (`N` = `num_fillers` on the bet)
 //! 0. `signer` (signer)
 //! 1. `bet_account` (writable)
 //! 2. `bet_ata` (writable)
 //! 3. `bet_feepayer` (writable)
-//! 4. `user` (readonly)
-//! 5. `user_ata` (writable)
+//! 4. `user` (readonly) — ticket owner; on a cashout ticket this is the filling MM program
+//! 5. `user_ata` (writable) — user ATA, or filling-MM **liability** ATA on cashout settle
 //! 6. `config_pda` (readonly)
 //! 7. `mint` (readonly)
 //! 8. `token_program` (readonly)
-//! 
+//! 9. `cashout_escrow_pda` (readonly) — must be unused for this ticket
+//! 10. `dest_encumbrance` (readonly) — filling MM encumbrance when settling a cashout; ignored otherwise
+//!
 //! Per filler:
-//! 0 `mm_address` (readonly)
+//! 0. `mm_address` (readonly)
 //! 1. `mm_config_pda` (readonly)
 //! 2. `mm_encumbrance_pda` (writable)
 //! 3. `mm_liability_token_account` (writable)
-//! 4. `mm_token_account` (writable)
-//! 
+//! 4. `mm_netting_pda` (writable) — real netting PDA if the fill was netted, else system program
+//!
 //! No Data
 
 use core::mem::MaybeUninit;
 
 use pinocchio::{
-   AccountView, ProgramResult, address::address_eq, cpi::{Seed, Signer}, error::ProgramError, hint::{unlikely}
+   AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer}, error::ProgramError, hint::unlikely
 };
 use pinocchio_log::log;
 use pinocchio_system::ID as SYSTEM_ID;
 use pinocchio_token::instructions::{Batch, CloseAccount, IntoBatch, Transfer};
 use pinocchio::{cpi::CpiAccount, instruction::InstructionAccount};
-use crate::{ID, constants::{SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS, SETTLE_BET_TOKEN_BATCH_IX_CAP, SETTLE_TOKEN_BATCH_MAX_INNER_DATA}, helpers::{calc_potential_profit, close_pda_return_rent, push_bet_ata_out, verify_config_pda, verify_mint, verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program}, parsers::{get_encumbrance, get_token_account_balance}, state::{
-      BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller, account_bet::BetResult, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED}
-   }, writers::write_i64_le_unchecked
+use crate::{
+   ID,
+   constants::{
+      MAX_NUMBER_OF_MMS, SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS, SETTLE_BET_TOKEN_BATCH_IX_CAP,
+      SETTLE_TOKEN_BATCH_MAX_INNER_DATA,
+   },
+   errors::SpammError,
+   helpers::{
+      calc_potential_profit, close_pda_return_rent, get_encumbrance, get_token_account_balance, push_bet_ata_out, verify_config_pda, verify_mint,
+      verify_mm_config_pda, verify_mm_encumbrance_pda, verify_netting_pda, verify_signer, verify_token_account,
+      verify_token_program,
+      cashout_helpers::require_no_live_cashout_escrow,
+      verify_bet_pda, verify_cashout_pda,
+      freebet_helpers::require_not_freebet,
+   },
+   state::{
+      BET_ACCOUNT_SEED, BetAccountData, BetAccountHeader, BetFiller, CashoutAccountData, CASHOUT_ACCOUNT_DISCRIMINATOR,
+      CASHOUT_ACCOUNT_SEED,
+      account_bet::BetResult,
+      account_netting::apply_settle_netting,
+      other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED},
+   },
+   writers::write_i64_le_unchecked,
 };
 
 pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 25;
 
-/// Account handles for the SPL token batch CPI in `settle_bet` (keeps `process` stack small).
-struct SettleBetTokenBatchCx<'a> {
-   user: &'a AccountView,
-   bet_account: &'a mut AccountView,
-   bet_ata: &'a mut AccountView,
-   bet_feepayer: &'a mut AccountView,
-   user_ata: &'a mut AccountView,
-   mint: &'a AccountView,
-   token_program: &'a AccountView,
-   f0_mm: &'a mut AccountView,
-   f0_cfg: &'a mut AccountView,
-   f0_enc: &'a mut AccountView,
-   f0_liab: &'a mut AccountView,
-   f0_tok: &'a mut AccountView,
-   f1_mm: &'a mut AccountView,
-   f1_cfg: &'a mut AccountView,
-   f1_enc: &'a mut AccountView,
-   f1_liab: &'a mut AccountView,
-   f1_tok: &'a mut AccountView,
-   f2_mm: &'a mut AccountView,
-   f2_cfg: &'a mut AccountView,
-   f2_enc: &'a mut AccountView,
-   f2_liab: &'a mut AccountView,
-   f2_tok: &'a mut AccountView,
-   f3_mm: &'a mut AccountView,
-   f3_cfg: &'a mut AccountView,
-   f3_enc: &'a mut AccountView,
-   f3_liab: &'a mut AccountView,
-   f3_tok: &'a mut AccountView,
-   f4_mm: &'a mut AccountView,
-   f4_cfg: &'a mut AccountView,
-   f4_enc: &'a mut AccountView,
-   f4_liab: &'a mut AccountView,
-   f4_tok: &'a mut AccountView,
+pub(crate) const ACCOUNTS_PER_FILLER: usize = 5;
+
+pub(crate) struct SettleBetTicket {
+   pub header: BetAccountHeader,
+   pub is_cashout: bool,
+   pub escrow_owner: Address,
+   pub escrow_bet_id: u64,
 }
 
-pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
+/// Decode a single-bet or cashout ticket header + live fillers for settle paths.
+pub(crate) fn decode_settle_bet_ticket(
+   bet_account: &AccountView,
+   fillers_buf: &mut [MaybeUninit<BetFiller>],
+   allow_cashout: bool,
+) -> Result<SettleBetTicket, ProgramError> {
+   if unlikely(!address_eq(bet_account.owner(), &ID)) {
+      log!("settle_bet: bet account must be owned by this program");
+      return Err(ProgramError::InvalidAccountOwner);
+   }
+   let disc = unsafe { *bet_account.data_ptr() };
+   let is_cashout = disc == CASHOUT_ACCOUNT_DISCRIMINATOR;
+   if !allow_cashout && is_cashout {
+      log!("settle_bet: cashout tickets are not freebets");
+      return Err(SpammError::InvalidFreebet.into());
+   }
+
+   if is_cashout {
+      let co = {
+         let raw = bet_account.try_borrow()?;
+         let h = CashoutAccountData::decode_header(raw.as_ref())?;
+         let n = h.num_fillers as usize;
+         CashoutAccountData::decode_fillers_into(raw.as_ref(), n, fillers_buf)?;
+         h
+      };
+      verify_cashout_pda(bet_account, &co.mm, co.cashout_id, co.bump)?;
+      let escrow_owner = co.orig_owner;
+      let escrow_bet_id = co.orig_bet_id;
+      let header = co.as_bet_header();
+      Ok(SettleBetTicket {
+         header,
+         is_cashout: true,
+         escrow_owner,
+         escrow_bet_id,
+      })
+   } else {
+      let bet_account_data = bet_account.try_borrow()?;
+      let h = BetAccountData::decode_header(bet_account_data.as_ref())?;
+      let n = h.num_fillers as usize;
+      BetAccountData::decode_fillers_into(bet_account_data.as_ref(), n, fillers_buf)?;
+      verify_bet_pda(bet_account, &h.owner, h.bet_id, h.bump)?;
+      Ok(SettleBetTicket {
+         escrow_owner: h.owner,
+         escrow_bet_id: h.bet_id,
+         header: h,
+         is_cashout: false,
+      })
+   }
+}
+
+/// Shared graded-ticket + filler-account checks after decode.
+pub(crate) fn validate_settle_bet_ticket(
+   header: &BetAccountHeader,
+   bet_feepayer: &AccountView,
+   user: &AccountView,
+   filler_accounts: &[AccountView],
+) -> ProgramResult {
+   let num_fillers = header.num_fillers as usize;
+   if filler_accounts.len() < ACCOUNTS_PER_FILLER || filler_accounts.len() % ACCOUNTS_PER_FILLER != 0 {
+      log!("settle_bet: mm accounts mismatch");
+      return Err(ProgramError::NotEnoughAccountKeys);
+   }
+   if filler_accounts.len() / ACCOUNTS_PER_FILLER != num_fillers {
+      log!("settle_bet: accounts mismatch");
+      return Err(ProgramError::NotEnoughAccountKeys);
+   }
+   if unlikely(header.result == BetResult::Pending) {
+      log!("settle_bet: bet is pending");
+      return Err(SpammError::BetNotGraded.into());
+   }
+   if unlikely(header.result == BetResult::CashedOut) {
+      log!("settle_bet: CashedOut is not settleable");
+      return Err(SpammError::InvalidCashout.into());
+   }
+   if unlikely(!address_eq(&header.feepayer, bet_feepayer.address())) {
+      log!("settle_bet: bet feepayer is invalid");
+      return Err(ProgramError::InvalidAccountData);
+   }
+   if unlikely(!address_eq(&header.owner, user.address())) {
+      log!("settle_bet: bet owner is invalid");
+      return Err(ProgramError::InvalidAccountData);
+   }
+   Ok(())
+}
+
+pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    let [
-      signer, //verified as signer, can be anyone
-      bet_account, //verified inline
-      bet_ata, //verified by verify_token_account
-      bet_feepayer, //verified inline
-      user, //verified inline
-      user_ata, //verified by verify_token_account
-      our_config_pda, //verified by verify_config_pda
-      mint, //verified by verify_mint
-      token_program, //verified by equ const
-      filler_0_mm_address,
-      filler_0_mm_config_pda,
-      filler_0_mm_encumbrance_pda,
-      filler_0_mm_liability_token_account,
-      filler_0_token_account,
-      filler_1_mm_address,
-      filler_1_mm_config_pda,
-      filler_1_mm_encumbrance_pda,
-      filler_1_mm_liability_token_account,
-      filler_1_token_account,
-      filler_2_mm_address,
-      filler_2_mm_config_pda,
-      filler_2_mm_encumbrance_pda,
-      filler_2_mm_liability_token_account,
-      filler_2_token_account,
-      filler_3_mm_address,
-      filler_3_mm_config_pda,
-      filler_3_mm_encumbrance_pda,
-      filler_3_mm_liability_token_account,
-      filler_3_token_account,
-      filler_4_mm_address,
-      filler_4_mm_config_pda,
-      filler_4_mm_encumbrance_pda,
-      filler_4_mm_liability_token_account,
-      filler_4_token_account,
+      signer,
+      bet_account,
+      bet_ata,
+      bet_feepayer,
+      user,
+      user_ata,
+      our_config_pda,
+      mint,
+      token_program,
+      cashout_escrow_pda,
+      dest_encumbrance,
+      filler_accounts @ ..,
    ] = accounts else {
       log!("settle_bet: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
@@ -116,384 +179,271 @@ pub fn process<'a>(accounts: &'a mut [AccountView]) -> ProgramResult {
 
    verify_signer(&signer)?;
    verify_config_pda(&our_config_pda, true)?;
-
-   if unlikely(!address_eq(bet_account.owner(), &ID)) {
-      log!("settle_bet: bet account must be owned by this program");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   if unlikely(bet_account.data_len() != BET_ACCOUNT_LEN as usize) {
-      log!("settle_bet: bet account data length is invalid");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   let bet_account_data = bet_account.try_borrow()?;
-   let bet_data = BetAccountData::decode(bet_account_data.as_ref())?;
-   core::mem::drop(bet_account_data);
-
-   let bet_id_bytes = bet_data.bet_id.to_le_bytes();
-   let bet_bump_bytes = bet_data.bump.to_le_bytes();
-
-   if unlikely(bet_data.result == BetResult::Pending) {
-      log!("settle_bet: bet is pending");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-
-   if unlikely(!address_eq(&bet_data.feepayer, &bet_feepayer.address())) {     
-      log!("settle_bet: bet feepayer is invalid");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   if unlikely(!address_eq(&bet_data.owner, &user.address())) {     
-      log!("settle_bet: bet owner is invalid");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   verify_token_account(true, 
-      &user_ata, &user, 
-      &mint, &token_program
-   )?;
-
-
    verify_token_program(token_program)?;
    verify_mint(&mint)?;
 
-   verify_token_account(true, 
-      &bet_ata, bet_account, 
-      &mint, &token_program
-   )?;
-
-   let amount_to_user_from_bet_ata: u64 = match bet_data.result {
-      BetResult::Won | BetResult::HalfWon |
-        BetResult::Push | BetResult::Cancelled |
-        BetResult::RolledBack => bet_data.amount,
-      BetResult::Lost => 0,
-      BetResult::HalfLost => bet_data.amount / 2,
-      BetResult::ModifiedWin => {
-         log!("settle_bet: ModifiedWin is parlay-only");
-         return Err(ProgramError::InvalidInstructionData);
-      }
-      BetResult::Pending => {
-         log!("settle_bet: bet result is pending");
-         return Err(ProgramError::InvalidInstructionData);
-      }
+   let mut fillers_buf = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
+   let SettleBetTicket {
+      header,
+      is_cashout,
+      escrow_owner,
+      escrow_bet_id,
+   } = decode_settle_bet_ticket(bet_account, &mut fillers_buf, true)?;
+   require_no_live_cashout_escrow(cashout_escrow_pda, &escrow_owner, escrow_bet_id)?;
+   let num_fillers = header.num_fillers as usize;
+   let fillers = unsafe {
+      core::slice::from_raw_parts(fillers_buf.as_ptr().cast::<BetFiller>(), num_fillers)
    };
+   validate_settle_bet_ticket(&header, bet_feepayer, user, filler_accounts)?;
 
+   let account_seed = if is_cashout {
+      if verify_mm_encumbrance_pda(dest_encumbrance, user).is_none() {
+         log!("settle_bet: cashout dest encumbrance invalid");
+         return Err(ProgramError::InvalidAccountData);
+      }
+      verify_token_account(true, &user_ata, dest_encumbrance, &mint, &token_program)?;
+      CASHOUT_ACCOUNT_SEED
+   } else {
+      require_not_freebet(header.freebet_id)?;
+      verify_token_account(true, &user_ata, &user, &mint, &token_program)?;
+      BET_ACCOUNT_SEED
+   };
+   verify_token_account(true, &bet_ata, bet_account, &mint, &token_program)?;
+
+   let amount_to_user_from_bet_ata = user_stake_from_bet_ata(header.result, header.amount)?;
    let bet_ata_start = get_token_account_balance(bet_ata)?;
-   let cx = SettleBetTokenBatchCx {
+
+   // Pay each filler, return leftover stake (+ dust) to the user, close the bet ATA.
+   settle_fillers(
+      &header,
+      fillers,
+      amount_to_user_from_bet_ata,
+      bet_ata_start,
       user,
       bet_account,
       bet_ata,
       bet_feepayer,
       user_ata,
+      user_ata,
       mint,
       token_program,
-      f0_mm: filler_0_mm_address,
-      f0_cfg: filler_0_mm_config_pda,
-      f0_enc: filler_0_mm_encumbrance_pda,
-      f0_liab: filler_0_mm_liability_token_account,
-      f0_tok: filler_0_token_account,
-      f1_mm: filler_1_mm_address,
-      f1_cfg: filler_1_mm_config_pda,
-      f1_enc: filler_1_mm_encumbrance_pda,
-      f1_liab: filler_1_mm_liability_token_account,
-      f1_tok: filler_1_token_account,
-      f2_mm: filler_2_mm_address,
-      f2_cfg: filler_2_mm_config_pda,
-      f2_enc: filler_2_mm_encumbrance_pda,
-      f2_liab: filler_2_mm_liability_token_account,
-      f2_tok: filler_2_token_account,
-      f3_mm: filler_3_mm_address,
-      f3_cfg: filler_3_mm_config_pda,
-      f3_enc: filler_3_mm_encumbrance_pda,
-      f3_liab: filler_3_mm_liability_token_account,
-      f3_tok: filler_3_token_account,
-      f4_mm: filler_4_mm_address,
-      f4_cfg: filler_4_mm_config_pda,
-      f4_enc: filler_4_mm_encumbrance_pda,
-      f4_liab: filler_4_mm_liability_token_account,
-      f4_tok: filler_4_token_account,
-   };
-   settle_bet_execute_token_batch(
-      &bet_data,
-      amount_to_user_from_bet_ata,
-      bet_ata_start,
-      bet_id_bytes,
-      bet_bump_bytes,
-      &cx,
+      filler_accounts,
+      account_seed,
    )?;
 
-   apply_filler_encumbrance_updates(
-      filler_0_mm_address, filler_0_mm_encumbrance_pda, &bet_data.filler_0,
-   )?;
-   apply_filler_encumbrance_updates(
-      filler_1_mm_address, filler_1_mm_encumbrance_pda, &bet_data.filler_1,
-   )?;
-   apply_filler_encumbrance_updates(
-      filler_2_mm_address, filler_2_mm_encumbrance_pda, &bet_data.filler_2,
-   )?;
-   apply_filler_encumbrance_updates(
-      filler_3_mm_address, filler_3_mm_encumbrance_pda, &bet_data.filler_3,
-   )?;
-   apply_filler_encumbrance_updates(
-      filler_4_mm_address, filler_4_mm_encumbrance_pda, &bet_data.filler_4,
-   )?;
+   unwind_fillers_encumbrance_after_settle(&header, fillers, filler_accounts)?;
 
-   close_pda_return_rent(
-      bet_account,
-      bet_feepayer,
-   )?;
-
+   close_pda_return_rent(bet_account, bet_feepayer)?;
    Ok(())
 }
 
-fn handle_filler<'acc, 'buf>(
-   filler_slot: usize,
-   mm_address: &'acc AccountView,
-   mm_config_pda: &'acc AccountView,
-   mm_encumbrance_pda: &'acc AccountView,
-   mm_liability_token_account: &'acc AccountView,
-   token_account: &'acc AccountView,
-   filler: &'acc BetFiller,
-   user_ata: &'acc AccountView,
-   bet_account: &'acc AccountView,
-   bet_ata: &'acc AccountView,
-   mint: &'acc AccountView,
-   token_program: &'acc AccountView,
-   bet_result: BetResult,
-   batch: &mut Batch<'acc, 'buf>,
-   bet_ata_remaining: &mut u64,
-   enc_needed: &mut [bool; 5],
-   enc_bumps: &mut [u8; 5],
-) -> ProgramResult
-where
-   'acc: 'buf,
-{
-   if address_eq(&filler.mm_address, &SYSTEM_ID) {
-      return Ok(());
+/// Stake returned from the bet ATA (profit comes from each filler's liability ATA).
+pub(crate) fn user_stake_from_bet_ata(result: BetResult, amount: u64) -> Result<u64, ProgramError> {
+   match result {
+      BetResult::Won | BetResult::HalfWon |
+         BetResult::Push | BetResult::Cancelled | BetResult::RolledBack => Ok(amount),
+      BetResult::Lost => Ok(0),
+      BetResult::HalfLost => Ok(amount / 2),
+      BetResult::ModifiedWin => {
+         log!("settle_bet: ModifiedWin is parlay-only");
+         Err(ProgramError::InvalidAccountData)
+      }
+      // process() already rejected Pending / CashedOut.
+      _ => Err(ProgramError::InvalidAccountData),
    }
+}
 
-   if unlikely(!address_eq(&filler.mm_address, &mm_address.address())) {
-      log!("settle_bet: filler mm address is invalid");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-
-   verify_token_account(true, token_account, mm_config_pda, mint, token_program)?;
-
-   let Some(valid_mm_encumbrance_pda_bump) = verify_mm_encumbrance_pda(
-      mm_encumbrance_pda,
-      mm_address,
-   ) else {
-      return Err(ProgramError::InvalidInstructionData);
-   };
-
-   verify_token_account(true, mm_liability_token_account, mm_encumbrance_pda, mint, token_program)?;
-
-   let (
-      amount_to_user_from_filler_liability_token_account,
-      amount_to_filler_from_bet_ata,
-      amount_to_liability_token_account_from_bet_ata,
-   ): (u64, u64, u64) = match bet_result {
+/// Per-filler token legs: `(liability → user, bet ATA → liability ATA)`.
+fn filler_token_amounts(result: BetResult, filler: &BetFiller) -> Result<(u64, u64), ProgramError> {
+   match result {
       BetResult::Won => {
          let user_profit = calc_potential_profit(filler.amount, filler.odds_scaled)?;
-         (user_profit, 0, 0)
-      },
-      BetResult::Lost => {
-         if filler.is_potentially_netted {
-            (0, 0, filler.amount)
-         } else {
-            (0, filler.amount, 0)
-         }
-      },
+         Ok((user_profit, 0))
+      }
+      BetResult::Lost => Ok((0, filler.amount)),
       BetResult::HalfWon => {
          let half_amount = filler.amount.checked_div(2).ok_or(ProgramError::ArithmeticOverflow)?;
          let user_profit = calc_potential_profit(half_amount, filler.odds_scaled)?;
-         (user_profit, 0, 0)
-      },
+         Ok((user_profit, 0))
+      }
       BetResult::HalfLost => {
          let half_amount = filler.amount.checked_div(2).ok_or(ProgramError::ArithmeticOverflow)?;
-         if filler.is_potentially_netted {
-            (0, 0, half_amount)
-         } else {
-            (0, half_amount, 0)
-         }
-      },
-      BetResult::Push | BetResult::Cancelled | BetResult::RolledBack => {
-         (0, 0, 0)
-      },
+         Ok((0, half_amount))
+      }
+      BetResult::Push | BetResult::Cancelled | BetResult::RolledBack => Ok((0, 0)),
       BetResult::ModifiedWin => {
          log!("settle_bet: ModifiedWin is parlay-only");
-         return Err(ProgramError::InvalidInstructionData);
+         Err(ProgramError::InvalidAccountData)
       }
-      BetResult::Pending => {
-         log!("settle_bet: bet result is pending");
-         return Err(ProgramError::InvalidInstructionData);
-      }
-   };
-
-   if amount_to_user_from_filler_liability_token_account > 0 {
-      enc_needed[filler_slot] = true;
-      enc_bumps[filler_slot] = valid_mm_encumbrance_pda_bump;
-      Transfer::new(
-         mm_liability_token_account,
-         user_ata,
-         mm_encumbrance_pda,
-         amount_to_user_from_filler_liability_token_account,
-      ).into_batch(batch)?;
+      // process() already rejected Pending / CashedOut.
+      _ => Err(ProgramError::InvalidAccountData),
    }
+}
 
-   push_bet_ata_out(
-      batch,
-      bet_ata_remaining,
-      amount_to_filler_from_bet_ata,
-      bet_ata,
-      token_account,
-      bet_account,
-   )?;
-   push_bet_ata_out(
-      batch,
-      bet_ata_remaining,
-      amount_to_liability_token_account_from_bet_ata,
-      bet_ata,
-      mm_liability_token_account,
-      bet_account,
-   )?;
-
+pub(crate) fn unwind_encumbrance(mm_encumbrance_pda: &mut AccountView, delta: i64) -> ProgramResult {
+   if delta == 0 {
+      return Ok(());
+   }
+   let encumbrance = get_encumbrance(mm_encumbrance_pda)?
+      .checked_sub(delta).ok_or(ProgramError::ArithmeticOverflow)?;
+   unsafe {
+      write_i64_le_unchecked(
+         mm_encumbrance_pda.data_mut_ptr(),
+         MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
+         encumbrance,
+      );
+   }
    Ok(())
 }
 
-/// SPL token batch CPI + enc signer prep. `#[inline(never)]` so large `MaybeUninit` buffers are not on `process`'s stack.
+/// After token CPI, unwind each filler's encumbrance / netting book.
+pub(crate) fn unwind_fillers_encumbrance_after_settle(
+   header: &BetAccountHeader,
+   fillers: &[BetFiller],
+   filler_accounts: &mut [AccountView],
+) -> ProgramResult {
+   let num_fillers = fillers.len();
+   let event_id_wire = header.market_id.event_id.as_wire_bytes();
+   for i in 0..num_fillers {
+      let filler = fillers[i];
+      if filler.amount == 0 && filler.reserved_profit == 0 {
+         continue;
+      }
+      if unlikely(address_eq(&filler.mm_address, &SYSTEM_ID)) {
+         log!("settle_bet: filler mm address is invalid");
+         return Err(ProgramError::InvalidAccountData);
+      }
+      let profit = filler.reserved_profit;
+      let base = i * ACCOUNTS_PER_FILLER;
+      let drop = if filler.is_potentially_netted {
+         if !verify_netting_pda(
+            &filler_accounts[base + 4],
+            &filler_accounts[base],
+            &event_id_wire,
+         ) {
+            log!("settle_bet: invalid netting pda");
+            return Err(ProgramError::InvalidAccountData);
+         }
+         let peak_delta = apply_settle_netting(
+            &mut filler_accounts[base + 4],
+            &header.market_id,
+            header.side,
+            profit,
+         )?;
+         peak_delta.checked_neg().ok_or(ProgramError::ArithmeticOverflow)?
+      } else {
+         if unlikely(!address_eq(filler_accounts[base + 4].address(), &SYSTEM_ID)) {
+            log!("settle_bet: unnetted filler must pass system program as netting");
+            return Err(ProgramError::InvalidAccountData);
+         }
+         profit.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?
+      };
+      unwind_encumbrance(&mut filler_accounts[base + 2], drop)?;
+   }
+   Ok(())
+}
+
+/// SPL token batch CPI. `#[inline(never)]` so the large `MaybeUninit` buffers are not on `process`'s stack.
 #[inline(never)]
-fn settle_bet_execute_token_batch<'a>(
-   bet_data: &BetAccountData,
+pub(crate) fn settle_fillers<'a>(
+   header: &BetAccountHeader,
+   fillers: &[BetFiller],
    amount_to_user_from_bet_ata: u64,
    bet_ata_start: u64,
-   bet_id_bytes: [u8; 8],
-   bet_bump_bytes: [u8; 1],
-   cx: &SettleBetTokenBatchCx<'a>,
+   user: &'a AccountView,
+   bet_account: &'a AccountView,
+   bet_ata: &'a AccountView,
+   bet_feepayer: &'a AccountView,
+   stake_dest_ata: &'a AccountView,
+   profit_dest_ata: &'a AccountView,
+   mint: &'a AccountView,
+   token_program: &'a AccountView,
+   filler_accounts: &'a [AccountView],
+   account_seed: &'static [u8],
 ) -> ProgramResult {
+   let bet_id_bytes = header.bet_id.to_le_bytes();
+   let bet_bump_bytes = [header.bump];
    let bet_account_signer_seeds = [
-      Seed::from(BET_ACCOUNT_SEED),
-      Seed::from(cx.user.address().as_ref()),
+      Seed::from(account_seed),
+      Seed::from(user.address().as_ref()),
       Seed::from(&bet_id_bytes),
       Seed::from(&bet_bump_bytes),
    ];
 
    let mut bet_ata_remaining = bet_ata_start;
-
-   let mut enc_needed = [false; 5];
-   let mut enc_bumps = [0u8; 5];
-   let mut enc_seed_bufs = [const { MaybeUninit::<[Seed; 3]>::uninit() }; 5];
+   let mut enc_needed = [false; MAX_NUMBER_OF_MMS];
+   let mut enc_bumps = [0u8; MAX_NUMBER_OF_MMS];
+   let mut enc_seed_bufs = [const { MaybeUninit::<[Seed; 3]>::uninit() }; MAX_NUMBER_OF_MMS];
 
    let mut batch_data = [const { MaybeUninit::<u8>::uninit() }; 1 + SETTLE_BET_TOKEN_BATCH_IX_CAP * (2 + SETTLE_TOKEN_BATCH_MAX_INNER_DATA)];
    let mut batch_ix_accounts = [const { MaybeUninit::<InstructionAccount>::uninit() }; SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS];
    let mut batch_accounts = [const { MaybeUninit::<CpiAccount>::uninit() }; SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS];
-
    let mut batch = Batch::new(
       &mut batch_data,
       &mut batch_ix_accounts,
       &mut batch_accounts,
    )?;
 
-   handle_filler(
-      0,
-      cx.f0_mm,
-      cx.f0_cfg,
-      &*cx.f0_enc,
-      cx.f0_liab,
-      cx.f0_tok,
-      &bet_data.filler_0,
-      cx.user_ata,
-      cx.bet_account,
-      cx.bet_ata,
-      cx.mint,
-      cx.token_program,
-      bet_data.result,
-      &mut batch,
-      &mut bet_ata_remaining,
-      &mut enc_needed,
-      &mut enc_bumps,
-   )?;
-   handle_filler(
-      1,
-      cx.f1_mm,
-      cx.f1_cfg,
-      &*cx.f1_enc,
-      cx.f1_liab,
-      cx.f1_tok,
-      &bet_data.filler_1,
-      cx.user_ata,
-      cx.bet_account,
-      cx.bet_ata,
-      cx.mint,
-      cx.token_program,
-      bet_data.result,
-      &mut batch,
-      &mut bet_ata_remaining,
-      &mut enc_needed,
-      &mut enc_bumps,
-   )?;
-   handle_filler(
-      2,
-      cx.f2_mm,
-      cx.f2_cfg,
-      &*cx.f2_enc,
-      cx.f2_liab,
-      cx.f2_tok,
-      &bet_data.filler_2,
-      cx.user_ata,
-      cx.bet_account,
-      cx.bet_ata,
-      cx.mint,
-      cx.token_program,
-      bet_data.result,
-      &mut batch,
-      &mut bet_ata_remaining,
-      &mut enc_needed,
-      &mut enc_bumps,
-   )?;
-   handle_filler(
-      3,
-      cx.f3_mm,
-      cx.f3_cfg,
-      &*cx.f3_enc,
-      cx.f3_liab,
-      cx.f3_tok,
-      &bet_data.filler_3,
-      cx.user_ata,
-      cx.bet_account,
-      cx.bet_ata,
-      cx.mint,
-      cx.token_program,
-      bet_data.result,
-      &mut batch,
-      &mut bet_ata_remaining,
-      &mut enc_needed,
-      &mut enc_bumps,
-   )?;
-   handle_filler(
-      4,
-      cx.f4_mm,
-      cx.f4_cfg,
-      &*cx.f4_enc,
-      cx.f4_liab,
-      cx.f4_tok,
-      &bet_data.filler_4,
-      cx.user_ata,
-      cx.bet_account,
-      cx.bet_ata,
-      cx.mint,
-      cx.token_program,
-      bet_data.result,
-      &mut batch,
-      &mut bet_ata_remaining,
-      &mut enc_needed,
-      &mut enc_bumps,
-   )?;
+   let num_fillers = fillers.len();
+   for i in 0..num_fillers {
+      let filler = fillers[i];
+      // Partial cashout can leave a slot at 0. Keep the filler for revert-by-index; skip work.
+      if filler.amount == 0 {
+         continue;
+      }
+      if unlikely(address_eq(&filler.mm_address, &SYSTEM_ID)) {
+         log!("settle_bet: filler mm address is invalid");
+         return Err(ProgramError::InvalidAccountData);
+      }
+
+      let base = i * ACCOUNTS_PER_FILLER;
+      let mm = &filler_accounts[base];
+      let mm_config = &filler_accounts[base + 1];
+      let mm_enc = &filler_accounts[base + 2];
+      let mm_liab = &filler_accounts[base + 3];
+
+      if unlikely(!address_eq(&filler.mm_address, &mm.address())) {
+         log!("settle_bet: filler mm address is invalid");
+         return Err(ProgramError::InvalidAccountData);
+      }
+      if unlikely(!verify_mm_config_pda(mm_config, mm)) {
+         log!("settle_bet: invalid mm config pda");
+         return Err(ProgramError::InvalidAccountData);
+      }
+      let Some(enc_bump) = verify_mm_encumbrance_pda(mm_enc, mm) else {
+         return Err(ProgramError::InvalidAccountData);
+      };
+      verify_token_account(true, mm_liab, mm_enc, mint, token_program)?;
+
+      let (liability_to_user, bet_to_liability) =
+         filler_token_amounts(header.result, &filler)?;
+
+      // Win (or half-win): pay profit from this MM's reserved liability.
+      // Cashout dest is the filling MM liability ATA (may equal this ATA when the same MM cashed out).
+      if liability_to_user > 0 && !address_eq(mm_liab.address(), profit_dest_ata.address()) {
+         Transfer::new(mm_liab, profit_dest_ata, mm_enc, liability_to_user).into_batch(&mut batch)?;
+         enc_needed[i] = true;
+         enc_bumps[i] = enc_bump;
+      }
+
+      // Loss: lost stake goes into the liability ATA (never the MM wallet).
+      push_bet_ata_out(
+         &mut batch,
+         &mut bet_ata_remaining,
+         bet_to_liability,
+         bet_ata,
+         mm_liab,
+         bet_account,
+      )?;
+   }
 
    push_bet_ata_out(
       &mut batch,
       &mut bet_ata_remaining,
       amount_to_user_from_bet_ata,
-      cx.bet_ata,
-      cx.user_ata,
-      cx.bet_account,
+      bet_ata,
+      stake_dest_ata,
+      bet_account,
    )?;
 
    let dust_to_user = bet_ata_remaining;
@@ -502,28 +452,21 @@ fn settle_bet_execute_token_batch<'a>(
          &mut batch,
          &mut bet_ata_remaining,
          dust_to_user,
-         cx.bet_ata,
-         cx.user_ata,
-         cx.bet_account,
+         bet_ata,
+         stake_dest_ata,
+         bet_account,
       )?;
    }
-
    if unlikely(bet_ata_remaining != 0) {
       log!("settle_bet: bet ata remaining balance after batch");
-      return Err(ProgramError::InvalidInstructionData);
+      return Err(ProgramError::InvalidAccountData);
    }
 
-   CloseAccount::new(cx.bet_ata, cx.bet_feepayer, cx.bet_account).into_batch(&mut batch)?;
+   CloseAccount::new(bet_ata, bet_feepayer, bet_account).into_batch(&mut batch)?;
 
-   for i in 0..5 {
+   for i in 0..num_fillers {
       if enc_needed[i] {
-         let mm: &AccountView = match i {
-            0 => &*cx.f0_mm,
-            1 => &*cx.f1_mm,
-            2 => &*cx.f2_mm,
-            3 => &*cx.f3_mm,
-            _ => &*cx.f4_mm,
-         };
+         let mm = &filler_accounts[i * ACCOUNTS_PER_FILLER];
          enc_seed_bufs[i].write([
             Seed::from(MM_ENCUMBRANCE_PDA_SEED),
             Seed::from(mm.address().as_ref()),
@@ -532,77 +475,17 @@ fn settle_bet_execute_token_batch<'a>(
       }
    }
 
-   let s_bet = Signer::from(&bet_account_signer_seeds);
-   let mut enc_signers = [const { MaybeUninit::<Signer>::uninit() }; 5];
-   let mut n_enc_signers = 0usize;
-   for i in 0..5 {
+   let mut signers = [const { MaybeUninit::<Signer>::uninit() }; 1 + MAX_NUMBER_OF_MMS];
+   signers[0].write(Signer::from(&bet_account_signer_seeds));
+   let mut n_signers = 1usize;
+   for i in 0..num_fillers {
       if enc_needed[i] {
-         enc_signers[n_enc_signers].write(Signer::from(unsafe { enc_seed_bufs[i].assume_init_ref() }));
-         n_enc_signers += 1;
+         signers[n_signers].write(Signer::from(unsafe { enc_seed_bufs[i].assume_init_ref() }));
+         n_signers += 1;
       }
    }
-
-   match n_enc_signers {
-      0 => batch.invoke_signed(core::slice::from_ref(&s_bet))?,
-      1 => {
-         let e0 = unsafe { core::ptr::read(enc_signers[0].as_ptr().cast::<Signer>()) };
-         batch.invoke_signed(&[s_bet, e0])?;
-      },
-      2 => {
-         let e0 = unsafe { core::ptr::read(enc_signers[0].as_ptr().cast::<Signer>()) };
-         let e1 = unsafe { core::ptr::read(enc_signers[1].as_ptr().cast::<Signer>()) };
-         batch.invoke_signed(&[s_bet, e0, e1])?;
-      },
-      3 => {
-         let e0 = unsafe { core::ptr::read(enc_signers[0].as_ptr().cast::<Signer>()) };
-         let e1 = unsafe { core::ptr::read(enc_signers[1].as_ptr().cast::<Signer>()) };
-         let e2 = unsafe { core::ptr::read(enc_signers[2].as_ptr().cast::<Signer>()) };
-         batch.invoke_signed(&[s_bet, e0, e1, e2])?;
-      },
-      4 => {
-         let e0 = unsafe { core::ptr::read(enc_signers[0].as_ptr().cast::<Signer>()) };
-         let e1 = unsafe { core::ptr::read(enc_signers[1].as_ptr().cast::<Signer>()) };
-         let e2 = unsafe { core::ptr::read(enc_signers[2].as_ptr().cast::<Signer>()) };
-         let e3 = unsafe { core::ptr::read(enc_signers[3].as_ptr().cast::<Signer>()) };
-         batch.invoke_signed(&[s_bet, e0, e1, e2, e3])?;
-      },
-      _ => {
-         let e0 = unsafe { core::ptr::read(enc_signers[0].as_ptr().cast::<Signer>()) };
-         let e1 = unsafe { core::ptr::read(enc_signers[1].as_ptr().cast::<Signer>()) };
-         let e2 = unsafe { core::ptr::read(enc_signers[2].as_ptr().cast::<Signer>()) };
-         let e3 = unsafe { core::ptr::read(enc_signers[3].as_ptr().cast::<Signer>()) };
-         let e4 = unsafe { core::ptr::read(enc_signers[4].as_ptr().cast::<Signer>()) };
-         batch.invoke_signed(&[s_bet, e0, e1, e2, e3, e4])?;
-      },
-   }
-
-   Ok(())
-}
-
-fn apply_filler_encumbrance_updates(
-   mm_address: &AccountView,
-   mm_encumbrance_pda: &mut AccountView,
-   filler: &BetFiller,
-) -> ProgramResult {
-   if address_eq(&filler.mm_address, &SYSTEM_ID) {
-      return Ok(());
-   }
-   if unlikely(!address_eq(&filler.mm_address, &mm_address.address())) {
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   if filler.encumbrance_delta != 0 {
-      let mut encumbrance = get_encumbrance(mm_encumbrance_pda)?;
-      encumbrance = encumbrance
-         .checked_sub(filler.encumbrance_delta)
-         .ok_or_else(|| ProgramError::ArithmeticOverflow)?;
-
-      unsafe {
-         write_i64_le_unchecked(
-            mm_encumbrance_pda.data_mut_ptr(),
-            MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
-            encumbrance
-         );
-      }
-   }
+   batch.invoke_signed(unsafe {
+      core::slice::from_raw_parts(signers.as_ptr().cast::<Signer>(), n_signers)
+   })?;
    Ok(())
 }

@@ -13,10 +13,10 @@ use solana_program_error::ProgramError;
 use solana_program_option::COption;
 use solana_program_pack::Pack;
 use solana_pubkey::Pubkey;
-use solana_sdk_ids::address_lookup_table;
 use spl_token_interface::state::{Account as TokenAccount, AccountState, Mint};
 
-use spamm_aggregator::state::{EventId, EventStateData, MarketId, EVENT_STATE_LEN};
+use spamm_aggregator::constants::{ADDRESS_LEN, U64_LEN};
+use spamm_aggregator::state::{EventId, EventStateData, MarketId, EVENT_STATE_HEADER_LEN};
 use zeropod::ZeroPodFixed;
 
 use super::fixtures::*;
@@ -68,28 +68,43 @@ pub fn assert_program_err(res: &InstructionResult, expected: ProgramError) {
    }
 }
 
+/// Assert a [`spamm_aggregator::errors::SpammError`] custom code.
+pub fn assert_spamm_err(res: &InstructionResult, err: spamm_aggregator::errors::SpammError) {
+   assert_program_err(res, ProgramError::Custom(err as u32));
+}
+
 fn deploy_dir() -> PathBuf {
    PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("target/deploy")
 }
 
-/// Prefer the MM workspace artifact so tests do not run a stale `target/deploy` copy.
+/// Prefer the newest MM `.so` among workspace build outputs (deploy dir can lag `sbpfv3` release).
 fn mm_so_path() -> PathBuf {
-   let external = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-      .join("../../market_maker/program/target/deploy/spamm_market_maker.so");
-   if external.exists() {
-      return external;
-   }
-   deploy_dir().join("spamm_market_maker.so")
+   let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+   let candidates = [
+      manifest.join("../../market_maker/program/target/deploy/spamm_market_maker.so"),
+      manifest.join("../../market_maker/program/target/sbpfv3-solana-solana/release/spamm_market_maker.so"),
+      manifest.join("target/deploy/spamm_market_maker.so"),
+      manifest.join("target/sbpfv3-solana-solana/release/spamm_market_maker.so"),
+   ];
+   newest_existing_path(&candidates).unwrap_or_else(|| deploy_dir().join("spamm_market_maker.so"))
 }
 
-/// Prefer the alt_stub crate artifact so tests do not run a stale `target/deploy` copy.
-fn alt_stub_so_path() -> PathBuf {
-   let built = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-      .join("tests/spamm_mollusk/alt_stub/target/deploy/spamm_alt_stub.so");
-   if built.exists() {
-      return built;
-   }
-   deploy_dir().join("spamm_alt_stub.so")
+/// Prefer the newest aggregator `.so` among workspace build outputs.
+fn agg_so_path() -> PathBuf {
+   let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+   let candidates = [
+      manifest.join("target/deploy/spamm_aggregator.so"),
+      manifest.join("target/sbpfv3-solana-solana/release/spamm_aggregator.so"),
+   ];
+   newest_existing_path(&candidates).unwrap_or_else(|| deploy_dir().join("spamm_aggregator.so"))
+}
+
+fn newest_existing_path(candidates: &[PathBuf]) -> Option<PathBuf> {
+   candidates
+      .iter()
+      .filter(|p| p.exists())
+      .max_by_key(|p| std::fs::metadata(p).and_then(|m| m.modified()).ok())
+      .cloned()
 }
 
 pub fn system_owned_empty() -> Account {
@@ -126,33 +141,37 @@ impl Env {
          .expect("Env deploy mutex poisoned");
       let deploy = deploy_dir();
       std::env::set_var("SBF_OUT_DIR", deploy.to_string_lossy().as_ref());
-      let agg_so = deploy.join("spamm_aggregator.so");
-      let alt_src = alt_stub_so_path();
+      let agg_src = agg_so_path();
+      let agg_deploy = deploy.join("spamm_aggregator.so");
+      if agg_src != agg_deploy {
+         std::fs::copy(&agg_src, &agg_deploy).unwrap_or_else(|e| {
+            panic!("copy aggregator artifact {:?} -> {:?}: {}", agg_src, agg_deploy, e);
+         });
+      }
+      let agg_so = agg_deploy;
       let mm_src = mm_so_path();
       let mm_deploy = deploy.join("spamm_market_maker.so");
-      std::fs::copy(&mm_src, &mm_deploy).unwrap_or_else(|e| {
-         panic!("copy MM artifact {:?} -> {:?}: {}", mm_src, mm_deploy, e);
-      });
-      if !agg_so.exists() || !mm_deploy.exists() || !alt_src.exists() {
-         panic!(
-            "Missing SBF artifacts.\nExpected aggregator:\n  {:?}\nMM (after sync):\n  {:?}\nALT stub:\n  {:?}\nBuild with:\n  cargo build-sbf --manifest-path aggregator/program/Cargo.toml\n  cargo build-sbf --manifest-path market_maker/program/Cargo.toml\n  cargo build-sbf --manifest-path aggregator/program/tests/spamm_mollusk/alt_stub/Cargo.toml",
-            agg_so, mm_deploy, alt_src
-         );
-      }
-
-      let alt_deploy = deploy.join("spamm_alt_stub.so");
-      let alt_built = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
-         .join("tests/spamm_mollusk/alt_stub/target/deploy/spamm_alt_stub.so");
-      let alt_copy_src = if alt_built.exists() { alt_built } else { alt_src };
-      if alt_copy_src != alt_deploy {
-         std::fs::copy(&alt_copy_src, &alt_deploy).unwrap_or_else(|e| {
-            panic!("copy ALT stub {:?} -> {:?}: {}", alt_copy_src, alt_deploy, e);
+      if mm_src != mm_deploy {
+         std::fs::copy(&mm_src, &mm_deploy).unwrap_or_else(|e| {
+            panic!("copy MM artifact {:?} -> {:?}: {}", mm_src, mm_deploy, e);
          });
+      }
+      if !agg_so.exists() || !mm_deploy.exists() {
+         panic!(
+            "Missing SBF artifacts (Mollusk tests need compiled .so files; cargo check is not enough).\n\
+             Expected aggregator:\n  {:?}\n\
+             MM (after sync from {:?}):\n  {:?}\n\
+             From repo root, run both (pass `--features devnet` or `--features mainnet` for the aggregator):\n\
+               cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet\n\
+               cargo build-sbf --arch v3 --manifest-path market_maker/program/Cargo.toml\n\
+             Then: cd aggregator/program && cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --test-threads=1\n\
+             See .cursor/rules/mollusk-tests.mdc",
+            agg_so, mm_src, mm_deploy
+         );
       }
 
       let mut mollusk = Mollusk::new(&agg_program_id(), "spamm_aggregator");
       mollusk.add_program(&mm_program_id(), "spamm_market_maker");
-      mollusk.add_program(&address_lookup_table::id(), "spamm_alt_stub");
       token::add_program(&mut mollusk);
       associated_token::add_program(&mut mollusk);
 
@@ -177,8 +196,8 @@ impl Env {
          let (_, a) = self.mollusk.sysvars.keyed_account_for_clock_sysvar();
          a
       });
-      if acct.data.len() >= 40 {
-         acct.data[32..40].copy_from_slice(&ts.to_le_bytes());
+      if acct.data.len() >= 5 * U64_LEN {
+         acct.data[4 * U64_LEN..5 * U64_LEN].copy_from_slice(&ts.to_le_bytes());
       }
       self.upsert(pk, acct);
    }
@@ -203,10 +222,6 @@ impl Env {
       if self.get_account(&agg_program_id()).is_none() {
          self.upsert(agg_program_id(), stub.clone());
       }
-      let alt_id = address_lookup_table::id();
-      if self.get_account(&alt_id).is_none() {
-         self.upsert(alt_id, stub);
-      }
       let (ix_sysvar_pk, ix_sysvar_acct) =
          mollusk_svm::instructions_sysvar::keyed_account(core::iter::once(&ix));
       self.upsert(ix_sysvar_pk, ix_sysvar_acct);
@@ -214,6 +229,16 @@ impl Env {
       if self.get_account(&clock_pk).is_none() {
          let (_, clock_acct) = self.mollusk.sysvars.keyed_account_for_clock_sysvar();
          self.upsert(clock_pk, clock_acct);
+      }
+      let rent_pk = rent_sysvar_pubkey();
+      if self.get_account(&rent_pk).is_none() {
+         let (_, rent_acct) = self.mollusk.sysvars.keyed_account_for_rent_sysvar();
+         self.upsert(rent_pk, rent_acct);
+      }
+      for meta in &ix.accounts {
+         if self.get_account(&meta.pubkey).is_none() && !meta.is_writable {
+            self.upsert(meta.pubkey, system_owned_empty());
+         }
       }
       let res = self
          .mollusk
@@ -275,7 +300,6 @@ impl Env {
 
       self.upsert(config_pda(), system_owned_empty());
       self.upsert(mm_list_pda(), system_owned_empty());
-      self.upsert(lookup_table_pubkey(), system_owned_empty());
 
       let init = self.agg_ix(
          0,
@@ -309,13 +333,13 @@ impl Env {
       let mm_tok_ata = mm_collateral_ata();
       self.upsert(mm_tok_ata, system_owned_empty());
 
-      let mut admin_bytes = [0u8; 32];
+      let mut admin_bytes = [0u8; ADDRESS_LEN];
       admin_bytes.copy_from_slice(mm_admin().as_ref());
-      let mut mm_init_data = Vec::with_capacity(64);
+      let mut mm_init_data = Vec::with_capacity(2 * ADDRESS_LEN);
       mm_init_data.extend_from_slice(&admin_bytes);
       mm_init_data.extend_from_slice(super::rfq::rfq_signer_pubkey().as_ref());
       let mm_init = self.mm_ix(
-         1,
+         100,
          mm_init_data,
          vec![
             AccountMeta::new(mm_admin(), true),
@@ -326,6 +350,7 @@ impl Env {
             AccountMeta::new_readonly(mint_pubkey(), false),
             AccountMeta::new_readonly(tok_pk, false),
             AccountMeta::new_readonly(ata_pk, false),
+            AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
             AccountMeta::new_readonly(sys_pk, false),
          ],
       );
@@ -341,12 +366,13 @@ impl Env {
             self.upsert(es, system_owned_empty());
             let ev_wire = eid.as_wire_bytes().to_vec();
             let ev_ix = self.mm_ix(
-               9,
+               110,
                ev_wire,
                vec![
                   AccountMeta::new(mm_admin(), true),
                   AccountMeta::new_readonly(mm_config_pda(), false),
                   AccountMeta::new(es, false),
+                  AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
                   AccountMeta::new_readonly(sys_pk, false),
                ],
             );
@@ -363,12 +389,13 @@ impl Env {
          data.extend_from_slice(&market_id_wire_bytes(mid));
          data.extend_from_slice(oracle_body);
          let m_ix = self.mm_ix(
-            10,
+            111,
             data,
             vec![
                AccountMeta::new(mm_admin(), true),
                AccountMeta::new_readonly(mm_config_pda(), false),
                AccountMeta::new(md, false),
+               AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
                AccountMeta::new_readonly(sys_pk, false),
             ],
          );
@@ -412,16 +439,15 @@ impl Env {
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
          AccountMeta::new_readonly(associated_token::ID, false),
+         AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
          AccountMeta::new_readonly(sys_pk, false),
-         AccountMeta::new(lookup_table_pubkey(), false),
-         AccountMeta::new_readonly(address_lookup_table_program_pubkey(), false),
          AccountMeta::new_readonly(mm_collateral_ata(), false),
          AccountMeta::new_readonly(mm_quote_buffer_pda(), false),
          AccountMeta::new_readonly(mm_parlay_quote_buffer_pda(), false),
       ]
    }
 
-   /// Seed empty encumbrance + liability slots, then run on-chain `register_mm` (creates PDA + ATA + ALT extend).
+   /// Seed empty encumbrance + liability slots, then run on-chain `register_mm` (creates PDA + ATA).
    pub fn register_mm_execute(&mut self) -> InstructionResult {
       self.upsert(encumbrance_pda(), system_owned_empty());
       self.upsert(liability_token_ata(), system_owned_empty());
@@ -462,13 +488,14 @@ impl Env {
       self.upsert(np, system_owned_empty());
       let data = eid.as_wire_bytes().to_vec();
       let ix = self.agg_ix(
-         50,
+         40,
          data,
          vec![
             AccountMeta::new(mm_admin(), true),
-            AccountMeta::new_readonly(mm_config_pda(), false),
             AccountMeta::new_readonly(mm_program_id(), false),
+            AccountMeta::new_readonly(mm_config_pda(), false),
             AccountMeta::new(np, false),
+            AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
             AccountMeta::new_readonly(sys_pk, false),
          ],
       );
@@ -487,15 +514,15 @@ impl Env {
          .get_account(&pk)
          .unwrap_or_else(|| panic!("patch_event_state_sequence: missing event state {pk}"))
          .clone();
-      if acct.data.len() > EVENT_STATE_LEN {
-         acct.data.truncate(EVENT_STATE_LEN);
+      if acct.data.len() < EVENT_STATE_HEADER_LEN {
+         panic!(
+            "patch_event_state_sequence: event_state len {} < header {}",
+            acct.data.len(),
+            EVENT_STATE_HEADER_LEN
+         );
       }
-      assert_eq!(
-         acct.data.len(),
-         EVENT_STATE_LEN,
-         "event_state len (expected on-chain wire size)"
-      );
-      let zc = <EventStateData as ZeroPodFixed>::from_bytes_mut(&mut acct.data).unwrap_or_else(
+      let header = &mut acct.data[..EVENT_STATE_HEADER_LEN];
+      let zc = <EventStateData as ZeroPodFixed>::from_bytes_mut(header).unwrap_or_else(
          |e| panic!("patch_event_state_sequence: invalid event_state wire {e:?}"),
       );
       zc.sequence.set(sequence);

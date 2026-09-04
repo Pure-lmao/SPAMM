@@ -40,7 +40,6 @@ export async function airdropUser(user: string): Promise<{ success: boolean; err
          feePayer: SOL_DONOR_SIGNER,
          instructions: [ix],
          signers: [SOL_DONOR_SIGNER],
-         useALT: false,
       });
       await sendAndConfirmSignedTransaction(clients, signed, { commitment: "confirmed" });
       return { success: true };
@@ -108,9 +107,9 @@ export async function gradeParlays() {
    const allEvents = fetchGradedStartedEvents();
    console.log("Events fetched", allEvents.size);
 
-   const gradeJobs: { mask: Uint8Array; address: Address }[] = [];
+   const gradeJobs: { mask: Uint8Array; address: Address; numLegs: number }[] = [];
    for (const bet of parlayBets) {
-      const mask = new Uint8Array(5).fill(GRADE_PARLAY_LEG_SKIP);
+      const mask = new Uint8Array(bet.data.numLegs).fill(GRADE_PARLAY_LEG_SKIP);
       let anyGrade = false;
       for (let i = 0; i < bet.data.numLegs; i++) {
          const leg = bet.data.legs[i]!;
@@ -148,18 +147,20 @@ export async function gradeParlays() {
          }
       }
       if (anyGrade) {
-         gradeJobs.push({ mask, address: bet.address });
+         gradeJobs.push({ mask, address: bet.address, numLegs: bet.data.numLegs });
       }
    }
 
-   const MAX_RESULTS_PER_TX = 25;
+   const MAX_PARLAYS_PER_TX = 25;
    if (gradeJobs.length > 0) {
-      for (let i = 0; i < gradeJobs.length; i += MAX_RESULTS_PER_TX) {
-         const batch = gradeJobs.slice(i, i + MAX_RESULTS_PER_TX);
-         const masks = batch.map((job) => job.mask);
-         const addresses = batch.map((job) => job.address);
-         const ix = await getGradeParlayIx(ADMIN_SIGNER.address, masks, addresses);
-         const sig = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+      for (let i = 0; i < gradeJobs.length; i += MAX_PARLAYS_PER_TX) {
+         const batch = gradeJobs.slice(i, i + MAX_PARLAYS_PER_TX);
+         const instructions = await Promise.all(
+            batch.map((job) =>
+               getGradeParlayIx(ADMIN_SIGNER.address, job.mask, job.address, job.numLegs),
+            ),
+         );
+         const sig = await sendAndConfirmInstructions(instructions, [ADMIN_SIGNER]);
          console.log(`Grade parlay tx: ${sig}`);
       }
    }

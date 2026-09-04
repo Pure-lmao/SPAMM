@@ -12,7 +12,6 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { Address, KeyPairSigner } from '@solana/kit';
 import {
-   BetResult,
    getEventGameState,
    getFillRfqBetIx,
    getFillRfqParlayIx,
@@ -20,9 +19,10 @@ import {
    makeSignedRfqBetFill,
    makeSignedRfqParlayFill,
    ODDS_SCALE,
+   RFQ_NETWORK_DOMAIN,
    type FillRfqBetIxData,
    type FillRfqParlayIxData,
-   type ParlayLegWire,
+   type ParlayLegQuoted,
    type Sport,
 } from 'spamm-aggregator-sdk';
 
@@ -92,14 +92,13 @@ function combinedParlayOdds(legOddsScaled: bigint, numLegs: number): bigint {
    return p;
 }
 
-const legs: ParlayLegWire[] = [
+const legs: ParlayLegQuoted[] = [
    {
       marketId,
       side: 0,
       eventStateSequence,
       eventGameState,
       oddsScaled: legOdds,
-      result: BetResult.Pending,
    },
    {
       marketId: marketId2,
@@ -107,7 +106,6 @@ const legs: ParlayLegWire[] = [
       eventStateSequence,
       eventGameState,
       oddsScaled: legOdds,
-      result: BetResult.Pending,
    },
 ];
 
@@ -136,6 +134,7 @@ export async function makeSignedBetQuote(params?: {
 }): Promise<FillRfqBetIxData> {
    const mmProgram = params?.mmProgram ?? DumbMarketMaker;
    return makeSignedRfqBetFill(RFQ_SIGNER, {
+      networkDomain: RFQ_NETWORK_DOMAIN,
       user: params?.user ?? USER_SIGNER.address,
       betId: params?.betId ?? betId,
       marketId,
@@ -166,6 +165,7 @@ export async function makeSignedParlayQuote(params?: {
    const mmProgram = params?.mmProgram ?? DumbMarketMaker;
    const combinedOdds = params?.oddsScaled ?? combinedParlayOdds(legOdds, legs.length);
    return makeSignedRfqParlayFill(RFQ_SIGNER, {
+      networkDomain: RFQ_NETWORK_DOMAIN,
       user: params?.user ?? USER_SIGNER.address,
       betId: params?.betId ?? betId,
       numLegs: legs.length,
@@ -182,16 +182,16 @@ export async function makeSignedParlayQuote(params?: {
 export async function placeRfqBet(
    fill: FillRfqBetIxData,
    mmProgram: Address = DumbMarketMaker,
-   opts?: { send?: boolean; useALT?: boolean },
+   opts?: { send?: boolean },
 ) {
-   const ix = await getFillRfqBetIx(fill, USER_SIGNER.address, USER_SIGNER.address, mmProgram);
+   const ix = await getFillRfqBetIx(fill, USER_SIGNER.address, USER_SIGNER.address, mmProgram, false);
    // console.log('fill_rfq_bet ix:', ix);
    if (opts?.send) {
-      const sig = await sendAndConfirmInstructions([ix], [USER_SIGNER], opts.useALT ?? false);
+      const sig = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
       console.log('fill_rfq_bet signature:', sig);
       return sig;
    }
-   const sim = await simulateTransaction(clients.rpc, [ix], [USER_SIGNER], opts?.useALT ?? false);
+   const sim = await simulateTransaction(clients.rpc, [ix], [USER_SIGNER]);
    console.log('fill_rfq_bet sim returnData:', sim);
    return sim;
 }
@@ -200,15 +200,15 @@ export async function placeRfqBet(
 export async function placeRfqParlay(
    fill: FillRfqParlayIxData,
    mmProgram: Address = DumbMarketMaker,
-   opts?: { send?: boolean; useALT?: boolean },
+   opts?: { send?: boolean },
 ) {
    const ix = await getFillRfqParlayIx(fill, USER_SIGNER.address, USER_SIGNER.address, mmProgram);
    if (opts?.send) {
-      const sig = await sendAndConfirmInstructions([ix], [USER_SIGNER], opts.useALT ?? false);
+      const sig = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
       console.log('fill_rfq_parlay signature:', sig);
       return sig;
    }
-   const sim = await simulateTransaction(clients.rpc, [ix], [USER_SIGNER], opts?.useALT ?? false);
+   const sim = await simulateTransaction(clients.rpc, [ix], [USER_SIGNER]);
    console.log('fill_rfq_parlay sim returnData:', sim);
    return sim;
 }
@@ -225,7 +225,7 @@ async function signAndPlaceRfqBet(send = false) {
       offerExpiry: fill.offerExpiry,
       signature: Buffer.from(fill.signature).toString('base64'),
    });
-   await placeRfqBet(fill, DumbMarketMaker, { send, useALT: true });
+   await placeRfqBet(fill, DumbMarketMaker, { send });
 }
 
 async function signAndPlaceRfqParlay(send = false) {
@@ -240,7 +240,7 @@ async function signAndPlaceRfqParlay(send = false) {
       numLegs: fill.numLegs,
       signature: Buffer.from(fill.signature).toString('base64'),
    });
-   await placeRfqParlay(fill, DumbMarketMaker, { send, useALT: true });
+   await placeRfqParlay(fill, DumbMarketMaker, { send });
 }
 
 // Uncomment to run:

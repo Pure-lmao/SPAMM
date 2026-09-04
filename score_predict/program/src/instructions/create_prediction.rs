@@ -3,7 +3,8 @@
 //! Accounts:
 //! 0. `owner` (writable signer) — pays rent; stored as account owner
 //! 1. `prediction_pda` (writable, uninitialized)
-//! 2. `system_program` (readonly)
+//! 2. `rent_sysvar` (readonly)
+//! 3. `system_program` (readonly)
 //!
 //! Instruction data (after router disc): see `parsers::CREATE_PREDICTION_IX_DATA_LEN`.
 
@@ -21,7 +22,7 @@ use pinocchio_system::instructions::CreateAccount;
 use crate::{
    ID,
    constants::PREDICTION_ACCOUNT_SEED,
-   helpers::{get_rent_local, verify_signer, verify_system_program},
+   helpers::{get_rent, verify_rent_sysvar, verify_signer, verify_system_program},
    parsers::parse_create_prediction_data,
    state::{PREDICTION_ACCOUNT_DISCRIMINATOR, PREDICTION_ACCOUNT_LEN, PredictionAccountData, PredictionAccountDataZc},
 };
@@ -29,12 +30,13 @@ use crate::{
 pub const CREATE_PREDICTION_IX_DISCRIMINATOR: u8 = 0;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
-   let [owner, prediction_pda, system_program] = accounts else {
+   let [owner, prediction_pda, rent_sysvar, system_program] = accounts else {
       log!("create_prediction: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
    verify_signer(owner)?;
+   verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
 
    if unlikely(prediction_pda.lamports() > 0 || prediction_pda.data_len() != 0) {
@@ -74,7 +76,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    CreateAccount {
       from: owner,
       to: prediction_pda,
-      lamports: get_rent_local(space),
+      lamports: get_rent(rent_sysvar, space)?,
       space,
       owner: &ID,
    }

@@ -9,7 +9,7 @@ import {
    ODDS_SCALE,
    type FillParlayIxData,
    type MarketId,
-   type ParlayLegWire,
+   type ParlayLegSel,
    type ProxyQuoteData,
 } from "spamm-aggregator-sdk";
 import { DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG } from "./chainIds";
@@ -106,6 +106,7 @@ export async function buildAndSignFillBetTx(params: {
       minOddsScaled: bigint;
    };
    mmPrograms: readonly Address[];
+   hasActiveNetting?: boolean;
 }): Promise<ReturnType<typeof buildSignV0Transaction>> {
    const ix = await getFillBetIx(
       {
@@ -120,19 +121,19 @@ export async function buildAndSignFillBetTx(params: {
       params.userAddress,
       params.userAddress,
       params.mmPrograms,
+      params.hasActiveNetting ?? false,
    );
    return buildSignV0Transaction(params.rpc, {
       feePayer: params.walletSigner,
       instructions: [ix],
       signers: [params.walletSigner],
-      useALT: true,
    });
 }
 
 export async function runMmParlayQuoteFlow(params: {
    rpc: Rpc<SolanaRpcApi>;
    userAddress: Address;
-   legs: readonly ParlayLegWire[];
+   legs: readonly ParlayLegSel[];
    amount: bigint;
 }): Promise<QuoteFlowResult & { bestMm: MmQuoteRow | null }> {
    const errors: string[] = [];
@@ -190,6 +191,5 @@ export async function buildAndSignFillParlayTx(params: {
       feePayer: params.walletSigner,
       instructions: [ix],
       signers: [params.walletSigner],
-      useALT: true,
    });
 }

@@ -22,7 +22,7 @@ pinocchio-token = { version = "0.6.0", default-features = false }
 pinocchio-associated-token-account = "0.4.0"
 solana-define-syscall = { version = "5.0", features = ["unstable-static-syscalls"] }
 spamm_aggregator = { path = "../../aggregator/program", default-features = false }
-zeropod = { version = "0.3.3", features = ["solana-address"] }
+zeropod = { version = "0.3.4", features = ["solana-address"] }
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [

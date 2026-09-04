@@ -3,11 +3,12 @@
 use pinocchio::{error::ProgramError, hint::unlikely, Address};
 use pinocchio_log::log;
 
-use brine_ed25519::hasher::Sha512;
 use brine_ed25519::verify;
 
+use crate::errors::SpammError;
+
 /// Verify an ed25519 signature over `message` using the MM config `rfq_signer` pubkey.
-#[inline(always)]
+#[inline(never)]
 pub fn verify_rfq_ed25519_signature(
    rfq_signer: &Address,
    signature: &[u8; 64],
@@ -17,8 +18,8 @@ pub fn verify_rfq_ed25519_signature(
       log!("verify_rfq_ed25519_signature: empty message");
       return Err(ProgramError::InvalidInstructionData);
    }
-   verify::<Sha512>(rfq_signer.as_array(), signature, &[message]).map_err(|_| {
+   verify(rfq_signer, signature, &[message]).map_err(|_| {
       log!("verify_rfq_ed25519_signature: signature invalid");
-      ProgramError::InvalidInstructionData
+      SpammError::InvalidRfqSignature.into()
    })
 }

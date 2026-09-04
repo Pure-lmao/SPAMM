@@ -75,6 +75,8 @@ async function runMarketMakerCycle() {
                   mkt: market.id,
                   period: market.period_id,
                   isPregame: true,
+                  // Production: set from API market metadata. Placeholder until wired.
+                  operator: ADMIN_SIGNER.address,
                };
                try {
                   const _marketData = await withRpcRetry(() =>
@@ -251,5 +253,5 @@ if (import.meta.main === true) {
 }
 
 function scaleOdds(odds: number): bigint {
-   return BigInt(Math.floor(odds * 10_000));
+   return BigInt(Math.floor(odds * Number(ODDS_SCALE)));
 }

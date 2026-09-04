@@ -10,7 +10,7 @@ use mollusk_svm_programs_token::token;
 
 use crate::common::{
    admin, assert_program_err, bet_feepayer, config_pda, init_program_account_metas, init_program_ix_data, mm_admin,
-   mint_pubkey, mm_list_pda, read_config_authority_status, record_cu_success, rich_signer_account, lookup_table_pubkey,
+   mint_pubkey, mm_list_pda, read_config_authority_status, record_cu_success, rich_signer_account,
    system_owned_empty, user, wrong_signer, Env,
 };
 
@@ -44,7 +44,6 @@ fn init_program_success_creates_pdas() {
    seed_funded_actors(&mut env);
    env.upsert(config_pda(), system_owned_empty());
    env.upsert(mm_list_pda(), system_owned_empty());
-   env.upsert(lookup_table_pubkey(), system_owned_empty());
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(0, init_program_ix_data(), init_program_account_metas(admin(), true, sys_pk));
    let r = env.run_ix(ix);
@@ -76,7 +75,6 @@ fn init_program_wrong_config_pda_seeds() {
    seed_funded_actors(&mut env);
    env.upsert(config_pda(), system_owned_empty());
    env.upsert(mm_list_pda(), system_owned_empty());
-   env.upsert(lookup_table_pubkey(), system_owned_empty());
    let bad = Pubkey::new_from_array([0x55; 32]);
    env.upsert(bad, system_owned_empty());
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
@@ -92,7 +90,6 @@ fn init_program_wrong_mm_list_pda() {
    let mut env = Env::new();
    seed_funded_actors(&mut env);
    env.upsert(config_pda(), system_owned_empty());
-   env.upsert(lookup_table_pubkey(), system_owned_empty());
    let bad_list = Pubkey::new_from_array([0x66; 32]);
    env.upsert(bad_list, system_owned_empty());
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
@@ -109,7 +106,6 @@ fn init_program_missing_admin_signer() {
    seed_funded_actors(&mut env);
    env.upsert(config_pda(), system_owned_empty());
    env.upsert(mm_list_pda(), system_owned_empty());
-   env.upsert(lookup_table_pubkey(), system_owned_empty());
    let sys_pk = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(0, init_program_ix_data(), init_program_account_metas(admin(), false, sys_pk));
    let r = env.run_ix(ix);

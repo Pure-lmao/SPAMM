@@ -58,7 +58,7 @@ fn register_mm_wrong_mm_admin_signer() {
    assert_program_err(&r, ProgramError::IncorrectAuthority);
 }
 
-/// `mm_program` is not executable (`verify_mm_program_executable` → `InvalidAccountOwner`).
+/// `mm_program` is not executable (`verify_mm_program_executable` → `IncorrectProgramId`).
 #[test]
 fn register_mm_non_executable_mm_program() {
    let mut env = Env::new();
@@ -71,7 +71,7 @@ fn register_mm_non_executable_mm_program() {
    env.upsert(liability_token_ata(), crate::common::system_owned_empty());
    let ix = env.agg_ix(2, vec![], register_metas(mm_admin(), user()));
    let r = env.run_ix(ix);
-   assert_program_err(&r, ProgramError::InvalidAccountOwner);
+   assert_program_err(&r, ProgramError::IncorrectProgramId);
 }
 
 /// Executable account at wrong pubkey: config PDA is owned by the real MM program, not this account.
@@ -154,7 +154,7 @@ fn register_mm_wrong_mint_rejected() {
    metas[7] = AccountMeta::new_readonly(fake_mint, false);
    let ix = env.agg_ix(2, vec![], metas);
    let r = env.run_ix(ix);
-   assert_program_err(&r, ProgramError::InvalidAccountOwner);
+   assert_program_err(&r, ProgramError::InvalidAccountData);
 }
 
 #[test]
@@ -168,10 +168,10 @@ fn register_mm_wrong_system_program_rejected() {
    env.upsert(encumbrance_pda(), crate::common::system_owned_empty());
    env.upsert(liability_token_ata(), crate::common::system_owned_empty());
    let mut metas = register_metas(mm_admin(), mm_program_id());
-   metas[10] = AccountMeta::new_readonly(user(), false);
+   metas[11] = AccountMeta::new_readonly(user(), false);
    let ix = env.agg_ix(2, vec![], metas);
    let r = env.run_ix(ix);
-   assert_program_err(&r, ProgramError::InvalidAccountOwner);
+   assert_program_err(&r, ProgramError::IncorrectProgramId);
 }
 
 #[test]

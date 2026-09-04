@@ -1,4 +1,4 @@
-import { decodeAggregatorInstructionData, decodeMmAccountConfig, getBetPda, getBetsData, getChangeConfigStatusIx, getConfigPda, getDeregisterMmIx, getForceClosePdaIx, getGradeBetsIx, getInitProgramIx, getMmAccountConfigDecoder, getMmConfigPda, getMmEncumbranceData, getMmListData, getMmListPda, getNettingPda, getParlayBetPda, getParlaysData, getRecentSlot, getSettleBetIx, getSettleParlayIx, getWriteArbitraryDataIx, readAccountDataRaw } from "spamm-aggregator-sdk";
+import { decodeAggregatorInstructionData, decodeMmAccountConfig, getBetPda, getBetsData, getChangeConfigStatusIx, getConfigPda, getDeregisterMmIx, getForceClosePdaIx, getGradeBetsIx, getGradeParlayIx, getInitProgramIx, getMmAccountConfigDecoder, getMmConfigPda, getMmEncumbranceData, getMmListData, getMmListPda, getNettingPda, getParlayBetPda, getParlaysData, getSettleBetIx, getSettleParlayIx, getWriteArbitraryDataIx, readAccountDataRaw } from "spamm-aggregator-sdk";
 import { loadKeypairSignerFromJsonFile } from "./utils.ts";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
 import type { Address } from "@solana/kit";
@@ -14,10 +14,7 @@ export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
 );
 
 async function initProgram() {
-   const clients = createRpcClients();
-   const currentSlot = await getRecentSlot(clients.rpc);
-   const recentSlot = currentSlot - 5n;
-   const ix = await getInitProgramIx(ADMIN_SIGNER.address, recentSlot);
+   const ix = await getInitProgramIx(ADMIN_SIGNER.address);
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
@@ -36,19 +33,25 @@ async function gradeBets(bets: Address[], results: Uint8Array) {
    console.log(txResult);
 }
 // gradeBets([
+//    (await getBetPda(USER_SIGNER.address, 10n))[0],
+// ], new Uint8Array([1])).catch(console.error);
+
+async function gradeParlay(parlayPda: Address, legGradeMask: Uint8Array) {
+   const ix = await getGradeParlayIx(ADMIN_SIGNER.address, legGradeMask, parlayPda);
+   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// gradeParlay(
 //    (await getParlayBetPda(USER_SIGNER.address, 10n))[0],
-//    (await getParlayBetPda(USER_SIGNER.address, 11n))[0],
-// ], new Uint8Array([1, 2])).catch(console.error);
+//    new Uint8Array([1, 2]), // one BetResult byte per leg (Won, Lost)
+//    2,
+// ).catch(console.error);
 
 async function deregisterMm(mm: Address) {
    const allBets = await getBetsData(clients.rpc);
    const openBets = [];
    for (const bet of allBets) {
-      if (bet.data.filler0.mmAddress === mm
-         || bet.data.filler1.mmAddress === mm 
-         || bet.data.filler2.mmAddress === mm
-         || bet.data.filler3.mmAddress === mm
-         || bet.data.filler4.mmAddress === mm) {
+      if (bet.data.fillers.some((f) => f.mmAddress === mm)) {
          console.log(bet.data.betId, bet.data.result);
          openBets.push(bet);
       }
@@ -64,7 +67,7 @@ async function deregisterMm(mm: Address) {
       const txInstructions = instructions.slice(i, i + IXS_PER_TX);
       // const simResult = await simulateTransaction(clients.rpc, txInstructions, [ADMIN_SIGNER], true);
       // console.log(simResult);
-      const txResult = await sendAndConfirmInstructions(txInstructions, [ADMIN_SIGNER], true);
+      const txResult = await sendAndConfirmInstructions(txInstructions, [ADMIN_SIGNER]);
       console.log(txResult);
    }
 
@@ -90,7 +93,7 @@ async function deregisterMm(mm: Address) {
       const txInstructions = instructions2.slice(i, i + IXS_PER_TX2);
       // const simResult = await simulateTransaction(clients.rpc, txInstructions, [ADMIN_SIGNER], true);
       // console.log(simResult);
-      const txResult = await sendAndConfirmInstructions(txInstructions, [ADMIN_SIGNER], true);
+      const txResult = await sendAndConfirmInstructions(txInstructions, [ADMIN_SIGNER]);
       console.log(txResult);
    }
 
@@ -114,7 +117,7 @@ async function forceClosePda(pda: Address) {
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
-const [pda] = await getConfigPda();
+// const [pda] = await getConfigPda();
 // forceClosePda(pda).catch(console.error);
 
 async function writeArbitraryData(

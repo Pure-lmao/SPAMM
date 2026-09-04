@@ -3,9 +3,7 @@ import { address, type Rpc, type SolanaRpcApi } from "@solana/kit";
 import {
    getBetsData,
    getParlaysData,
-   SYSTEM_PROGRAM_ID,
    type BetAccountData,
-   type BetFiller,
    type BetResult,
    type MarketId,
    type ParlayBetAccountData,
@@ -14,14 +12,6 @@ import { type BetRecord, type Selection } from "../../../api/quickIndexer";
 import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
-
-const emptyFiller: BetFiller = {
-   mmAddress: SYSTEM_PROGRAM_ID,
-   amount: 0n,
-   oddsScaled: 0n,
-   isPotentiallyNetted: false,
-   encumbranceDelta: 0n,
-};
 
 export type WalletParlayLeg = {
    marketId: MarketId;
@@ -233,11 +223,8 @@ function closedBetRecordToSingleRow(rec: BetRecord): WalletSingleRow | null {
             awaySecondary: 0,
          },
          result: rec.result,
-         filler0: emptyFiller,
-         filler1: emptyFiller,
-         filler2: emptyFiller,
-         filler3: emptyFiller,
-         filler4: emptyFiller,
+         numFillers: 0,
+         fillers: [],
       },
    };
 }

@@ -1,6 +1,6 @@
 //! Close the event-state PDA created in `init_event` and return rent to `auth`.
 //!
-//! Accounts: **(4)** — same ordering as `init_event`
+//! Accounts: **(4)**
 //! 0. `auth` (signer, writable) — must match `MmAccountConfig::admin` on `config_pda`
 //! 1. `config_pda` (readonly)
 //! 2. `event_state_pda` (writable)
@@ -13,15 +13,21 @@ use pinocchio::{
    error::ProgramError, hint::unlikely,
 };
 use pinocchio_log::log;
-use spamm_aggregator::helpers::{verify_signer, verify_system_program};
-use spamm_aggregator::readers::read_u8_unchecked;
-use spamm_aggregator::state::{EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN};
+use crate::{
+   mm_helpers::{find_event_state_pda, verify_mm_config_auth},
+   state::decode_close_event_id,
+};
+use spamm_aggregator::{
+   helpers::{close_pda_return_rent, verify_signer, verify_system_program},
+   readers::read_u8_unchecked,
+   state::{
+      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_DISCRIMINATOR_OFFSET, EVENT_STATE_BUMP_OFFSET,
+      EVENT_STATE_HEADER_LEN,
+   },
+};
 
-use crate::mm_helpers::{close_pda_return_rent, find_event_state_pda, verify_mm_config_auth};
-use crate::state::InitEventIxPayload;
 
-
-pub const CLOSE_EVENT_IX_DISCRIMINATOR: u8 = 11;
+pub const CLOSE_EVENT_IX_DISCRIMINATOR: u8 = 112;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -34,8 +40,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   let parsed = InitEventIxPayload::decode(data)?;
-   let event_id = parsed.event_id;
+   let event_id = decode_close_event_id(data)?;
 
    verify_signer(auth)?;
    verify_system_program(system_program)?;
@@ -52,17 +57,18 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::InvalidSeeds);
    }
 
-   if unlikely(event_state_pda.data_len() != EVENT_STATE_LEN) {
+   if unlikely(event_state_pda.data_len() < EVENT_STATE_HEADER_LEN) {
       log!("close_event: event state data length invalid");
       return Err(ProgramError::InvalidAccountData);
    }
-   if unlikely(unsafe { read_u8_unchecked(event_state_pda.data_ptr(), 0) } != EVENT_STATE_DISCRIMINATOR) {
+   if unlikely(unsafe { read_u8_unchecked(event_state_pda.data_ptr(), EVENT_STATE_DISCRIMINATOR_OFFSET) } != EVENT_STATE_DISCRIMINATOR) {
       log!("close_event: event state discriminator invalid");
       return Err(ProgramError::InvalidAccountData);
    }
-   if unlikely(unsafe { read_u8_unchecked(event_state_pda.data_ptr(), 1) } != bump) {
+   if unlikely(unsafe { read_u8_unchecked(event_state_pda.data_ptr(), EVENT_STATE_BUMP_OFFSET) } != bump) {
       log!("close_event: bump mismatch");
-      return Err(ProgramError::InvalidAccountData);   }
+      return Err(ProgramError::InvalidAccountData);   
+   }
 
    close_pda_return_rent(event_state_pda, auth)
 }

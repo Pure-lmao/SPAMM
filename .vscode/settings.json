@@ -4,5 +4,17 @@
     "market_maker/program/Cargo.toml",
     "score_predict/program/Cargo.toml"
   ],
-  "rust-analyzer.cargo.cfgs": ["target_os=\"solana\""]
+  "rust-analyzer.cargo.cfgs": [
+    "target_os=\"solana\""
+  ],
+  "rust-analyzer.cargo.features": ["bpf-entrypoint"],
+  "cSpell.words": [
+    "cashout",
+    "cashouts",
+    "freebet",
+    "freebets",
+    "orderbooks",
+    "pregame",
+    "SPAMM"
+  ]
 }

@@ -4,10 +4,16 @@
 
 0 - Invalid
 1 - Soccer
-3 - American Football
-4 - Baseball
-5 - Basketball
-6 - Ice Hockey
+2 - American Football
+3 - Baseball
+4 - Basketball
+5 - Ice Hockey
+6 - Tennis
+101 - Counter-Strike 2
+102 - Dota 2
+103 - League of Legends
+104 - Valorant
+
 ... More to be added
 
 ## League (u16 - max 65535)
@@ -42,8 +48,6 @@ Digits 3-6 are the country code from ISO 3166-1 numeric with additions for non-I
 | Olympic Games | 930 |
 | International Friendly | 950 |
 | Club Friendly | 951 |
-
-
 
 ## Event (u64 - max 18,446,744,073,709,551,615)
 
@@ -89,8 +93,11 @@ mkt start | mkt end | market | sides count | logic | sides meaning (in index ord
 | 3000 | 3999 | aou | 2 | 3000+2*L | over, under
 | 4000 | 4999 | btts+ou | 4 | 4000+2*L | y-o, y-u, n-o, n-u
 | 5000 | 5999 | ft+ou | 6 | 5000+2*L | h-o, a-o, d-o, h-u, a-u, d-u
-| 10000 | 100909 | cs | 1 | [10][0, home score][0, away score] - scores max at 9	|
+| 10000 | 10909 | cs | 1 | [10][home score][0][away score] - scores max at 9	|
+| 11000 | 65535 | player props | 2 | 10000+player_prop_id+2*L | over, under |
 
+player prop id | line type | notes
+|-------|-------|---------|
 
 ## Player (u64 - max 18,446,744,073,709,551,615)
 
@@ -98,11 +105,7 @@ mkt start | mkt end | market | sides count | logic | sides meaning (in index ord
 
 ## Side (u8 - max 255)
 
-0 - Home (Over in totals) 
-1 - Away (Under in totals) 
-2 - Draw (used in 3-way markets)
-
-In Double Chance markets, the side is the team NOT to win (so side 0 means the user is betting away OR draw)
+Per the sides meaning in the markets table. For example, in a 1X2 market, the sides are: 0 - Home, 1 - Away, and 2 - Draw; in a Both Teams To Score + Over/Under market, the sides: 0 - Yes+Over, 1 - Yes+Under, 2 - No+Over, 3 - No+Under.
 
 ## Event Sequence (u16 - max 65535)
 

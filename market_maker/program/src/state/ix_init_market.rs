@@ -3,11 +3,11 @@ use core::result::Result;
 use pinocchio::error::ProgramError;
 use spamm_aggregator::state::MarketId;
 
-/// Minimum bytes after the router `u8` in `spamm_maker` (`market_id` only; body may be empty or any length).
+/// Minimum bytes after the router `u8` in `spamm_market_maker` (`market_id` only; body may be empty or any length).
 pub const INIT_MARKET_IX_DATA_MIN_LEN: usize = MarketId::WIRE_SIZE;
 
-/// Decoded from variable-length instruction data: `market_id` wire (26) then the oracle **body** bytes
-/// (copied to the account after the 8-byte oracle header; body length sets account `space = 8 + n`).
+/// Decoded from variable-length instruction data: `market_id` wire then the oracle **body** bytes
+/// (copied after the 6-byte header; account `space = 6 + max(n, 12)` so Doppler can write 12 body bytes).
 #[repr(C)]
 pub struct InitMarketIxPayload<'a> {
    pub market_id: MarketId,

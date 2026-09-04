@@ -10,31 +10,40 @@ autotests = false
 crate-type = ["cdylib", "lib"]
 
 [features]
-default = ["bpf-entrypoint"]
+default = ["bpf-entrypoint", "devnet"]
 # Disable when consuming this crate as a library (avoids duplicate entrypoint symbols).
 bpf-entrypoint = []
 # Enables `pinocchio_log::log!` call sites gated by `#[cfg(feature = "log")]`.
 log = []
-# Mollusk SBF integration tests (`program/tests/*`). Requires `app_specific_delegated_vaults.so` in `target/deploy/`.
-test-sbf = ["log"]
+# Cluster-specific constants (`MINT`, `RFQ_NETWORK_DOMAIN`, …) and dev-only ix 254/255.
+# Default includes `devnet` for IDE/`cargo check`. Mainnet SBF builds:
+#   --no-default-features --features bpf-entrypoint,mainnet
+mainnet = []
+devnet = []
+# Mollusk SBF tests load `target/deploy/spamm_aggregator.so` (and MM deploy copy).
+test-sbf = ["log", "devnet"]
+
+[package.metadata.rust-analyzer]
+# linkedProjects often skips default features; pin devnet for this crate only.
+cargo.features = ["devnet", "bpf-entrypoint"]
 
 [dependencies]
 pinocchio = { version = "0.11.1", default-features = false, features = ["cpi", "copy", "account-resize"] }
 pinocchio-associated-token-account = "0.4.0"
 pinocchio-system = "0.6.0"
 pinocchio-token = "0.6.0"
-pinocchio-token-2022 = "0.3.0"
 pinocchio-log = { version = "0.5.1", default-features = false, features = ["macro"] }
-solana-address = { version = "2.5.0", features = ["curve25519"] }
+solana-address = { version = "2.6.0", features = ["curve25519"] }
 solana-define-syscall = { version = "5.0", features = ["unstable-static-syscalls"] }
-brine-ed25519 = { version = "0.5" }
-zeropod = { version = "0.3.3", features = ["solana-address"] }
+brine-ed25519 = { version = "0.9.2", features = ["fast-sha512"] } # use fast-sha512 on mollusk and mainnet until sol_215 support is live
+zeropod = { version = "0.3.4", features = ["solana-address"] }
 
 
 [lints.rust]
 unexpected_cfgs = { level = "warn", check-cfg = [
    'cfg(target_os, values("solana"))',
    'cfg(target_arch, values("bpf", "sbf"))',
+   'cfg(feature, values("mainnet", "devnet", "bpf-entrypoint", "log", "test-sbf"))',
 ] }
 [[test]]
 name = "spamm_mollusk"

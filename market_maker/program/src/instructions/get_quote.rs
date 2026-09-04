@@ -2,40 +2,41 @@
 //! Validates PDAs, event state, market-data layout, writes the quote buffer, sets return data (matches
 //! [`spamm_aggregator::state::GetQuoteIxData`] wire after the router byte).
 //!
-//! Accounts **(5)** — must match aggregator CPI account order:
+//! Accounts **(6)** — must match aggregator CPI account order:
 //! 0. `user`
-//! 1. `mm_market_data_pda` — [`crate::mm_helpers::find_market_data_pda`]; layout `[disc u8][bump u8][pad u8;2][u32 seq LE][u32 odds…]` (`init_market`)
-//! 2. `event_state_pda` — [`crate::mm_helpers::verify_event_state`]
-//! 3. `mm_config_pda` — MM `["config"]` PDA (validated; unused for pricing)
-//! 4. `mm_quote_buffer` — single program PDA [`crate::constants::MM_QUOTE_BUFFER_SEED`]
+//! 1. `clock_sysvar`
+//! 2. `mm_market_data_pda` — [`crate::mm_helpers::mm_market_data_pda_ok`]; layout `[disc u8][bump u8][u32 seq LE][u32 odds…]` (`init_market`)
+//! 3. `event_state_pda` — [`crate::mm_helpers::verify_event_state`]
+//! 4. `mm_config_pda` — MM `["config"]` PDA
+//! 5. `mm_quote_buffer` — single program PDA [`crate::constants::MM_QUOTE_BUFFER_SEED`]
 //!
-//! Instruction `data` (bytes after the router discriminator in `lib.rs`): **49 bytes**, zeropod layout, in order:
-//! - `amount` (u64 LE)
-//! - `odds_scaled` (u32 LE) — min odds hint from caller
-//! - `market_id` (**26** bytes): nested `event_id` (`u64` LE `event_id`, `u32` LE `league`, `u8` `sport`) then `u64` LE `player`, `u32` LE `mkt`, `u8` `period`
-//! - `side` (u8): two-outcome — `0` home, `1` away; soccer `mkt` 1 or 5 — `0` home, `1` away, `2` draw
-//! - `event_game_state` (`EventGameState`, 8 bytes)
-//! - `event_state_sequence` (u16 LE): **1** for pregame markets (event state at PG); **≥ 2** for live markets (e.g. **2** once the match has started)
+//! Instruction `data` (bytes after the router discriminator): [`crate::state::GetQuoteIxPayload`]
+//! (`amount` u64, `odds_scaled` u32 min-odds hint, `MarketId`, `side` u8, `EventGameState`, `event_state_sequence` u16).
 //!
-//! Return data (`sol_set_return_data`): **12** bytes — `max_amount` (u64 LE), `odds_scaled` (u32 LE).
+//! Return data (`sol_set_return_data`): packed `max_amount` (u64 LE) + `odds_scaled` (u32 LE).
 
 use pinocchio::{AccountView, Address, address::address_eq, hint::unlikely};
 use pinocchio_log::log;
-use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state};
 use zeropod::ZeroPodFixed;
 
-use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, QUOTE_BUFFER_PDA};
-use crate::instructions::quote_helpers::odds_from_market_data_body;
-use spamm_aggregator::QuoteResult;
-use crate::state::{GetQuoteIxPayload, GetQuoteReturnWire};
-use spamm_aggregator::state::mm_quote::MM_QUOTE_BUFFER_DISCRIMINATOR;
-use spamm_aggregator::state::{MMQuoteBuffer, MM_QUOTE_BUFFER_LEN};
-pub use spamm_aggregator::state::GET_QUOTE_IX_DISCRIMINATOR;
+use crate::{
+   constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, QUOTE_BUFFER_PDA},
+   instructions::quote_helpers::{odds_from_market_data_body, validate_quote_leg_context},
+   mm_helpers::{mm_market_data_pda_ok, verify_event_state},
+   state::{GetQuoteIxPayload, GetQuoteReturnWire},
+};
+use spamm_aggregator::{
+   QuoteResult,
+   state::{
+      MMQuoteBuffer, MM_QUOTE_BUFFER_LEN,
+      mm_quote::MM_QUOTE_BUFFER_DISCRIMINATOR,
+   },
+};
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> QuoteResult {
    let [
       user,
-      _clock_program,
+      _clock_sysvar,
       mm_market_data_pda,
       event_state_pda,
       mm_config_pda,
@@ -45,13 +46,14 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       set_get_quote_return_data(0, 0)?;
       return Ok(());
    };
-   let parsed_data = GetQuoteIxPayload::decode(data);
-   if unlikely(parsed_data.is_err()) {
-      log!("get_quote: decode failed");
-      set_get_quote_return_data(0, 0)?;
-      return Ok(());
-   }
-   let parsed_data = parsed_data.unwrap();
+   let parsed_data = match GetQuoteIxPayload::decode(data) {
+      Ok(p) => p,
+      Err(_) => {
+         log!("get_quote: decode failed");
+         set_get_quote_return_data(0, 0)?;
+         return Ok(());
+      }
+   };
    log!(
       "get_quote: decoded amount {} min_odds_scaled {} side {} ev_seq {} mkt {} sport {} pregame {}",
       parsed_data.amount,
@@ -64,38 +66,13 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    );
    let side = parsed_data.side;
    let market_id = parsed_data.market_id;
-   let mkt = market_id.mkt;
-   // SIDECHECK
-   if unlikely(side > 2) {
-      log!("get_quote: side must be 0, 1, or 2");
-      set_get_quote_return_data(0, 0)?;
-      return Ok(());
-   }
-   // SIDECHECK
-   if unlikely(side == 2 && mkt != 1 && mkt != 5) {
-      log!("get_quote: side 2 is only valid for mkt 1 or 5");
+   if unlikely(validate_quote_leg_context(&market_id, side, parsed_data.event_state_sequence).is_err()) {
+      log!("get_quote: invalid leg context");
       set_get_quote_return_data(0, 0)?;
       return Ok(());
    }
 
    let event_state_sequence = parsed_data.event_state_sequence;
-   if unlikely(event_state_sequence == 0) {
-      log!("get_quote: event_state_sequence must be greater than 0");
-      set_get_quote_return_data(0, 0)?;
-      return Ok(());
-   }
-   if market_id.is_pregame() {
-      if unlikely(event_state_sequence != 1) {
-         log!("get_quote: pregame event_state_sequence must be 1");
-         set_get_quote_return_data(0, 0)?;
-         return Ok(());
-      }
-   } else if unlikely(event_state_sequence < 2) {
-      log!("get_quote: live event_state_sequence must be >= 2");
-      set_get_quote_return_data(0, 0)?;
-      return Ok(());
-   }
-
    let event_game_state = parsed_data.event_game_state;
 
    if unlikely(!address_eq(mm_quote_buffer.address(), &QUOTE_BUFFER_PDA)) {
@@ -128,19 +105,15 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Ok(());
    }
 
-   let market_data = mm_market_data_pda.try_borrow();
-   if unlikely(market_data.is_err()) {
-      log!("get_quote: market data borrow failed");
-      set_get_quote_return_data(0, 0)?;
-      return Ok(());
-   }
-   let market_data = market_data.unwrap();
+   let market_data = match mm_market_data_pda.try_borrow() {
+      Ok(d) if d.len() >= 6 => d,
+      _ => {
+         log!("get_quote: market data borrow failed or too short");
+         set_get_quote_return_data(0, 0)?;
+         return Ok(());
+      }
+   };
    log!("get_quote: market_data_len {}", market_data.len());
-   if unlikely(market_data.len() < 8) {
-      log!("get_quote: market data too short (need 8-byte oracle header + body)");
-      set_get_quote_return_data(0, 0)?;
-      return Ok(());
-   }
    // Market data: [disc][bump][u32 seq][body]; odds start at byte 6 (`init_market`).
    let body = &market_data[6..] as &[u8];
    log!("get_quote: body_len {} side {}", body.len(), side);
@@ -153,10 +126,15 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       }
    };
 
-   let max_amount = MAX_QUOTE_STAKE_UNITS;
+   if unlikely(odds_scaled < parsed_data.odds_scaled) {
+      log!("get_quote: odds below caller min hint");
+      set_get_quote_return_data(0, 0)?;
+      return Ok(());
+   }
+
+   let max_amount = core::cmp::min(parsed_data.amount, MAX_QUOTE_STAKE_UNITS);
    log!("get_quote: max_amount: {}, odds_scaled: {} (min_odds_scaled {})", 
       max_amount, odds_scaled, parsed_data.odds_scaled);
-   set_get_quote_return_data(max_amount, odds_scaled)?;
 
    let quote = MMQuoteBuffer {
       discriminator: MM_QUOTE_BUFFER_DISCRIMINATOR,
@@ -170,26 +148,21 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       event_state_sequence,
    };
 
-   let buf = mm_quote_buffer.try_borrow_mut();
-   if unlikely(buf.is_err()) {
-      log!("get_quote: quote buffer borrow failed");
-      set_get_quote_return_data(0, 0)?;
-      return Ok(());
-   }
-
-   let mut buf = buf.unwrap();
-   if unlikely(buf.len() != MM_QUOTE_BUFFER_LEN) {
-      log!("get_quote: quote buffer len mismatch");
-      set_get_quote_return_data(0, 0)?;
-      return Ok(());
-   }
-   let result = quote.write_wire(&mut buf);
-   if unlikely(result.is_err()) {
+   let mut buf = match mm_quote_buffer.try_borrow_mut() {
+      Ok(b) if b.len() == MM_QUOTE_BUFFER_LEN => b,
+      _ => {
+         log!("get_quote: quote buffer borrow failed or len mismatch");
+         set_get_quote_return_data(0, 0)?;
+         return Ok(());
+      }
+   };
+   if unlikely(quote.write_wire(&mut buf).is_err()) {
       log!("get_quote: quote write failed");
       set_get_quote_return_data(0, 0)?;
       return Ok(());
    }
 
+   set_get_quote_return_data(max_amount, odds_scaled)?;
    Ok(())
 }
 

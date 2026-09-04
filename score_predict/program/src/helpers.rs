@@ -6,8 +6,9 @@ use pinocchio::{
 };
 use pinocchio_log::log;
 use pinocchio_system::ID as SYSTEM_ID;
+use pinocchio::sysvars::rent::RENT_ID;
 
-use crate::{constants::ADMIN, ID};
+use crate::{constants::{ADDRESS_LEN, ADMIN}, ID};
 
 #[inline(always)]
 pub fn verify_signer(signer: &AccountView) -> ProgramResult {
@@ -26,6 +27,14 @@ pub fn verify_system_program(system_program: &AccountView) -> ProgramResult {
    Ok(())
 }
 
+pub fn verify_rent_sysvar(rent_acc: &AccountView) -> ProgramResult {
+   if unlikely(!address_eq(rent_acc.address(), &RENT_ID)) {
+      log!("verify_rent_sysvar: rent account must be the rent account");
+      return Err(ProgramError::InvalidAccountOwner);
+   }
+   Ok(())
+}
+
 pub fn verify_program_owner(account: &AccountView) -> ProgramResult {
    if unlikely(!address_eq(account.owner(), &ID)) {
       log!("verify_program_owner: account not owned by program");
@@ -34,11 +43,17 @@ pub fn verify_program_owner(account: &AccountView) -> ProgramResult {
    Ok(())
 }
 
-pub fn get_rent_local(space: u64) -> u64 {
+pub fn get_rent(rent_sysvar: &AccountView, space: u64) -> Result<u64, ProgramError> {
    if unlikely(space == 0) {
-      return 0;
+      return Ok(0);
    }
-   (128 + space) * 6960
+   if unlikely(rent_sysvar.data_len() < 8) {
+      return Err(ProgramError::InvalidAccountData);
+   }
+   let lamports_per_byte = unsafe {
+      u64::from_le_bytes(*(rent_sysvar.data_ptr() as *const [u8; 8]))
+   };
+   Ok((128 + space) * lamports_per_byte)
 }
 
 /// Move lamports from PDA to recipient and close the account.
@@ -77,5 +92,5 @@ pub fn verify_admin(authority: &AccountView) -> ProgramResult {
 
 
 pub fn read_address_unchecked(ptr: *const u8) -> Address {
-   Address::new_from_array(unsafe { core::ptr::read_unaligned(ptr as *const [u8; 32]) })
+   Address::new_from_array(unsafe { core::ptr::read_unaligned(ptr as *const [u8; ADDRESS_LEN]) })
 }

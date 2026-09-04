@@ -3,36 +3,32 @@
 //!
 //! Accounts **(8)** (aggregator order):
 //! 0. `user`
-//! 1. `clock_program`
-//! 2. `mm_config_pda`
-//! 3. `mm_parlay_quote_buffer`
-//! 4. `mm_token_account`
-//! 5. `liability_account`
-//! 6. `mint` (readonly)
-//! 7. `token_program` (readonly)
-//! 8. `instructions_sysvar` (readonly) — introspect parent `fill_parlay`
+//! 1. `mm_config_pda`
+//! 2. `mm_parlay_quote_buffer`
+//! 3. `mm_token_account`
+//! 4. `liability_account`
+//! 5. `mint` (readonly)
+//! 6. `token_program` (readonly)
+//! 7. `instructions_sysvar` (readonly) — introspect parent `fill_parlay`
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer}, error::ProgramError, hint::{likely, unlikely},
+   AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::{likely, unlikely},
 };
 use pinocchio_log::log;
-use pinocchio_token::instructions::Transfer;
 
-use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA};
-use crate::state::FillParlayQuoteIxPayload;
-use spamm_aggregator::{
-   helpers::verify_invoked_via_aggregator_fill_ix,
-   instructions::FILL_PARLAY_IX_DISCRIMINATOR,
+use crate::{
+   constants::{MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA},
+   instructions::token_transfer::transfer_mm_config_signed,
+   state::FillParlayQuoteIxPayload,
 };
-use spamm_aggregator::readers::read_u8_unchecked;
-use spamm_aggregator::state::mm_account_config::MM_CONFIG_PDA_BUMP_OFFSET;
-use spamm_aggregator::state::mm_parlay_quote::{MMParlayQuoteBuffer, MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR, MM_PARLAY_QUOTE_BUFFER_LEN};
-use spamm_aggregator::state::MM_ACCOUNT_CONFIG_SEED;
-use spamm_aggregator::writers::write_u8_unchecked;
-
-const IS_USED_OFFSET: usize = 1;
-
-pub use spamm_aggregator::state::FILL_QUOTE_PARLAY_IX_DISCRIMINATOR;
+use spamm_aggregator::{
+   helpers::verify_invoked_via_aggregator,
+   instructions::{FILL_PARLAY_IX_DISCRIMINATOR, FREEBET_FILL_PARLAY_IX_DISCRIMINATOR},
+   writers::write_u8_unchecked,
+   state::{
+      MMParlayQuoteBuffer, MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR, MM_PARLAY_QUOTE_BUFFER_LEN,
+   },
+};
 
 pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -49,7 +45,11 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   verify_invoked_via_aggregator_fill_ix(instructions_sysvar, FILL_PARLAY_IX_DISCRIMINATOR)?;
+   let parent_disc = verify_invoked_via_aggregator(instructions_sysvar)?;
+   if unlikely(parent_disc != FILL_PARLAY_IX_DISCRIMINATOR && parent_disc != FREEBET_FILL_PARLAY_IX_DISCRIMINATOR) {
+      log!("fill_parlay_quote: parent must be fill_parlay or freebet_fill_parlay");
+      return Err(ProgramError::InvalidInstructionData);
+   }
 
    if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
       log!("fill_parlay_quote: mm config pda invalid");
@@ -93,35 +93,18 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       log!("fill_parlay_quote: amount_to_fill exceeds quoted max");
       return Err(ProgramError::InvalidInstructionData);
    }
-   if unlikely(quote.max_amount != MAX_QUOTE_STAKE_UNITS) {
-      log!("fill_parlay_quote: buffer max_amount unexpected");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-
-   if unlikely(ix_data.amount_to_fill > MAX_QUOTE_STAKE_UNITS) {
-      log!("fill_parlay_quote: amount_to_fill exceeds quote max");
-      return Err(ProgramError::InvalidInstructionData);
-   }
 
    if likely(ix_data.amount_to_send > 0) {
-      let config_bump = unsafe { read_u8_unchecked(mm_config_pda.data_ptr(), MM_CONFIG_PDA_BUMP_OFFSET) };
-      let bump_ref = [config_bump];
-      let signer_seeds = [
-         Seed::from(MM_ACCOUNT_CONFIG_SEED),
-         Seed::from(&bump_ref as &[u8]),
-      ];
-      let signers = [Signer::from(&signer_seeds)];
-      Transfer::new(
+      transfer_mm_config_signed(
+         mm_config_pda,
          mm_token_account,
          liability_account,
-         mm_config_pda,
          ix_data.amount_to_send,
-      )
-      .invoke_signed(&signers)?;
+      )?;
    }
 
    unsafe {
-      write_u8_unchecked(mm_parlay_quote_buffer.data_mut_ptr(), IS_USED_OFFSET, 1);
+      write_u8_unchecked(mm_parlay_quote_buffer.data_mut_ptr(), MMParlayQuoteBuffer::IS_USED_OFFSET, 1);
    }
 
    Ok(())

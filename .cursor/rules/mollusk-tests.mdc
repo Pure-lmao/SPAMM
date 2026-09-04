@@ -1,0 +1,85 @@
+---
+description: How to build SBF .so artifacts and run Mollusk integration tests (agents must read before running aggregator tests).
+alwaysApply: true
+---
+
+# Mollusk / SBF integration tests
+
+Aggregator program tests are **Mollusk SBF tests**. They load compiled BPF **`.so`** binaries from `target/deploy/`. They do **not** run from `cargo check`, `cargo test` without `test-sbf`, or plain `cargo build`.
+
+## What agents get wrong
+
+| Mistake | Reality |
+|--------|---------|
+| `cargo test -p spamm_aggregator` | Test crate is `#![cfg(feature = "test-sbf")]` — **no tests run** without `--features test-sbf`. |
+| `cargo check` then assume tests pass | Check only validates Rust; Mollusk needs **`.so`** files on disk. |
+| Expect one `cargo build` to produce everything | **Two** separate `cargo build-sbf` builds (aggregator, MM). |
+| Edit MM program, only rebuild aggregator | Stale MM: harness copies from `market_maker/program/target/deploy/spamm_market_maker.so`. |
+| Parallel tests on Windows | File-lock errors copying `.so` — use `--test-threads=1`. |
+| `cargo build-sbf` aggregator for mainnet without disabling defaults | Default features include `devnet`; mainnet deploy needs `--no-default-features --features bpf-entrypoint,mainnet`. |
+
+## Prerequisites
+
+Solana/Agave toolchain with **`cargo build-sbf`** on PATH (same as `solana --version` install). `target/` is gitignored; `.so` files are **local build artifacts**, never committed.
+
+## Two artifacts (all required)
+
+| Program | Build manifest | Output `.so` |
+|---------|----------------|--------------|
+| Aggregator | `aggregator/program/Cargo.toml` | `aggregator/program/target/deploy/spamm_aggregator.so` |
+| Example MM | `market_maker/program/Cargo.toml` | `market_maker/program/target/deploy/spamm_market_maker.so` |
+
+## How the harness loads them
+
+`tests/spamm_mollusk/common/env.rs` → `Env::new()`:
+
+1. Sets `SBF_OUT_DIR` to `aggregator/program/target/deploy`.
+2. **Copies** the newest aggregator `.so` from `target/deploy` or `target/sbpfv3-solana-solana/release` into deploy.
+3. **Copies** the newest MM `.so` among `market_maker/program/target/deploy`, `market_maker/.../sbpfv3-solana-solana/release`, and aggregator `target/deploy` / `sbpfv3` release into `aggregator/program/target/deploy/spamm_market_maker.so`.
+4. Requires both `.so` files in deploy (after sync).
+5. Panics with the exact `cargo build-sbf` commands if any file is missing.
+
+Mollusk registers programs by **filename stem** (`spamm_aggregator`, `spamm_market_maker`), not by path.
+
+## Build (from repo root)
+
+Run both after changing **any** on-chain program code under test:
+
+```powershell
+cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet
+cargo build-sbf --arch v3 --manifest-path market_maker/program/Cargo.toml
+```
+
+For mainnet deploys: `--no-default-features --features bpf-entrypoint,mainnet`. Devnet is the default (`devnet` is in `[features] default`).
+
+Rebuild **only** the crate you changed if you know the other is fresh:
+
+- Aggregator ix/helpers/state → first command only (plus re-run tests).
+- `market_maker/program` → second command (harness syncs MM into aggregator deploy dir at test start).
+
+## Run tests
+
+From `aggregator/program`:
+
+```powershell
+cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --test-threads=1
+```
+
+- **`--features test-sbf`** — required; enables the test crate, program `log`, and `devnet` cluster constants.
+- **`--test-threads=1`** — recommended on Windows (deploy-dir copy mutex; parallel runs can hit “file in use”).
+- Filter one module: append `ix_settle_freebet` (or any `mod` name from `tests/spamm_mollusk/main.rs`).
+
+`cargo check -p spamm_aggregator` is fine for fast compile-only validation; it does **not** substitute for the flow above.
+
+## CU ledger
+
+`tests/spamm_mollusk/cu_ledger.md` is regenerated when tests run. Optional full regen uses `--test-threads=4` on Unix; prefer `--test-threads=1` on Windows.
+
+## Agent workflow after program edits
+
+1. `cargo check -p spamm_aggregator --features devnet` (and `-p spamm_market_maker` if MM touched).
+2. `cargo build-sbf --arch v3` for each changed program (see table; aggregator needs `--features devnet` or `mainnet`).
+3. `cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --test-threads=1` with a focused filter when possible.
+4. If panic says **Missing SBF artifacts**, run the two build commands — do not retry `cargo test` alone.
+
+Canonical source comments: `aggregator/program/tests/spamm_mollusk/main.rs` (header) and `common/env.rs` (`Env::new`).

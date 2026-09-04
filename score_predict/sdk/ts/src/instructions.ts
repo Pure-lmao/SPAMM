@@ -7,6 +7,7 @@ import {
    CREATE_PREDICTION_IX_DISCRIMINATOR,
    SCORE_PREDICT_PROGRAM_ID,
    SYSTEM_PROGRAM_ID,
+   SYSVAR_RENT_ID,
 } from './constants.js';
 import { getPredictionPda } from './helpers.js';
 import type { CreatePredictionParams } from './types.js';
@@ -31,6 +32,7 @@ export async function getCreatePredictionIx(
       accounts: [
          { address: params.owner, role: AccountRole.WRITABLE_SIGNER },
          { address: predictionPda, role: AccountRole.WRITABLE },
+         { address: SYSVAR_RENT_ID, role: AccountRole.READONLY },
          { address: SYSTEM_PROGRAM_ID, role: AccountRole.READONLY },
       ],
       data,

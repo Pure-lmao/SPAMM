@@ -16,7 +16,8 @@ fn process_instruction_empty_data_fails() {
 #[test]
 fn process_instruction_unknown_discriminator_fails() {
    let mut env = Env::new();
-   let ix = Instruction::new_with_bytes(agg_program_id(), &[42u8], vec![]);
+   // Avoid live discs (e.g. 42 = remove_line); pick an unused router byte.
+   let ix = Instruction::new_with_bytes(agg_program_id(), &[99u8], vec![]);
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::InvalidInstructionData);
 }

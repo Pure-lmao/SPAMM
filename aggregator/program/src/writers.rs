@@ -39,21 +39,21 @@ pub unsafe fn write_netting_line_unchecked(
    let zc = NettingLineZc {
       period: value.period,
       mkt: value.mkt.into(),
-      outcome_0: value.outcome_0.into(),
-      outcome_1: value.outcome_1.into(),
+      open_0: value.open_0.into(),
+      open_1: value.open_1.into(),
    };
    // SAFETY: caller guarantees `offset..offset+NETTING_LINE_LEN` is in-bounds (`NettingLineZc` wire size).
    unsafe { write_unaligned(ptr.add(offset) as *mut NettingLineZc, zc) };
 }
 
 #[inline(always)]
-pub unsafe fn write_i64_pair_unchecked(ptr: *mut u8, offset: usize, value: (i64, i64)) {
+pub unsafe fn write_u64_pair_unchecked(ptr: *mut u8, offset: usize, value: (u64, u64)) {
    // SAFETY: caller guarantees `offset..offset+16` is in-bounds.
-   unsafe { write_unaligned(ptr.add(offset) as *mut (i64, i64), value) };
+   unsafe { write_unaligned(ptr.add(offset) as *mut (u64, u64), value) };
 }
 
 #[inline(always)]
 pub unsafe fn write_arbitrary_bytes_unchecked(ptr: *mut u8, offset: usize, value: &[u8]) {
-   // SAFETY: caller guarantees `offset..offset+value.len()` is writable on `ptr`, and that
+   // SAFETY: caller guarantees `offset..offset+value.len()` is writable on `ptr`
    unsafe { core::ptr::copy_nonoverlapping(value.as_ptr(), ptr.add(offset), value.len()) };
 }

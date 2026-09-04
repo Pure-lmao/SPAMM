@@ -1,22 +1,22 @@
-//! Withdraw funds from the liability account to the token account
-//! 
+//! Withdraw free funds from the liability ATA to the MM token account.
+//!
 //! Accounts: **9**
 //! 0. `mm_authority` (writable signer)
 //! 1. `mm_program_account` (readonly)
-//! 2. `mm_config_pda` (writable)
-//! 3. `mm_encumbrance_pda` (writable)
+//! 2. `mm_config_pda` (readonly)
+//! 3. `mm_encumbrance_pda` (writable) — signs the liability → MM token transfer
 //! 4. `mm_liability_token_account` (writable)
 //! 5. `mm_token_account` (writable)
-//! 6. `mint` (readonly)
-//! 7. `token_program` (readonly)
-//! 
+//! 6. `config_pda` (readonly) — pause-checked
+//! 7. `mint` (readonly)
+//! 8. `token_program` (readonly)
+//!
 //! Data (after router discriminator in `lib.rs`): amount (u64)
 use pinocchio::{AccountView, ProgramResult, cpi::{Seed, Signer}, error::ProgramError};
 use pinocchio_log::log;
 use pinocchio_token::instructions::Transfer;
 
-use crate::{helpers::{verify_mint, verify_mm_admin, verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program}, 
-parsers::{get_encumbrance, get_token_account_balance}, 
+use crate::{helpers::{get_encumbrance, get_token_account_balance, verify_config_pda, verify_mint, verify_mm_admin, verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program}, 
 readers::read_u64_le_unchecked, state::other::MM_ENCUMBRANCE_PDA_SEED};
 
 
@@ -31,6 +31,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mm_encumbrance_pda,
       mm_liability_token_account,
       mm_token_account,
+      config_pda,
       mint,
       token_program,
    ] = accounts else {
@@ -39,6 +40,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    };
 
    verify_signer(&mm_authority)?;
+   verify_config_pda(config_pda, true)?;
    verify_mm_admin(mm_authority, mm_program_account, mm_config_pda)?;
    verify_mint(mint)?;
    verify_token_program(token_program)?;
@@ -46,7 +48,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let Some(valid_mm_encumbrance_pda_bump) =
       verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account)
    else {
-      log!("withdraw_from_liability_account: invalid mm liability pda");
+      log!("withdraw_from_liability_account: invalid mm encumbrance pda");
       return Err(ProgramError::InvalidAccountOwner);
    };
 
@@ -70,10 +72,11 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let encumbrance_u64: u64 = if encumbrance < 0 {
       0
    } else {
-      encumbrance.try_into().unwrap()
+      encumbrance.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?
    };
 
-   let free_balance = liability_balance.checked_sub(encumbrance_u64).unwrap_or(0);
+   let free_balance = liability_balance
+      .checked_sub(encumbrance_u64).ok_or(ProgramError::ArithmeticOverflow)?;
 
    if amount > free_balance {
       log!("withdraw_from_liability_account: amount is greater than free balance");

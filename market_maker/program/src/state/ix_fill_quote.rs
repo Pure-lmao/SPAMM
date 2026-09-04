@@ -1,7 +1,7 @@
 use pinocchio::error::ProgramError;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use spamm_aggregator::state::{EventGameState, FillQuoteIxData, MarketId};
+use spamm_aggregator::state::{EventGameState, MarketId};
 
 /// Fill-quote instruction payload (bytes after the router discriminator in `lib.rs`), matching
 /// `FillQuoteIxData` minus `instruction_discriminator`.
@@ -21,22 +21,25 @@ pub const FILL_QUOTE_IX_PAYLOAD_LEN: usize = <FillQuoteIxPayload as ZeroPodFixed
 
 impl FillQuoteIxPayload {
    #[inline(always)]
+   pub fn from_zc(z: &FillQuoteIxPayloadZc) -> Option<Self> {
+      Some(Self {
+         amount_to_fill: z.amount_to_fill.get(),
+         odds_scaled: z.odds_scaled.get(),
+         market_id: MarketId::from_zc(&z.market_id)?,
+         side: z.side,
+         event_game_state: EventGameState::from_zc(&z.event_game_state),
+         event_state_sequence: z.event_state_sequence.get(),
+         amount_to_send: z.amount_to_send.get(),
+      })
+   }
+
+   #[inline(always)]
    pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
       if data.len() != FILL_QUOTE_IX_PAYLOAD_LEN {
          return Err(ProgramError::InvalidInstructionData);
       }
-      let zc = <Self as ZeroPodFixed>::from_bytes(data)
+      let z = <Self as ZeroPodFixed>::from_bytes(data)
          .map_err(|_| ProgramError::InvalidInstructionData)?;
-      Ok(Self {
-         side: zc.side,
-         event_state_sequence: zc.event_state_sequence.get(),
-         amount_to_fill: zc.amount_to_fill.get(),
-         odds_scaled: zc.odds_scaled.get(),
-         market_id: MarketId::from_zc(&zc.market_id).ok_or(ProgramError::InvalidInstructionData)?,
-         event_game_state: EventGameState::from_zc(&zc.event_game_state),
-         amount_to_send: zc.amount_to_send.get(),
-      })
+      Self::from_zc(&z).ok_or(ProgramError::InvalidInstructionData)
    }
 }
-
-const _: () = assert!(FILL_QUOTE_IX_PAYLOAD_LEN == FillQuoteIxData::WIRE_LEN - 1);

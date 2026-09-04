@@ -4,11 +4,12 @@ use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
 
 use crate::common::{
-   assert_program_err, bet_pda_for, bet_token_ata, encumbrance_pda, event_id_soccer, fill_bet_instruction,
+   assert_program_err, assert_spamm_err, bet_pda_for, bet_token_ata, encumbrance_pda, event_id_soccer, fill_bet_instruction,
    fill_bet_netting_placeholder, liability_token_ata, market_spread_pregame, mm_admin, mm_collateral_ata,
    mm_config_pda, mm_program_id, mint_pubkey, read_encumbrance, read_token_balance, record_cu_success,
-   system_owned_empty, user, user_collateral_ata, wrong_signer, Env,
+   system_owned_empty, user, user_collateral_ata, wrong_signer, config_pda, Env,
 };
+use spamm_aggregator::errors::SpammError;
 use spamm_aggregator::instructions::FillBetIxData;
 use spamm_aggregator::state::EventGameState;
 use mollusk_svm_programs_token::token;
@@ -63,7 +64,7 @@ fn withdraw_free_after_fill() {
    let mut wd = Vec::new();
    wd.extend_from_slice(&free.to_le_bytes());
    let ix = env.agg_ix(
-      100,
+      50,
       wd,
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -72,6 +73,7 @@ fn withdraw_free_after_fill() {
          AccountMeta::new(enc_pda, false),
          AccountMeta::new(liab, false),
          AccountMeta::new(mm_collateral_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
       ],
@@ -85,7 +87,7 @@ fn withdraw_free_after_fill() {
 }
 
 #[test]
-fn withdraw_works_while_agg_paused() {
+fn withdraw_rejected_while_agg_paused() {
    let mut env = Env::new();
    env.bootstrap_default_mm_spread();
    let mid = market_spread_pregame(event_id_soccer());
@@ -119,10 +121,6 @@ fn withdraw_works_while_agg_paused() {
 
    let liab = liability_token_ata();
    let enc_pda = encumbrance_pda();
-   let enc_before = read_encumbrance(&env, &enc_pda);
-   let mm_tok = mm_collateral_ata();
-   let mm_before = read_token_balance(&env, &mm_tok);
-   let liab_before = read_token_balance(&env, &liab);
    let free = token_amount(env.get_account(&liab).expect("liab"))
       .saturating_sub({
          let enc_val = i64::from_le_bytes(env.get_account(&enc_pda).expect("enc").data[2..10].try_into().unwrap());
@@ -131,7 +129,7 @@ fn withdraw_works_while_agg_paused() {
    let mut wd = Vec::new();
    wd.extend_from_slice(&free.to_le_bytes());
    let ix = env.agg_ix(
-      100,
+      50,
       wd,
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -140,16 +138,13 @@ fn withdraw_works_while_agg_paused() {
          AccountMeta::new(enc_pda, false),
          AccountMeta::new(liab, false),
          AccountMeta::new(mm_collateral_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
       ],
    );
    let r = env.run_ix(ix);
-   assert!(r.program_result.is_ok());
-   assert_eq!(read_encumbrance(&env, &enc_pda), enc_before);
-   assert_eq!(read_token_balance(&env, &mm_tok), mm_before.saturating_add(free));
-   assert_eq!(read_token_balance(&env, &liab), liab_before.saturating_sub(free));
-   record_cu_success("withdraw_from_liability_account/paused_agg", &r);
+   assert_spamm_err(&r, SpammError::ProgramPaused);
 }
 
 fn filled_env_with_extra_liab() -> (Env, u64) {
@@ -192,7 +187,7 @@ fn withdraw_amount_exceeds_free_rejected() {
    let enc_pda = encumbrance_pda();
    let bust = free.saturating_add(1);
    let ix = env.agg_ix(
-      100,
+      50,
       bust.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -201,6 +196,7 @@ fn withdraw_amount_exceeds_free_rejected() {
          AccountMeta::new(enc_pda, false),
          AccountMeta::new(liab, false),
          AccountMeta::new(mm_collateral_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
       ],
@@ -215,7 +211,7 @@ fn withdraw_wrong_mm_admin_rejected() {
    let liab = liability_token_ata();
    let enc_pda = encumbrance_pda();
    let ix = env.agg_ix(
-      100,
+      50,
       free.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(wrong_signer(), true),
@@ -224,6 +220,7 @@ fn withdraw_wrong_mm_admin_rejected() {
          AccountMeta::new(enc_pda, false),
          AccountMeta::new(liab, false),
          AccountMeta::new(mm_collateral_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
       ],
@@ -239,7 +236,7 @@ fn withdraw_bad_encumbrance_pda_rejected() {
    let fake_enc = solana_pubkey::Pubkey::new_from_array([0xE1; 32]);
    env.upsert(fake_enc, system_owned_empty());
    let ix = env.agg_ix(
-      100,
+      50,
       free.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -248,6 +245,7 @@ fn withdraw_bad_encumbrance_pda_rejected() {
          AccountMeta::new(fake_enc, false),
          AccountMeta::new(liab, false),
          AccountMeta::new(mm_collateral_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
       ],
@@ -262,7 +260,7 @@ fn withdraw_wrong_ix_data_len_rejected() {
    let liab = liability_token_ata();
    let enc_pda = encumbrance_pda();
    let ix = env.agg_ix(
-      100,
+      50,
       vec![1, 2, 3, 4, 5, 6, 7],
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -271,6 +269,7 @@ fn withdraw_wrong_ix_data_len_rejected() {
          AccountMeta::new(enc_pda, false),
          AccountMeta::new(liab, false),
          AccountMeta::new(mm_collateral_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
       ],
@@ -285,7 +284,7 @@ fn withdraw_mm_token_wrong_owner_rejected() {
    let liab = liability_token_ata();
    let enc_pda = encumbrance_pda();
    let ix = env.agg_ix(
-      100,
+      50,
       free.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -294,6 +293,7 @@ fn withdraw_mm_token_wrong_owner_rejected() {
          AccountMeta::new(enc_pda, false),
          AccountMeta::new(liab, false),
          AccountMeta::new(user_collateral_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
       ],

@@ -1,6 +1,6 @@
 import { getDb } from "./localDb";
 import { getCompiledTransactionMessageDecoder, getTransactionDecoder, type Address, type Base64EncodedDataResponse, type Commitment, type ReadonlyUint8Array, type Signature, type Slot, type TransactionError, type UnixTimestamp } from "@solana/kit";
-import { AGGREGATOR_PROGRAM_ID, BetResult, decodeAggregatorInstructionData, getBetData, getParlayData, ODDS_SCALE, SYSTEM_PROGRAM_ID, type BetAccountData, type BetFiller, type MarketId, type ParlayBetAccountData, type ParlayLegWire } from "spamm-aggregator-sdk";
+import { AGGREGATOR_PROGRAM_ID, BetResult, decodeAggregatorInstructionData, getBetData, getParlayData, ODDS_SCALE, SYSTEM_PROGRAM_ID, type BetAccountData, type MarketId, type ParlayBetAccountData, type ParlayLegWire } from "spamm-aggregator-sdk";
 import { createRpcClients } from "../aggregator/client/txSend";
 import { withRpcRetry } from "../market_maker/client/txSend";
 const client = createRpcClients()
@@ -290,14 +290,6 @@ export function getClosedBetRecordsByUser(userAddress: string): BetRecord[] {
    return betAccounts.map(rowToBetRecord);
 }
 
-const nullFiller: BetFiller = {
-   mmAddress: SYSTEM_PROGRAM_ID,
-   amount: 0n,
-   oddsScaled: 0n,
-   isPotentiallyNetted: false,
-   encumbranceDelta: 0n,
-}
-
 // runIndexer()
 async function runIndexer() {
    console.log("Running indexer...");
@@ -348,11 +340,8 @@ async function runIndexer() {
                   side: decodedTransaction.data.side,
                   eventStateSequence: decodedTransaction.data.eventStateSequence,
                   eventGameState: decodedTransaction.data.eventGameState,
-                  filler0: nullFiller,
-                  filler1: nullFiller,
-                  filler2: nullFiller,
-                  filler3: nullFiller,
-                  filler4: nullFiller,
+                  numFillers: 0,
+                  fillers: [],
                }
             }
             addBetAccount(

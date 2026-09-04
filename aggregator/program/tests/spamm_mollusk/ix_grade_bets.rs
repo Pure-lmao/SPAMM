@@ -3,7 +3,7 @@
 use solana_instruction::{AccountMeta, Instruction};
 use solana_program_error::ProgramError;
 
-use spamm_aggregator::instructions::FillBetIxData;
+use spamm_aggregator::instructions::{FillBetIxData, GRADE_BETS_IX_DISCRIMINATOR};
 use spamm_aggregator::state::EventGameState;
 use spamm_aggregator::state::account_bet::BetResult;
 
@@ -21,7 +21,7 @@ fn grade_ix(results: &[u8], bets: &[solana_pubkey::Pubkey]) -> Instruction {
    for b in bets {
       metas.push(AccountMeta::new(*b, false));
    }
-   let mut buf = vec![5u8];
+   let mut buf = vec![GRADE_BETS_IX_DISCRIMINATOR];
    buf.extend_from_slice(results);
    Instruction::new_with_bytes(crate::common::agg_program_id(), &buf, metas)
 }
@@ -132,7 +132,7 @@ fn grade_bets_fewer_results_than_bets() {
    env.bootstrap_default_mm_spread();
    place_simple_bet(&mut env, 307);
    let bet = bet_pda_for(&user(), 307);
-   let ix = Instruction::new_with_bytes(crate::common::agg_program_id(), &[5u8], vec![
+   let ix = Instruction::new_with_bytes(crate::common::agg_program_id(), &[GRADE_BETS_IX_DISCRIMINATOR], vec![
       AccountMeta::new(admin(), true),
       AccountMeta::new_readonly(config_pda(), false),
       AccountMeta::new(bet, false),
@@ -152,7 +152,11 @@ fn grade_bets_non_admin() {
       AccountMeta::new_readonly(config_pda(), false),
       AccountMeta::new(bet, false),
    ];
-   let ix = Instruction::new_with_bytes(crate::common::agg_program_id(), &[5u8, 1u8], metas);
+   let ix = Instruction::new_with_bytes(
+      crate::common::agg_program_id(),
+      &[GRADE_BETS_IX_DISCRIMINATOR, BetResult::Won as u8],
+      metas,
+   );
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::IncorrectAuthority);
 }
@@ -196,7 +200,7 @@ fn grade_bets_target_wrong_account_length_config_pda() {
    place_simple_bet(&mut env, 323);
    let ix = grade_ix(&[1u8], &[config_pda()]);
    let r = env.run_ix(ix);
-   assert_program_err(&r, ProgramError::InvalidInstructionData);
+   assert_program_err(&r, ProgramError::InvalidAccountData);
 }
 
 #[test]
@@ -206,5 +210,19 @@ fn grade_bets_target_wrong_account_length_user_ata() {
    place_simple_bet(&mut env, 324);
    let ix = grade_ix(&[1u8], &[user_collateral_ata()]);
    let r = env.run_ix(ix);
-   assert_program_err(&r, ProgramError::InvalidInstructionData);
+   assert_program_err(&r, ProgramError::InvalidAccountOwner);
+}
+
+#[test]
+fn grade_bets_regrade_overwrite() {
+   let mut env = Env::new();
+   env.bootstrap_default_mm_spread();
+   place_simple_bet(&mut env, 886);
+   let bet = bet_pda_for(&user(), 886);
+   let r1 = env.run_ix(grade_ix(&[BetResult::Won as u8], &[bet]));
+   assert!(r1.program_result.is_ok(), "{:?}", r1);
+   assert!(matches!(decode_bet(&env, &bet).result, BetResult::Won));
+   let r2 = env.run_ix(grade_ix(&[BetResult::Lost as u8], &[bet]));
+   assert_ok_record_cu("grade_bets/regrade", &r2);
+   assert!(matches!(decode_bet(&env, &bet).result, BetResult::Lost));
 }

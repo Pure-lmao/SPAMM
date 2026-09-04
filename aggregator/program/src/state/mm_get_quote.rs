@@ -1,10 +1,12 @@
+use core::mem::offset_of;
+
 use pinocchio::error::ProgramError;
 use pinocchio_log::log;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::state::{EventGameState, MarketId};
 
-pub const GET_QUOTE_IX_DISCRIMINATOR: u8 = 5;
+pub const GET_QUOTE_IX_DISCRIMINATOR: u8 = 120;
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
@@ -20,9 +22,16 @@ pub struct GetQuoteIxData {
 
 impl GetQuoteIxData {
    pub const WIRE_LEN: usize = <Self as ZeroPodFixed>::SIZE;
+   pub const SIDE_OFFSET: usize = offset_of!(GetQuoteIxDataZc, side);
+
+   /// Overwrite only `side` on an already-packed buffer (market-quotes proxy).
+   #[inline(always)]
+   pub fn set_side_on_wire(buf: &mut [u8; Self::WIRE_LEN], side: u8) {
+      buf[Self::SIDE_OFFSET] = side;
+   }
 
    #[inline(always)]
-   pub fn to_zc(self) -> GetQuoteIxDataZc {
+   pub fn to_zc(&self) -> GetQuoteIxDataZc {
       GetQuoteIxDataZc {
          instruction_discriminator: self.instruction_discriminator,
          amount: self.amount.into(),
@@ -35,16 +44,16 @@ impl GetQuoteIxData {
    }
 
    #[inline(always)]
-   pub fn from_zc(z: &GetQuoteIxDataZc) -> Self {
-      Self {
+   pub fn from_zc(z: &GetQuoteIxDataZc) -> Option<Self> {
+      Some(Self {
          instruction_discriminator: z.instruction_discriminator,
          amount: z.amount.into(),
          odds_scaled: z.odds_scaled.into(),
-         market_id: MarketId::from_zc(&z.market_id).unwrap(),
+         market_id: MarketId::from_zc(&z.market_id)?,
          side: z.side,
          event_game_state: EventGameState::from_zc(&z.event_game_state),
          event_state_sequence: z.event_state_sequence.into(),
-      }
+      })
    }
 
    #[inline(always)]
@@ -59,12 +68,19 @@ impl GetQuoteIxData {
       Ok(())
    }
 
-   #[inline(always)]
    pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
+      if data.len() != Self::WIRE_LEN {
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      if data[0] != GET_QUOTE_IX_DISCRIMINATOR {
+         return Err(ProgramError::InvalidInstructionData);
+      }
       let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| {
          log!("get_quote: cannot decode get quote ix data");
          ProgramError::InvalidInstructionData
       })?;
-      Ok(Self::from_zc(&z))
+      Ok(Self::from_zc(&z).ok_or(ProgramError::InvalidInstructionData)?)
    }
 }
+
+pub const GET_QUOTE_IX_SIDE_OFFSET: usize = GetQuoteIxData::SIDE_OFFSET;

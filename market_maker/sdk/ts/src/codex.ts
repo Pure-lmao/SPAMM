@@ -1,8 +1,6 @@
 /**
  * Encoders and decoders for market-maker instruction payloads and on-chain account data.
  *
- * `fill_quote` is **not** exposed here (aggregator CPI only).
- *
  * @see https://www.solanakit.com/docs/concepts/codecs
  */
 
@@ -39,63 +37,90 @@ import {
 
 import {
    EVENT_ID_WIRE_SIZE,
-   EVENT_STATE_LEN,
+   EVENT_STATE_HEADER_LEN,
+   FILL_QUOTE_IX_WIRE_LEN,
    FILL_QUOTE_PARLAY_IX_WIRE_LEN,
+   FILL_CASHOUT_QUOTE_IX_WIRE_LEN,
+   FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN,
    GET_QUOTE_IX_WIRE_LEN,
-   GET_QUOTE_PARLAY_IX_WIRE_LEN,
+   GET_QUOTE_PARLAY_IX_HEADER_LEN,
+   GET_CASHOUT_QUOTE_IX_WIRE_LEN,
+   GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN,
+   getQuoteParlayIxWireLen,
+   getCashoutQuoteParlayIxWireLen,
    INIT_PROGRAM_IX_DATA_LEN,
    MARKET_ID_WIRE_SIZE,
-   MAX_PARLAY_LEGS,
-   MM_ACCOUNT_CONFIG_MIN_LEN,
-   MM_ORACLE_ACCOUNT_LEN_THREE_OUTCOME,
-   MM_ORACLE_ACCOUNT_LEN_TWO_OUTCOME,
+   MM_CONFIG_PDA_HEADER_LEN,
+   MM_ORACLE_ACCOUNT_LEN,
+   MM_PARLAY_QUOTE_BUFFER_HEADER_LEN,
    MM_PARLAY_QUOTE_BUFFER_LEN,
    MM_QUOTE_BUFFER_LEN,
+   PARLAY_LEG_QUOTED_LEN,
+   PARLAY_LEG_SEL_LEN,
    PARLAY_LEG_TABLE_LEN,
-   PARLAY_LEG_WIRE_LEN,
    FILL_RFQ_IX_WIRE_LEN,
-   SET_RFQ_SIGNER_IX_DATA_LEN,
-   UPDATE_ORACLE_IX_PAYLOAD_LEN_THREE_OUTCOME,
-   UPDATE_ORACLE_IX_PAYLOAD_LEN_TWO_OUTCOME,
+   UPDATE_ORACLE_IX_PAYLOAD_LEN,
    UPDATE_EVENT_STATE_IX_PAYLOAD_LEN,
    type DecodedMarketMakerInstruction,
    type EventGameState,
    type EventId,
    type EventStateData,
    type FillParlayQuoteIxData,
+   type FillQuoteIxData,
+   type FillCashoutQuoteIxData,
+   type FillCashoutQuoteParlayIxData,
    type FillRfqIxData,
+   type GetCashoutQuoteIxData,
+   type GetCashoutQuoteParlayIxData,
    type GetQuoteIxData,
    type GetQuoteParlayIxData,
    type InitProgramIxData,
-   type SetRfqSignerIxData,
    type MmAccountConfig,
    type MmOracleMarketData,
-   type MmOracleMarketDataThreeOutcome,
-   type MmOracleMarketDataTwoOutcome,
    type MmParlayQuoteBuffer,
    type MmQuoteBuffer,
+   type ParlayLegQuoted,
+   type ParlayLegSel,
    type ParlayLegWire,
    type MmReturnData,
    type GetParlayQuoteReturnWire,
-   PARLAY_QUOTE_RETURN_WIRE_LEN,
+   PARLAY_QUOTE_RETURN_HEADER_LEN,
+   parlayQuoteReturnWireLen,
 } from './types.js';
+
+import { MAX_PARLAY_LEGS } from './constants.js';
 
 import { validateFillParlayQuoteIxData, validateGetQuoteParlayIxData } from './validate.js';
 
 export const UPDATE_ORACLE_BODY_IX_DISCRIMINATOR = 0;
-export const INIT_PROGRAM_IX_DISCRIMINATOR = 1;
-export const GET_QUOTE_IX_DISCRIMINATOR = 5;
-export const GET_QUOTE_PARLAY_IX_DISCRIMINATOR = 7;
-export const FILL_QUOTE_PARLAY_IX_DISCRIMINATOR = 8;
-export const MM_FILL_BET_RFQ_IX_DISCRIMINATOR = 14;
-export const MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR = 16;
-export const SET_RFQ_SIGNER_IX_DISCRIMINATOR = 15;
-export const INIT_EVENT_IX_DISCRIMINATOR = 9;
-export const INIT_MARKET_IX_DISCRIMINATOR = 10;
-export const CLOSE_EVENT_IX_DISCRIMINATOR = 11;
-export const CLOSE_MARKET_IX_DISCRIMINATOR = 12;
+// admin — 100–101
+export const INIT_PROGRAM_IX_DISCRIMINATOR = 100;
+export const SET_RFQ_SIGNER_IX_DISCRIMINATOR = 101;
+// event / market — 110–114
+export const INIT_EVENT_IX_DISCRIMINATOR = 110;
+export const INIT_MARKET_IX_DISCRIMINATOR = 111;
+export const CLOSE_EVENT_IX_DISCRIMINATOR = 112;
+export const CLOSE_MARKET_IX_DISCRIMINATOR = 113;
 /** `update_event_state` — must match `UPDATE_EVENT_STATE_IX_DISCRIMINATOR` in the MM program. */
-export const UPDATE_EVENT_STATE_IX_DISCRIMINATOR = 13;
+export const UPDATE_EVENT_STATE_IX_DISCRIMINATOR = 114;
+// auction CPI — 120–123
+export const GET_QUOTE_IX_DISCRIMINATOR = 120;
+export const FILL_QUOTE_IX_DISCRIMINATOR = 121;
+export const GET_QUOTE_PARLAY_IX_DISCRIMINATOR = 122;
+export const FILL_QUOTE_PARLAY_IX_DISCRIMINATOR = 123;
+// RFQ CPI — 130–131
+export const MM_FILL_BET_RFQ_IX_DISCRIMINATOR = 130;
+export const MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR = 131;
+// cashout CPI — 140–145
+export const GET_CASHOUT_QUOTE_IX_DISCRIMINATOR = 140;
+export const FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR = 141;
+export const GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR = 142;
+export const FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR = 143;
+export const FILL_CASHOUT_RFQ_IX_DISCRIMINATOR = 144;
+export const FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR = 145;
+// funds — 150
+export const WITHDRAW_FROM_TOKEN_ACCOUNT_IX_DISCRIMINATOR = 150;
+// dev tooling
 export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
@@ -175,25 +200,7 @@ const getU32BigintDecoder = (): Decoder<bigint> =>
 export { encodeEventIdWire, getEventIdDecoder, getEventIdEncoder, getMarketIdDecoder, getMarketIdEncoder } from './wire_codecs.js';
 
 
-const getMmOracleTwoOutcomeStructEncoder = (): Encoder<Omit<MmOracleMarketDataTwoOutcome, 'kind'>> =>
-   getStructEncoder([
-      ['discriminator', getU8Encoder()],
-      ['bump', getU8Encoder()],
-      ['sequence', getU32BigintEncoder('sequence')],
-      ['odds0', getU32BigintEncoder('odds0')],
-      ['odds1', getU32BigintEncoder('odds1')],
-   ]);
-
-const getMmOracleTwoOutcomeStructDecoder = (): Decoder<Omit<MmOracleMarketDataTwoOutcome, 'kind'>> =>
-   getStructDecoder([
-      ['discriminator', getU8Decoder()],
-      ['bump', getU8Decoder()],
-      ['sequence', getU32BigintDecoder()],
-      ['odds0', getU32BigintDecoder()],
-      ['odds1', getU32BigintDecoder()],
-   ]);
-
-const getMmOracleThreeOutcomeStructEncoder = (): Encoder<Omit<MmOracleMarketDataThreeOutcome, 'kind'>> =>
+const getMmOracleStructEncoder = (): Encoder<MmOracleMarketData> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
@@ -203,7 +210,7 @@ const getMmOracleThreeOutcomeStructEncoder = (): Encoder<Omit<MmOracleMarketData
       ['odds2', getU32BigintEncoder('odds2')],
    ]);
 
-const getMmOracleThreeOutcomeStructDecoder = (): Decoder<Omit<MmOracleMarketDataThreeOutcome, 'kind'>> =>
+const getMmOracleStructDecoder = (): Decoder<MmOracleMarketData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
@@ -213,34 +220,19 @@ const getMmOracleThreeOutcomeStructDecoder = (): Decoder<Omit<MmOracleMarketData
       ['odds2', getU32BigintDecoder()],
    ]);
 
-export function encodeMmOracleMarketDataTwoOutcome(data: Omit<MmOracleMarketDataTwoOutcome, 'kind'>): Uint8Array {
-   const out = getMmOracleTwoOutcomeStructEncoder().encode(data);
-   if (out.length !== MM_ORACLE_ACCOUNT_LEN_TWO_OUTCOME) {
-      throw new RangeError(`oracle two-outcome wire len ${out.length}`);
-   }
-   return new Uint8Array(out);
-}
-
-export function encodeMmOracleMarketDataThreeOutcome(data: Omit<MmOracleMarketDataThreeOutcome, 'kind'>): Uint8Array {
-   const out = getMmOracleThreeOutcomeStructEncoder().encode(data);
-   if (out.length !== MM_ORACLE_ACCOUNT_LEN_THREE_OUTCOME) {
-      throw new RangeError(`oracle three-outcome wire len ${out.length}`);
+export function encodeMmOracleMarketData(data: MmOracleMarketData): Uint8Array {
+   const out = getMmOracleStructEncoder().encode(data);
+   if (out.length !== MM_ORACLE_ACCOUNT_LEN) {
+      throw new RangeError(`oracle account wire len ${out.length}; expected ${MM_ORACLE_ACCOUNT_LEN}`);
    }
    return new Uint8Array(out);
 }
 
 export function decodeMmOracleMarketData(data: ReadonlyUint8Array): MmOracleMarketData {
-   if (data.length === MM_ORACLE_ACCOUNT_LEN_TWO_OUTCOME) {
-      const d = getMmOracleTwoOutcomeStructDecoder().decode(new Uint8Array(data));
-      return { kind: 'twoOutcome', ...d };
+   if (data.length !== MM_ORACLE_ACCOUNT_LEN) {
+      throw new RangeError(`oracle account len ${data.length}; expected ${MM_ORACLE_ACCOUNT_LEN}`);
    }
-   if (data.length === MM_ORACLE_ACCOUNT_LEN_THREE_OUTCOME) {
-      const d = getMmOracleThreeOutcomeStructDecoder().decode(new Uint8Array(data));
-      return { kind: 'threeOutcome', ...d };
-   }
-   throw new RangeError(
-      `oracle account len ${data.length}; expected ${MM_ORACLE_ACCOUNT_LEN_TWO_OUTCOME} or ${MM_ORACLE_ACCOUNT_LEN_THREE_OUTCOME}`,
-   );
+   return getMmOracleStructDecoder().decode(new Uint8Array(data));
 }
 
 export const getMmReturnDataDecoder = (): Decoder<MmReturnData> =>
@@ -255,34 +247,31 @@ export const getMmReturnDataEncoder = (): Encoder<MmReturnData> =>
       ['oddsScaled', getU32BigintEncoder('oddsScaled')],
    ]);
 
-const getGetParlayQuoteReturnWireDecoder = (): Decoder<GetParlayQuoteReturnWire> =>
-   transformDecoder(
-      getStructDecoder([
-         ['maxAmount', getU64Decoder()],
-         ['oddsScaled', getU32BigintDecoder()],
-         ['numLegs', getU8Decoder()],
-         ['legOdds0', getU32BigintDecoder()],
-         ['legOdds1', getU32BigintDecoder()],
-         ['legOdds2', getU32BigintDecoder()],
-         ['legOdds3', getU32BigintDecoder()],
-         ['legOdds4', getU32BigintDecoder()],
-      ]),
-      (row) => ({
-         maxAmount: row.maxAmount,
-         oddsScaled: row.oddsScaled,
-         numLegs: row.numLegs,
-         legOdds: [row.legOdds0, row.legOdds1, row.legOdds2, row.legOdds3, row.legOdds4],
-      }),
-   );
 
 /** Return data from MM `get_quote_parlay` (`GetParlayQuoteReturnWire`). */
 export function decodeGetParlayQuoteReturnWire(data: ReadonlyUint8Array): GetParlayQuoteReturnWire {
-   if (data.length !== PARLAY_QUOTE_RETURN_WIRE_LEN) {
+   if (data.length < PARLAY_QUOTE_RETURN_HEADER_LEN) {
       throw new RangeError(
-         `get_parlay_quote return data len ${data.length}; expected ${PARLAY_QUOTE_RETURN_WIRE_LEN}`,
+         `get_parlay_quote return data len ${data.length} < header ${PARLAY_QUOTE_RETURN_HEADER_LEN}`,
       );
    }
-   return getGetParlayQuoteReturnWireDecoder().decode(new Uint8Array(data));
+   const numLegs = data[12]!;
+   if (numLegs < 2 || numLegs > MAX_PARLAY_LEGS) {
+      throw new RangeError(`get_parlay_quote return numLegs ${numLegs}`);
+   }
+   const expected = parlayQuoteReturnWireLen(numLegs);
+   if (data.length !== expected) {
+      throw new RangeError(`get_parlay_quote return data len ${data.length}; expected ${expected}`);
+   }
+   const maxAmount = getU64Decoder().decode(data.subarray(0, 8));
+   const oddsScaled = getU32BigintDecoder().decode(data.subarray(8, 12));
+   const legOdds: bigint[] = [];
+   const oddsDec = getU32BigintDecoder();
+   for (let i = 0; i < numLegs; i++) {
+      const off = PARLAY_QUOTE_RETURN_HEADER_LEN + i * 4;
+      legOdds.push(oddsDec.decode(data.subarray(off, off + 4)));
+   }
+   return { maxAmount, oddsScaled, numLegs, legOdds };
 }
 
 export const getMmQuoteBufferEncoder = (): Encoder<MmQuoteBuffer> =>
@@ -367,6 +356,124 @@ export const getGetQuoteIxDataDecoder = (): Decoder<GetQuoteIxData> =>
       ['eventStateSequence', getU16Decoder()],
    ]);
 
+export const getFillQuoteIxDataEncoder = (): Encoder<FillQuoteIxData> =>
+   getStructEncoder([
+      ['instructionDiscriminator', getU8Encoder()],
+      ['amountToFill', getU64Encoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+      ['marketId', getMarketIdEncoder()],
+      ['side', getU8Encoder()],
+      ['eventGameState', getEventGameStateEncoder()],
+      ['eventStateSequence', getU16Encoder()],
+      ['amountToSend', getU64Encoder()],
+   ]);
+
+export const getFillQuoteIxDataDecoder = (): Decoder<FillQuoteIxData> =>
+   getStructDecoder([
+      ['instructionDiscriminator', getU8Decoder()],
+      ['amountToFill', getU64Decoder()],
+      ['oddsScaled', getU32BigintDecoder()],
+      ['marketId', getMarketIdDecoder()],
+      ['side', getU8Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
+      ['eventStateSequence', getU16Decoder()],
+      ['amountToSend', getU64Decoder()],
+   ]);
+
+export const getGetCashoutQuoteIxDataEncoder = (): Encoder<GetCashoutQuoteIxData> =>
+   getStructEncoder([
+      ['instructionDiscriminator', getU8Encoder()],
+      ['amount', getU64Encoder()],
+      ['payout', getU64Encoder()],
+      ['minPayout', getU64Encoder()],
+      ['marketId', getMarketIdEncoder()],
+      ['side', getU8Encoder()],
+      ['eventGameState', getEventGameStateEncoder()],
+      ['eventStateSequence', getU16Encoder()],
+   ]);
+
+export const getGetCashoutQuoteIxDataDecoder = (): Decoder<GetCashoutQuoteIxData> =>
+   getStructDecoder([
+      ['instructionDiscriminator', getU8Decoder()],
+      ['amount', getU64Decoder()],
+      ['payout', getU64Decoder()],
+      ['minPayout', getU64Decoder()],
+      ['marketId', getMarketIdDecoder()],
+      ['side', getU8Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
+      ['eventStateSequence', getU16Decoder()],
+   ]);
+
+export const getFillCashoutQuoteIxDataEncoder = (): Encoder<FillCashoutQuoteIxData> =>
+   getStructEncoder([
+      ['instructionDiscriminator', getU8Encoder()],
+      ['amount', getU64Encoder()],
+      ['amountToSend', getU64Encoder()],
+      ['marketId', getMarketIdEncoder()],
+      ['side', getU8Encoder()],
+      ['eventGameState', getEventGameStateEncoder()],
+      ['eventStateSequence', getU16Encoder()],
+   ]);
+
+export const getFillCashoutQuoteIxDataDecoder = (): Decoder<FillCashoutQuoteIxData> =>
+   getStructDecoder([
+      ['instructionDiscriminator', getU8Decoder()],
+      ['amount', getU64Decoder()],
+      ['amountToSend', getU64Decoder()],
+      ['marketId', getMarketIdDecoder()],
+      ['side', getU8Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
+      ['eventStateSequence', getU16Decoder()],
+   ]);
+
+export const getFillCashoutQuoteParlayIxDataEncoder = (): Encoder<FillCashoutQuoteParlayIxData> =>
+   getStructEncoder([
+      ['instructionDiscriminator', getU8Encoder()],
+      ['amount', getU64Encoder()],
+      ['amountToSend', getU64Encoder()],
+   ]);
+
+export const getFillCashoutQuoteParlayIxDataDecoder = (): Decoder<FillCashoutQuoteParlayIxData> =>
+   getStructDecoder([
+      ['instructionDiscriminator', getU8Decoder()],
+      ['amount', getU64Decoder()],
+      ['amountToSend', getU64Decoder()],
+   ]);
+
+export const getParlayLegSelEncoder = (): Encoder<ParlayLegSel> =>
+   getStructEncoder([
+      ['marketId', getMarketIdEncoder()],
+      ['side', getU8Encoder()],
+      ['eventStateSequence', getU16Encoder()],
+      ['eventGameState', getEventGameStateEncoder()],
+   ]);
+
+export const getParlayLegSelDecoder = (): Decoder<ParlayLegSel> =>
+   getStructDecoder([
+      ['marketId', getMarketIdDecoder()],
+      ['side', getU8Decoder()],
+      ['eventStateSequence', getU16Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
+   ]);
+
+export const getParlayLegQuotedEncoder = (): Encoder<ParlayLegQuoted> =>
+   getStructEncoder([
+      ['marketId', getMarketIdEncoder()],
+      ['side', getU8Encoder()],
+      ['eventStateSequence', getU16Encoder()],
+      ['eventGameState', getEventGameStateEncoder()],
+      ['oddsScaled', getU32BigintEncoder('oddsScaled')],
+   ]);
+
+export const getParlayLegQuotedDecoder = (): Decoder<ParlayLegQuoted> =>
+   getStructDecoder([
+      ['marketId', getMarketIdDecoder()],
+      ['side', getU8Decoder()],
+      ['eventStateSequence', getU16Decoder()],
+      ['eventGameState', getEventGameStateDecoder()],
+      ['oddsScaled', getU32BigintDecoder()],
+   ]);
+
 export const getParlayLegWireEncoder = (): Encoder<ParlayLegWire> =>
    getStructEncoder([
       ['marketId', getMarketIdEncoder()],
@@ -387,31 +494,57 @@ export const getParlayLegWireDecoder = (): Decoder<ParlayLegWire> =>
       ['result', getU8Decoder()],
    ]);
 
-/** Pad `ParlayLegTable` wire to `MAX_PARLAY_LEGS` slots; unused slots are zero. */
-function padParlayLegTableBytes(legs: readonly ParlayLegWire[], numLegs: number): Uint8Array {
+/** Pad `ParlayLegTable` wire to `MAX_PARLAY_LEGS` quoted slots; unused slots are zero. MM quote buffer only. */
+export function padParlayLegTableBytes(legs: readonly ParlayLegQuoted[], numLegs: number): Uint8Array {
    if (numLegs < 1 || numLegs > MAX_PARLAY_LEGS || legs.length < numLegs) {
       throw new RangeError('padParlayLegTableBytes: invalid legs / numLegs');
    }
-   const enc = getParlayLegWireEncoder();
+   const enc = getParlayLegQuotedEncoder();
    const out = new Uint8Array(PARLAY_LEG_TABLE_LEN);
-   let o = 0;
    for (let i = 0; i < MAX_PARLAY_LEGS; i++) {
       if (i < numLegs) {
-         out.set(enc.encode(legs[i]!), o);
+         out.set(enc.encode(legs[i]!), i * PARLAY_LEG_QUOTED_LEN);
       }
-      o += PARLAY_LEG_WIRE_LEN;
    }
    return out;
 }
 
-function decodeParlayLegTableBytes(table: Uint8Array): ParlayLegWire[] {
+/** Encode only `numLegs` live get_quote_parlay selection legs (no padding). */
+export function encodeLiveParlayLegsBytes(legs: readonly ParlayLegSel[], numLegs: number): Uint8Array {
+   if (numLegs < 1 || legs.length < numLegs) {
+      throw new RangeError('encodeLiveParlayLegsBytes: invalid legs / numLegs');
+   }
+   const enc = getParlayLegSelEncoder();
+   const out = new Uint8Array(numLegs * PARLAY_LEG_SEL_LEN);
+   for (let i = 0; i < numLegs; i++) {
+      out.set(enc.encode(legs[i]!), i * PARLAY_LEG_SEL_LEN);
+   }
+   return out;
+}
+
+/** Decode `numLegs` live get_quote_parlay selection legs from unpadded wire bytes. */
+export function decodeLiveParlayLegsBytes(bytes: ReadonlyUint8Array, numLegs: number): readonly ParlayLegSel[] {
+   const expected = numLegs * PARLAY_LEG_SEL_LEN;
+   if (bytes.length !== expected) {
+      throw new RangeError(`live parlay legs bytes ${bytes.length}; expected ${expected} for ${numLegs} legs`);
+   }
+   const dec = getParlayLegSelDecoder();
+   const legs: ParlayLegSel[] = [];
+   for (let i = 0; i < numLegs; i++) {
+      const off = i * PARLAY_LEG_SEL_LEN;
+      legs.push(dec.decode(bytes.subarray(off, off + PARLAY_LEG_SEL_LEN)));
+   }
+   return legs;
+}
+
+function decodeParlayLegTableBytes(table: Uint8Array): ParlayLegQuoted[] {
    if (table.length !== PARLAY_LEG_TABLE_LEN) {
       throw new RangeError(`parlay leg table len ${table.length}`);
    }
-   const dec = getParlayLegWireDecoder();
-   const legs: ParlayLegWire[] = [];
+   const dec = getParlayLegQuotedDecoder();
+   const legs: ParlayLegQuoted[] = [];
    for (let i = 0; i < MAX_PARLAY_LEGS; i++) {
-      const slice = table.subarray(i * PARLAY_LEG_WIRE_LEN, (i + 1) * PARLAY_LEG_WIRE_LEN);
+      const slice = table.subarray(i * PARLAY_LEG_QUOTED_LEN, (i + 1) * PARLAY_LEG_QUOTED_LEN);
       legs.push(dec.decode(slice));
    }
    return legs;
@@ -422,19 +555,20 @@ export function encodeGetQuoteParlayIxData(ix: GetQuoteParlayIxData): Uint8Array
    if (ix.instructionDiscriminator !== GET_QUOTE_PARLAY_IX_DISCRIMINATOR) {
       throw new RangeError(`get_quote_parlay instructionDiscriminator must be ${GET_QUOTE_PARLAY_IX_DISCRIMINATOR}`);
    }
-   const out = new Uint8Array(GET_QUOTE_PARLAY_IX_WIRE_LEN);
+   const expected = getQuoteParlayIxWireLen(ix.numLegs);
+   const out = new Uint8Array(expected);
    out[0] = ix.instructionDiscriminator & 0xff;
    const dv = new DataView(out.buffer);
    dv.setBigUint64(1, ix.amount, true);
    dv.setUint32(9, assertU32Bigint('oddsScaled', ix.oddsScaled), true);
    out[13] = ix.numLegs & 0xff;
-   out.set(padParlayLegTableBytes(ix.legs, ix.numLegs), 14);
+   out.set(encodeLiveParlayLegsBytes(ix.legs, ix.numLegs), 14);
    return out;
 }
 
 export function decodeGetQuoteParlayIxData(data: ReadonlyUint8Array): GetQuoteParlayIxData {
-   if (data.length !== GET_QUOTE_PARLAY_IX_WIRE_LEN) {
-      throw new RangeError(`get_quote_parlay wire len ${data.length}`);
+   if (data.length < GET_QUOTE_PARLAY_IX_HEADER_LEN) {
+      throw new RangeError(`get_quote_parlay wire len ${data.length} < header ${GET_QUOTE_PARLAY_IX_HEADER_LEN}`);
    }
    const u8 = new Uint8Array(data);
    const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
@@ -442,16 +576,20 @@ export function decodeGetQuoteParlayIxData(data: ReadonlyUint8Array): GetQuotePa
    const amount = dv.getBigUint64(1, true);
    const oddsScaled = BigInt(dv.getUint32(9, true) >>> 0);
    const numLegs = u8[13]!;
+   const expected = getQuoteParlayIxWireLen(numLegs);
+   if (data.length !== expected) {
+      throw new RangeError(`get_quote_parlay wire len ${data.length}; expected ${expected} for ${numLegs} legs`);
+   }
    if (numLegs < 2 || numLegs > MAX_PARLAY_LEGS) {
       throw new RangeError(`get_quote_parlay numLegs invalid: ${numLegs}`);
    }
-   const allLegs = decodeParlayLegTableBytes(u8.subarray(14, 14 + PARLAY_LEG_TABLE_LEN));
+   const legs = decodeLiveParlayLegsBytes(u8.subarray(14), numLegs);
    return {
       instructionDiscriminator,
       amount,
       oddsScaled,
       numLegs,
-      legs: allLegs.slice(0, numLegs),
+      legs,
    };
 }
 
@@ -483,6 +621,125 @@ export function decodeFillParlayQuoteIxData(data: ReadonlyUint8Array): FillParla
    };
 }
 
+export function encodeFillQuoteIxData(ix: FillQuoteIxData): Uint8Array {
+   if (ix.instructionDiscriminator !== FILL_QUOTE_IX_DISCRIMINATOR) {
+      throw new RangeError(`fill_quote instructionDiscriminator must be ${FILL_QUOTE_IX_DISCRIMINATOR}`);
+   }
+   const out = getFillQuoteIxDataEncoder().encode(ix);
+   if (out.length !== FILL_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_quote wire len ${out.length}`);
+   }
+   return new Uint8Array(out);
+}
+
+export function decodeFillQuoteIxData(data: ReadonlyUint8Array): FillQuoteIxData {
+   if (data.length !== FILL_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_quote wire len ${data.length}`);
+   }
+   return getFillQuoteIxDataDecoder().decode(new Uint8Array(data));
+}
+
+export function encodeGetCashoutQuoteIxData(ix: GetCashoutQuoteIxData): Uint8Array {
+   if (ix.instructionDiscriminator !== GET_CASHOUT_QUOTE_IX_DISCRIMINATOR) {
+      throw new RangeError(`get_cashout_quote instructionDiscriminator must be ${GET_CASHOUT_QUOTE_IX_DISCRIMINATOR}`);
+   }
+   const out = getGetCashoutQuoteIxDataEncoder().encode(ix);
+   if (out.length !== GET_CASHOUT_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`get_cashout_quote wire len ${out.length}`);
+   }
+   return new Uint8Array(out);
+}
+
+export function decodeGetCashoutQuoteIxData(data: ReadonlyUint8Array): GetCashoutQuoteIxData {
+   if (data.length !== GET_CASHOUT_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`get_cashout_quote wire len ${data.length}`);
+   }
+   return getGetCashoutQuoteIxDataDecoder().decode(new Uint8Array(data));
+}
+
+export function encodeFillCashoutQuoteIxData(ix: FillCashoutQuoteIxData): Uint8Array {
+   if (ix.instructionDiscriminator !== FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR) {
+      throw new RangeError(`fill_cashout_quote instructionDiscriminator must be ${FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR}`);
+   }
+   const out = getFillCashoutQuoteIxDataEncoder().encode(ix);
+   if (out.length !== FILL_CASHOUT_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_cashout_quote wire len ${out.length}`);
+   }
+   return new Uint8Array(out);
+}
+
+export function decodeFillCashoutQuoteIxData(data: ReadonlyUint8Array): FillCashoutQuoteIxData {
+   if (data.length !== FILL_CASHOUT_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_cashout_quote wire len ${data.length}`);
+   }
+   return getFillCashoutQuoteIxDataDecoder().decode(new Uint8Array(data));
+}
+
+export function encodeGetCashoutQuoteParlayIxData(ix: GetCashoutQuoteParlayIxData): Uint8Array {
+   if (ix.instructionDiscriminator !== GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR) {
+      throw new RangeError(
+         `get_cashout_quote_parlay instructionDiscriminator must be ${GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR}`,
+      );
+   }
+   if (ix.numLegs < 2 || ix.numLegs > MAX_PARLAY_LEGS || ix.legs.length < ix.numLegs) {
+      throw new RangeError(`get_cashout_quote_parlay numLegs invalid: ${ix.numLegs}`);
+   }
+   const expected = getCashoutQuoteParlayIxWireLen(ix.numLegs);
+   const out = new Uint8Array(expected);
+   out[0] = ix.instructionDiscriminator & 0xff;
+   const dv = new DataView(out.buffer);
+   dv.setBigUint64(1, ix.amount, true);
+   dv.setBigUint64(9, ix.payout, true);
+   dv.setBigUint64(17, ix.minPayout, true);
+   out[25] = ix.numLegs & 0xff;
+   out.set(encodeLiveParlayLegsBytes(ix.legs, ix.numLegs), 26);
+   return out;
+}
+
+export function decodeGetCashoutQuoteParlayIxData(data: ReadonlyUint8Array): GetCashoutQuoteParlayIxData {
+   if (data.length < GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN) {
+      throw new RangeError(
+         `get_cashout_quote_parlay wire len ${data.length} < header ${GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN}`,
+      );
+   }
+   const u8 = new Uint8Array(data);
+   const dv = new DataView(u8.buffer, u8.byteOffset, u8.byteLength);
+   const instructionDiscriminator = u8[0]!;
+   const amount = dv.getBigUint64(1, true);
+   const payout = dv.getBigUint64(9, true);
+   const minPayout = dv.getBigUint64(17, true);
+   const numLegs = u8[25]!;
+   const expected = getCashoutQuoteParlayIxWireLen(numLegs);
+   if (data.length !== expected) {
+      throw new RangeError(`get_cashout_quote_parlay wire len ${data.length}; expected ${expected} for ${numLegs} legs`);
+   }
+   if (numLegs < 2 || numLegs > MAX_PARLAY_LEGS) {
+      throw new RangeError(`get_cashout_quote_parlay numLegs invalid: ${numLegs}`);
+   }
+   const legs = [...decodeLiveParlayLegsBytes(u8.subarray(26), numLegs)];
+   return { instructionDiscriminator, amount, payout, minPayout, numLegs, legs };
+}
+
+export function encodeFillCashoutQuoteParlayIxData(ix: FillCashoutQuoteParlayIxData): Uint8Array {
+   if (ix.instructionDiscriminator !== FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR) {
+      throw new RangeError(
+         `fill_cashout_quote_parlay instructionDiscriminator must be ${FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR}`,
+      );
+   }
+   const out = getFillCashoutQuoteParlayIxDataEncoder().encode(ix);
+   if (out.length !== FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN) {
+      throw new RangeError(`fill_cashout_quote_parlay wire len ${out.length}`);
+   }
+   return new Uint8Array(out);
+}
+
+export function decodeFillCashoutQuoteParlayIxData(data: ReadonlyUint8Array): FillCashoutQuoteParlayIxData {
+   if (data.length !== FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN) {
+      throw new RangeError(`fill_cashout_quote_parlay wire len ${data.length}`);
+   }
+   return getFillCashoutQuoteParlayIxDataDecoder().decode(new Uint8Array(data));
+}
+
 export function decodeMmParlayQuoteBuffer(data: ReadonlyUint8Array): MmParlayQuoteBuffer {
    if (data.length !== MM_PARLAY_QUOTE_BUFFER_LEN) {
       throw new RangeError(`mm parlay quote buffer len ${data.length}`);
@@ -496,7 +753,12 @@ export function decodeMmParlayQuoteBuffer(data: ReadonlyUint8Array): MmParlayQuo
    const maxAmount = dv.getBigUint64(34, true);
    const oddsScaled = BigInt(dv.getUint32(42, true) >>> 0);
    const numLegs = u8[46]!;
-   const allLegs = decodeParlayLegTableBytes(u8.subarray(47, 47 + PARLAY_LEG_TABLE_LEN));
+   const allLegs = decodeParlayLegTableBytes(
+      u8.subarray(
+         MM_PARLAY_QUOTE_BUFFER_HEADER_LEN,
+         MM_PARLAY_QUOTE_BUFFER_HEADER_LEN + PARLAY_LEG_TABLE_LEN,
+      ),
+   );
    return {
       discriminator,
       isUsed,
@@ -520,12 +782,6 @@ const getInitProgramIxDataDecoder = (): Decoder<InitProgramIxData> =>
       ['rfqSigner', getAddressDecoder()],
    ]);
 
-const getSetRfqSignerIxDataEncoder = (): Encoder<SetRfqSignerIxData> =>
-   getStructEncoder([['rfqSigner', getAddressEncoder()]]);
-
-const getSetRfqSignerIxDataDecoder = (): Decoder<SetRfqSignerIxData> =>
-   getStructDecoder([['rfqSigner', getAddressDecoder()]]);
-
 export function encodeFillRfqIxData(ix: FillRfqIxData): Uint8Array {
    const out = new Uint8Array(FILL_RFQ_IX_WIRE_LEN);
    out[0] = ix.instructionDiscriminator & 0xff;
@@ -547,35 +803,19 @@ function encodeUpdateOraclePayload(
    sequence: bigint,
    odds0: bigint,
    odds1: bigint,
-   odds2?: bigint,
+   odds2: bigint,
 ): Uint8Array {
-   if (odds2 !== undefined) {
-      return new Uint8Array(
-         getStructEncoder([
-            ['sequence', getU32BigintEncoder('sequence')],
-            ['odds0', getU32BigintEncoder('odds0')],
-            ['odds1', getU32BigintEncoder('odds1')],
-            ['odds2', getU32BigintEncoder('odds2')],
-         ]).encode({ sequence, odds0, odds1, odds2 }),
-      );
-   }
    return new Uint8Array(
       getStructEncoder([
          ['sequence', getU32BigintEncoder('sequence')],
          ['odds0', getU32BigintEncoder('odds0')],
          ['odds1', getU32BigintEncoder('odds1')],
-      ]).encode({ sequence, odds0, odds1 }),
+         ['odds2', getU32BigintEncoder('odds2')],
+      ]).encode({ sequence, odds0, odds1, odds2 }),
    );
 }
 
-const getUpdateOracleBodyTwoDecoder = (): Decoder<{ sequence: bigint; odds0: bigint; odds1: bigint }> =>
-   getStructDecoder([
-      ['sequence', getU32BigintDecoder()],
-      ['odds0', getU32BigintDecoder()],
-      ['odds1', getU32BigintDecoder()],
-   ]);
-
-const getUpdateOracleBodyThreeDecoder = (): Decoder<{
+const getUpdateOracleBodyDecoder = (): Decoder<{
    sequence: bigint;
    odds0: bigint;
    odds1: bigint;
@@ -622,12 +862,8 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
    switch (ix.kind) {
       case 'updateOracle': {
          const p = encodeUpdateOraclePayload(ix.sequence, ix.odds0, ix.odds1, ix.odds2);
-         const expected =
-            ix.odds2 !== undefined
-               ? UPDATE_ORACLE_IX_PAYLOAD_LEN_THREE_OUTCOME
-               : UPDATE_ORACLE_IX_PAYLOAD_LEN_TWO_OUTCOME;
-         if (p.length !== expected) {
-            throw new RangeError(`updateOracleBody payload len ${p.length}; expected ${expected}`);
+         if (p.length !== UPDATE_ORACLE_IX_PAYLOAD_LEN) {
+            throw new RangeError(`updateOracleBody payload len ${p.length}; expected ${UPDATE_ORACLE_IX_PAYLOAD_LEN}`);
          }
          return concatDiscriminator(UPDATE_ORACLE_BODY_IX_DISCRIMINATOR, p);
       }
@@ -645,10 +881,14 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
          }
          return new Uint8Array(out);
       }
+      case 'fillQuote': {
+         return encodeFillQuoteIxData(ix.data);
+      }
       case 'getQuoteParlay': {
          const out = encodeGetQuoteParlayIxData(ix.data);
-         if (out.length !== GET_QUOTE_PARLAY_IX_WIRE_LEN) {
-            throw new RangeError(`getQuoteParlay wire len ${out.length}`);
+         const expected = getQuoteParlayIxWireLen(ix.data.numLegs);
+         if (out.length !== expected) {
+            throw new RangeError(`getQuoteParlay wire len ${out.length}; expected ${expected}`);
          }
          return new Uint8Array(out);
       }
@@ -656,6 +896,38 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
          const out = encodeFillParlayQuoteIxData(ix.data);
          if (out.length !== FILL_QUOTE_PARLAY_IX_WIRE_LEN) {
             throw new RangeError(`fillParlayQuote wire len ${out.length}`);
+         }
+         return new Uint8Array(out);
+      }
+      case 'getCashoutQuote': {
+         return encodeGetCashoutQuoteIxData(ix.data);
+      }
+      case 'fillCashoutQuote': {
+         return encodeFillCashoutQuoteIxData(ix.data);
+      }
+      case 'getCashoutQuoteParlay': {
+         return encodeGetCashoutQuoteParlayIxData(ix.data);
+      }
+      case 'fillCashoutQuoteParlay': {
+         return encodeFillCashoutQuoteParlayIxData(ix.data);
+      }
+      case 'fillCashoutRfq': {
+         const out = encodeFillRfqIxData(ix.data);
+         if (out[0] !== FILL_CASHOUT_RFQ_IX_DISCRIMINATOR) {
+            throw new RangeError(`fillCashoutRfq disc ${out[0]}; expected ${FILL_CASHOUT_RFQ_IX_DISCRIMINATOR}`);
+         }
+         if (out.length !== FILL_RFQ_IX_WIRE_LEN) {
+            throw new RangeError(`fillCashoutRfq wire len ${out.length}`);
+         }
+         return new Uint8Array(out);
+      }
+      case 'fillParlayCashoutRfq': {
+         const out = encodeFillRfqIxData(ix.data);
+         if (out[0] !== FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR) {
+            throw new RangeError(`fillParlayCashoutRfq disc ${out[0]}; expected ${FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR}`);
+         }
+         if (out.length !== FILL_RFQ_IX_WIRE_LEN) {
+            throw new RangeError(`fillParlayCashoutRfq wire len ${out.length}`);
          }
          return new Uint8Array(out);
       }
@@ -680,18 +952,21 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
          return new Uint8Array(out);
       }
       case 'setRfqSigner': {
-         const p = getSetRfqSignerIxDataEncoder().encode(ix.data);
-         if (p.length !== SET_RFQ_SIGNER_IX_DATA_LEN) {
-            throw new RangeError(`setRfqSigner payload len ${p.length}`);
-         }
-         return concatDiscriminator(SET_RFQ_SIGNER_IX_DISCRIMINATOR, p);
+         return concatDiscriminator(SET_RFQ_SIGNER_IX_DISCRIMINATOR, new Uint8Array());
       }
       case 'initEvent': {
          const p = getEventIdEncoder().encode(ix.eventId);
          if (p.length !== EVENT_ID_WIRE_SIZE) {
             throw new RangeError(`event id payload len ${p.length}`);
          }
-         return concatDiscriminator(INIT_EVENT_IX_DISCRIMINATOR, p);
+         const body = ix.eventBody ?? new Uint8Array();
+         const out = new Uint8Array(1 + EVENT_ID_WIRE_SIZE + body.length);
+         out[0] = INIT_EVENT_IX_DISCRIMINATOR & 0xff;
+         out.set(new Uint8Array(p), 1);
+         if (body.length > 0) {
+            out.set(body, 1 + EVENT_ID_WIRE_SIZE);
+         }
+         return out;
       }
       case 'initMarket': {
          const mid = getMarketIdEncoder().encode(ix.marketId);
@@ -754,21 +1029,15 @@ export function decodeMarketMakerInstructionData(data: ReadonlyUint8Array): Deco
    const restBytes = new Uint8Array(rest);
    switch (disc) {
       case UPDATE_ORACLE_BODY_IX_DISCRIMINATOR:
-         if (rest.length === UPDATE_ORACLE_IX_PAYLOAD_LEN_TWO_OUTCOME) {
-            return {
-               kind: 'updateOracle',
-               ...getUpdateOracleBodyTwoDecoder().decode(restBytes),
-            };
+         if (rest.length !== UPDATE_ORACLE_IX_PAYLOAD_LEN) {
+            throw new RangeError(
+               `updateOracleBody: expected ${UPDATE_ORACLE_IX_PAYLOAD_LEN} payload bytes, got ${rest.length}`,
+            );
          }
-         if (rest.length === UPDATE_ORACLE_IX_PAYLOAD_LEN_THREE_OUTCOME) {
-            return {
-               kind: 'updateOracle',
-               ...getUpdateOracleBodyThreeDecoder().decode(restBytes),
-            };
-         }
-         throw new RangeError(
-            `updateOracleBody: expected ${UPDATE_ORACLE_IX_PAYLOAD_LEN_TWO_OUTCOME} or ${UPDATE_ORACLE_IX_PAYLOAD_LEN_THREE_OUTCOME} payload bytes, got ${rest.length}`,
-         );
+         return {
+            kind: 'updateOracle',
+            ...getUpdateOracleBodyDecoder().decode(restBytes),
+         };
       case INIT_PROGRAM_IX_DISCRIMINATOR:
          if (rest.length !== INIT_PROGRAM_IX_DATA_LEN) {
             throw new RangeError(`initProgram: expected ${INIT_PROGRAM_IX_DATA_LEN} bytes`);
@@ -779,16 +1048,67 @@ export function decodeMarketMakerInstructionData(data: ReadonlyUint8Array): Deco
             throw new RangeError(`getQuote: expected ${GET_QUOTE_IX_WIRE_LEN} bytes`);
          }
          return { kind: 'getQuote', data: getGetQuoteIxDataDecoder().decode(new Uint8Array(data)) };
-      case GET_QUOTE_PARLAY_IX_DISCRIMINATOR:
-         if (data.length !== GET_QUOTE_PARLAY_IX_WIRE_LEN) {
-            throw new RangeError(`getQuoteParlay: expected ${GET_QUOTE_PARLAY_IX_WIRE_LEN} bytes`);
+      case FILL_QUOTE_IX_DISCRIMINATOR:
+         if (data.length !== FILL_QUOTE_IX_WIRE_LEN) {
+            throw new RangeError(`fillQuote: expected ${FILL_QUOTE_IX_WIRE_LEN} bytes`);
+         }
+         return { kind: 'fillQuote', data: decodeFillQuoteIxData(new Uint8Array(data)) };
+      case GET_QUOTE_PARLAY_IX_DISCRIMINATOR: {
+         if (data.length < GET_QUOTE_PARLAY_IX_HEADER_LEN) {
+            throw new RangeError(`getQuoteParlay: wire len ${data.length} < header ${GET_QUOTE_PARLAY_IX_HEADER_LEN}`);
+         }
+         const numLegs = data[13]!;
+         const expected = getQuoteParlayIxWireLen(numLegs);
+         if (data.length !== expected) {
+            throw new RangeError(`getQuoteParlay: expected ${expected} bytes for ${numLegs} legs, got ${data.length}`);
          }
          return { kind: 'getQuoteParlay', data: decodeGetQuoteParlayIxData(new Uint8Array(data)) };
+      }
       case FILL_QUOTE_PARLAY_IX_DISCRIMINATOR:
          if (data.length !== FILL_QUOTE_PARLAY_IX_WIRE_LEN) {
             throw new RangeError(`fillParlayQuote: expected ${FILL_QUOTE_PARLAY_IX_WIRE_LEN} bytes`);
          }
          return { kind: 'fillParlayQuote', data: decodeFillParlayQuoteIxData(new Uint8Array(data)) };
+      case GET_CASHOUT_QUOTE_IX_DISCRIMINATOR:
+         if (data.length !== GET_CASHOUT_QUOTE_IX_WIRE_LEN) {
+            throw new RangeError(`getCashoutQuote: expected ${GET_CASHOUT_QUOTE_IX_WIRE_LEN} bytes`);
+         }
+         return { kind: 'getCashoutQuote', data: decodeGetCashoutQuoteIxData(new Uint8Array(data)) };
+      case FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR:
+         if (data.length !== FILL_CASHOUT_QUOTE_IX_WIRE_LEN) {
+            throw new RangeError(`fillCashoutQuote: expected ${FILL_CASHOUT_QUOTE_IX_WIRE_LEN} bytes`);
+         }
+         return { kind: 'fillCashoutQuote', data: decodeFillCashoutQuoteIxData(new Uint8Array(data)) };
+      case GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR: {
+         if (data.length < GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN) {
+            throw new RangeError(
+               `getCashoutQuoteParlay: wire len ${data.length} < header ${GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN}`,
+            );
+         }
+         const numLegs = data[25]!;
+         const expected = getCashoutQuoteParlayIxWireLen(numLegs);
+         if (data.length !== expected) {
+            throw new RangeError(
+               `getCashoutQuoteParlay: expected ${expected} bytes for ${numLegs} legs, got ${data.length}`,
+            );
+         }
+         return { kind: 'getCashoutQuoteParlay', data: decodeGetCashoutQuoteParlayIxData(new Uint8Array(data)) };
+      }
+      case FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR:
+         if (data.length !== FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN) {
+            throw new RangeError(`fillCashoutQuoteParlay: expected ${FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN} bytes`);
+         }
+         return { kind: 'fillCashoutQuoteParlay', data: decodeFillCashoutQuoteParlayIxData(new Uint8Array(data)) };
+      case FILL_CASHOUT_RFQ_IX_DISCRIMINATOR:
+         if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
+            throw new RangeError(`fillCashoutRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);
+         }
+         return { kind: 'fillCashoutRfq', data: decodeFillRfqIxData(new Uint8Array(data)) };
+      case FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR:
+         if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
+            throw new RangeError(`fillParlayCashoutRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);
+         }
+         return { kind: 'fillParlayCashoutRfq', data: decodeFillRfqIxData(new Uint8Array(data)) };
       case MM_FILL_BET_RFQ_IX_DISCRIMINATOR:
          if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
             throw new RangeError(`fillBetRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);
@@ -800,15 +1120,19 @@ export function decodeMarketMakerInstructionData(data: ReadonlyUint8Array): Deco
          }
          return { kind: 'fillParlayRfq', data: decodeFillRfqIxData(new Uint8Array(data)) };
       case SET_RFQ_SIGNER_IX_DISCRIMINATOR:
-         if (rest.length !== SET_RFQ_SIGNER_IX_DATA_LEN) {
-            throw new RangeError(`setRfqSigner: expected ${SET_RFQ_SIGNER_IX_DATA_LEN} bytes`);
+         if (rest.length !== 0) {
+            throw new RangeError(`setRfqSigner: expected 0 payload bytes`);
          }
-         return { kind: 'setRfqSigner', data: getSetRfqSignerIxDataDecoder().decode(restBytes) };
+         return { kind: 'setRfqSigner' };
       case INIT_EVENT_IX_DISCRIMINATOR:
-         if (rest.length !== EVENT_ID_WIRE_SIZE) {
-            throw new RangeError(`initEvent: expected ${EVENT_ID_WIRE_SIZE} bytes`);
+         if (rest.length < EVENT_ID_WIRE_SIZE) {
+            throw new RangeError(`initEvent: expected at least ${EVENT_ID_WIRE_SIZE} bytes`);
          }
-         return { kind: 'initEvent', eventId: getEventIdDecoder().decode(restBytes) };
+         return {
+            kind: 'initEvent',
+            eventId: getEventIdDecoder().decode(restBytes.subarray(0, EVENT_ID_WIRE_SIZE)),
+            eventBody: new Uint8Array(rest.subarray(EVENT_ID_WIRE_SIZE)),
+         };
       case INIT_MARKET_IX_DISCRIMINATOR:
          if (rest.length < MARKET_ID_WIRE_SIZE) {
             throw new RangeError('initMarket: data too short for market_id');
@@ -873,20 +1197,20 @@ export const decodeMmQuoteBuffer = (data: ReadonlyUint8Array): MmQuoteBuffer => 
 };
 
 export const decodeEventStateData = (data: ReadonlyUint8Array): EventStateData => {
-   if (data.length !== EVENT_STATE_LEN) {
+   if (data.length < EVENT_STATE_HEADER_LEN) {
       throw new RangeError(`event state len ${data.length}`);
    }
-   return getEventStateDataDecoder().decode(new Uint8Array(data));
+   return getEventStateDataDecoder().decode(new Uint8Array(data.subarray(0, EVENT_STATE_HEADER_LEN)));
 };
 
 export const decodeMmAccountConfig = (data: ReadonlyUint8Array): MmAccountConfig => {
-   if (data.length < MM_ACCOUNT_CONFIG_MIN_LEN) {
+   if (data.length < MM_CONFIG_PDA_HEADER_LEN) {
       throw new RangeError(`mm account config len ${data.length}`);
    }
-   return getMmAccountConfigDecoder().decode(new Uint8Array(data.subarray(0, MM_ACCOUNT_CONFIG_MIN_LEN)));
+   return getMmAccountConfigDecoder().decode(new Uint8Array(data.subarray(0, MM_CONFIG_PDA_HEADER_LEN)));
 };
 
-/** `init_market` / CPI: raw odds body only (8 or 12 bytes), placed after the 8-byte oracle header on-chain. */
+/** `init_market` / CPI: raw odds body only (8 or 12 bytes), placed after the 6-byte oracle header on-chain. */
 export function encodeOracleBodyTwoOutcome(odds0: bigint, odds1: bigint): Uint8Array {
    const enc = getStructEncoder([
       ['odds0', getU32BigintEncoder('odds0')],

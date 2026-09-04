@@ -1,9 +1,7 @@
-import { fetchAddressLookupTable } from "@solana-program/address-lookup-table";
 import {
    addSignersToTransactionMessage,
    appendTransactionMessageInstructions,
    assertIsTransactionWithBlockhashLifetime,
-   compressTransactionMessageUsingAddressLookupTables,
    compileTransaction,
    createNoopSigner,
    createTransactionMessage,
@@ -15,13 +13,11 @@ import {
    setTransactionMessageLifetimeUsingBlockhash,
    signTransactionMessageWithSigners,
    type Address,
-   type AddressesByLookupTableAddress,
    type Instruction,
    type Rpc,
    type SolanaRpcApi,
    type TransactionSigner,
 } from "@solana/kit";
-import { LOOKUP_TABLE_ID } from "spamm-aggregator-sdk";
 
 const PUBLIC_HTTP_RPC: Record<string, string> = {
    devnet: "https://api.devnet.solana.com",
@@ -63,16 +59,6 @@ export function httpToWsRpcUrl(httpUrl: string): string {
    return base;
 }
 
-async function fetchAddressesByLookupTable(
-   rpc: Rpc<SolanaRpcApi>,
-   lookupTableAddress: Address,
-): Promise<AddressesByLookupTableAddress> {
-   const {
-      data: { addresses },
-   } = await fetchAddressLookupTable(rpc, lookupTableAddress);
-   return { [lookupTableAddress]: addresses } as AddressesByLookupTableAddress;
-}
-
 function base64ReturnDataToBytes(data: readonly [string, string]): Uint8Array {
    const [b64] = data;
    const bin = atob(b64);
@@ -89,23 +75,17 @@ export async function buildSignV0Transaction(
       feePayer: TransactionSigner;
       instructions: readonly Instruction[];
       signers: readonly TransactionSigner[];
-      useALT?: boolean;
    }>,
 ): Promise<ReturnType<typeof signTransactionMessageWithSigners>> {
    const { value: latestBlockhash } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
 
-   let txMessage = pipe(
+   const txMessage = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayerSigner(params.feePayer, m),
       (m) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m),
       (m) => appendTransactionMessageInstructions([...params.instructions], m),
    );
 
-   if (params.useALT === true) {
-      const addressesByLookupTable = await fetchAddressesByLookupTable(rpc, LOOKUP_TABLE_ID);
-      txMessage = compressTransactionMessageUsingAddressLookupTables(txMessage, addressesByLookupTable);
-   }
-   
    const txMessageWithSigners = addSignersToTransactionMessage([...params.signers], txMessage);
    const signedTransaction = await signTransactionMessageWithSigners(txMessageWithSigners);
    assertIsTransactionWithBlockhashLifetime(signedTransaction);
@@ -113,36 +93,28 @@ export async function buildSignV0Transaction(
 }
 
 /**
- * Build one compiled (unsigned) v0 transaction per instruction chunk, sharing the same blockhash
- * and optional ALT compression. Caller signs with {@link TransactionModifyingSigner#modifyAndSignTransactions}.
+ * Build one compiled (unsigned) v0 transaction per instruction chunk, sharing the same blockhash.
+ * Caller signs with {@link TransactionModifyingSigner#modifyAndSignTransactions}.
  */
 export async function compileUnsignedV0TransactionChunks(
    rpc: Rpc<SolanaRpcApi>,
    params: Readonly<{
       feePayer: TransactionSigner;
       instructionChunks: readonly (readonly Instruction[])[];
-      useALT?: boolean;
    }>,
 ): Promise<readonly ReturnType<typeof compileTransaction>[]> {
    const { value: latestBlockhash } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
-   let lookup: AddressesByLookupTableAddress | undefined;
-   if (params.useALT === true) {
-      lookup = await fetchAddressesByLookupTable(rpc, LOOKUP_TABLE_ID);
-   }
    const out: ReturnType<typeof compileTransaction>[] = [];
    for (const instructions of params.instructionChunks) {
       if (instructions.length === 0) {
          continue;
       }
-      let txMessage = pipe(
+      const txMessage = pipe(
          createTransactionMessage({ version: 0 }),
          (m) => setTransactionMessageFeePayerSigner(params.feePayer, m),
          (m) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m),
          (m) => appendTransactionMessageInstructions([...instructions], m),
       );
-      if (params.useALT === true && lookup !== undefined) {
-         txMessage = compressTransactionMessageUsingAddressLookupTables(txMessage, lookup);
-      }
       const txMessageWithSigners = addSignersToTransactionMessage([params.feePayer], txMessage);
       out.push(compileTransaction(txMessageWithSigners));
    }
@@ -153,34 +125,22 @@ export async function simulateInstructionReturnData(
    rpc: Rpc<SolanaRpcApi>,
    instruction: Instruction,
    feePayerAddress: Address,
-   useALT = false,
 ): Promise<Uint8Array | undefined> {
    const feePayerNoop = createNoopSigner(feePayerAddress);
    const { value: latestBlockhash } = await rpc.getLatestBlockhash({ commitment: "confirmed" }).send();
 
-   let txMessage = pipe(
+   const txMessage = pipe(
       createTransactionMessage({ version: 0 }),
       (m) => setTransactionMessageFeePayer(feePayerNoop.address, m),
       (m) => setTransactionMessageLifetimeUsingBlockhash(latestBlockhash, m),
       (m) => appendTransactionMessageInstructions([instruction], m),
    );
 
-   if (useALT === true) {
-      const addressesByLookupTable = await fetchAddressesByLookupTable(rpc, LOOKUP_TABLE_ID);
-      txMessage = compressTransactionMessageUsingAddressLookupTables(
-         txMessage,
-         addressesByLookupTable,
-      ) as typeof txMessage;
-   }
-
    const unsignedTransaction = compileTransaction(txMessage);
    const wireBytes = getTransactionSize(unsignedTransaction);
-   console.debug(`[simulate] wire bytes: ${wireBytes} (useALT=${useALT})`);
+   console.debug(`[simulate] wire bytes: ${wireBytes}`);
    const encodedTransaction = getBase64EncodedWireTransaction(unsignedTransaction);
    const simulation = await rpc.simulateTransaction(encodedTransaction, { encoding: "base64", sigVerify: false }).send();
-   const raw = simulation.value.returnData?.data;
-   if (!raw) {
-      return undefined;
-   }
-   return base64ReturnDataToBytes(raw);
+   const data = simulation.value.returnData?.data;
+   return data === undefined ? undefined : base64ReturnDataToBytes(data);
 }

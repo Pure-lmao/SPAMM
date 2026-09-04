@@ -1,8 +1,6 @@
 use pinocchio::error::ProgramError;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use spamm_aggregator::state::FillRfqIxData;
-
 /// CPI payload for `fill_bet_rfq` / `fill_parlay_rfq` (bytes after the router
 /// discriminator), matching `FillRfqIxData` minus `instruction_discriminator`.
 #[derive(Copy, Clone, ZeroPod)]
@@ -26,5 +24,3 @@ impl FillRfqIxPayload {
       })
    }
 }
-
-const _: () = assert!(FILL_RFQ_IX_PAYLOAD_LEN == FillRfqIxData::WIRE_LEN - 1);

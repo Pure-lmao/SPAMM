@@ -1,10 +1,10 @@
 //! Force close a PDA and return the rent to the authority
 //! 
-//! Accounts: **3**
+//! Accounts: **4**
 //! 0. `authority` (writable signer)
 //! 1. `config_pda` (readonly)
 //! 2. `pda` (writable)
-//! 3. `system_program` (readonly)
+//! 3. `system_program` (readonly) — required for the lamport transfer on close
 //! 
 //! No instruction data after the router discriminator.
 

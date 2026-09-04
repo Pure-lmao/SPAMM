@@ -6,6 +6,7 @@
       "name": "spamm-market-maker-sdk",
       "dependencies": {
         "@solana/kit": "^6.8.0",
+        "spamm-aggregator-sdk": "file:../../../aggregator/sdk/ts",
       },
       "devDependencies": {
         "typescript": "^5.7.2",
@@ -98,6 +99,8 @@
     "chalk": ["chalk@5.6.2", "", {}, "sha512-7NzBL0rN6fMUW+f7A6Io4h40qQlG+xGmtMxfbnH/K7TAtt8JQWVQK+6g0UXKMeVJoyV5EkkNsErQ8pVD3bLHbA=="],
 
     "commander": ["commander@14.0.3", "", {}, "sha512-H+y0Jo/T1RZ9qPP4Eh1pkcQcLRglraJaSLoyOtHxu6AapkjWVCy2Sit1QQ4x3Dng8qDlSsZEet7g5Pq06MvTgw=="],
+
+    "spamm-aggregator-sdk": ["spamm-aggregator-sdk@file:../../../aggregator/sdk/ts", { "dependencies": { "@solana/kit": "^6.8.0" }, "devDependencies": { "typescript": "^5.7.2" } }],
 
     "typescript": ["typescript@5.9.3", "", { "bin": { "tsc": "bin/tsc", "tsserver": "bin/tsserver" } }, "sha512-jl1vZzPDinLr9eUt3J/t7V6FgNEw9QjvBPdysz9KfQDD41fQrC2Y4vKQdiaUpFT4bXlb1RHhLpp8wtm6M5TgSw=="],
 

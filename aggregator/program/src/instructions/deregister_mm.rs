@@ -1,6 +1,6 @@
 //! Admin-controlled teardown of an MM registration (inverse of `register_mm`).
 //!
-//! Accounts (17):
+//! Accounts (16):
 //! 0. `aggregator_admin` (writable signer) — must match aggregator config authority
 //! 1. `mm_admin` (writable) — receives ATA + encumbrance rent; must match MM config admin
 //! 2. `mm_program` (readonly)
@@ -12,31 +12,28 @@
 //! 8. `mint` (readonly)
 //! 9. `token_program` (readonly)
 //! 10. `associated_token_program` (readonly)
-//! 11. `system_program` (readonly)
-//! 12. `lookup_table` (writable)
-//! 13. `lookup_table_program` (readonly)
-//! 14. `mm_token_account` (writable)
-//! 15. `mm_quote_buffer` (readonly)
-//! 16. `mm_parlay_quote_buffer` (readonly)
+//! 11. `rent_sysvar` (readonly)
+//! 12. `system_program` (readonly)
+//! 13. `mm_token_account` (writable)
+//! 14. `mm_quote_buffer` (readonly)
+//! 15. `mm_parlay_quote_buffer` (readonly)
 //!
 //! Instruction data: empty.
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, Resize, address::address_eq, cpi::{Seed, Signer},
+   AccountView, ProgramResult, Resize, cpi::{Seed, Signer},
    error::ProgramError, hint::unlikely,
 };
 use pinocchio_log::log;
 
 use crate::{
    helpers::{
-      close_pda_return_rent, get_rent_local, safe_close_ata, verify_address_lookup_table_program,
-      verify_associated_token_program, verify_authority, verify_config_pda, verify_lookup_table,
-      verify_mint, verify_mm_admin, verify_mm_encumbrance_pda, verify_mm_list_pda,
-      verify_mm_program_executable, verify_parlay_quote_buffer, verify_quote_buffer, verify_signer,
-      verify_system_program, verify_token_account, verify_token_program,
+      close_pda_return_rent, find_mm_program_in_list, get_rent, safe_close_ata,
+      verify_associated_token_program, verify_authority, verify_config_pda, verify_mint,
+      verify_mm_admin, verify_mm_encumbrance_pda, verify_mm_list_pda, verify_mm_program_executable,
+      verify_parlay_quote_buffer, verify_quote_buffer, verify_rent_sysvar, verify_signer,
+      verify_system_program, verify_token_account, verify_token_program, get_encumbrance,
    },
-   parsers::get_encumbrance,
-   readers::{read_address_unchecked, read_u16_le_unchecked},
    state::{
       MM_LIST_HEADER_LEN,
       other::{MM_ENCUMBRANCE_PDA_SEED, MM_LIST_ENTRY_LEN, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET},
@@ -46,46 +43,13 @@ use crate::{
 
 pub const DEREGISTER_MM_IX_DISCRIMINATOR: u8 = 3;
 
-fn find_mm_list_index(mm_list: &AccountView, mm_program: &Address) -> Result<usize, ProgramError> {
-   let data_len = mm_list.data_len();
-   if unlikely(data_len < MM_LIST_HEADER_LEN) {
-      log!("deregister_mm: mm_list data too short");
-      return Err(ProgramError::InvalidAccountData);
-   }
-
-   let number_of_mms =
-      unsafe { read_u16_le_unchecked(mm_list.data_ptr(), MM_LIST_PDA_NUMBER_OF_MMS_OFFSET) }
-         as usize;
-   let expected_len = MM_LIST_HEADER_LEN
-      .checked_add(number_of_mms.checked_mul(MM_LIST_ENTRY_LEN).ok_or(ProgramError::ArithmeticOverflow)?)
-      .ok_or(ProgramError::ArithmeticOverflow)?;
-   if unlikely(data_len != expected_len) {
-      log!("deregister_mm: mm_list length does not match number_of_mms");
-      return Err(ProgramError::InvalidAccountData);
-   }
-
-   let ptr = mm_list.data_ptr();
-   for i in 0..number_of_mms {
-      let off = MM_LIST_HEADER_LEN + i * MM_LIST_ENTRY_LEN;
-      let entry = unsafe { read_address_unchecked(ptr, off) };
-      if address_eq(&entry, mm_program) {
-         return Ok(i);
-      }
-   }
-
-   log!("deregister_mm: mm_program not in mm_list");
-   Err(ProgramError::InvalidAccountData)
-}
-
 fn remove_mm_from_list(
    mm_list_pda: &mut AccountView,
    lamport_recipient: &mut AccountView,
+   rent_sysvar: &AccountView,
    idx: usize,
+   number_of_mms: usize,
 ) -> ProgramResult {
-   let number_of_mms =
-      unsafe { read_u16_le_unchecked(mm_list_pda.data_ptr(), MM_LIST_PDA_NUMBER_OF_MMS_OFFSET) }
-         as usize;
-
    if number_of_mms == 0 {
       log!("deregister_mm: mm_list is empty");
       return Err(ProgramError::InvalidAccountData);
@@ -111,9 +75,8 @@ fn remove_mm_from_list(
    }
 
    let new_len = MM_LIST_HEADER_LEN
-      .checked_add(new_count.checked_mul(MM_LIST_ENTRY_LEN).ok_or(ProgramError::ArithmeticOverflow)?)
-      .ok_or(ProgramError::ArithmeticOverflow)?;
-   let new_rent = get_rent_local(new_len as u64);
+      .checked_add(new_count.checked_mul(MM_LIST_ENTRY_LEN).ok_or(ProgramError::ArithmeticOverflow)?).ok_or(ProgramError::ArithmeticOverflow)?;
+   let new_rent = get_rent(rent_sysvar, new_len as u64)?;
    let cur_lamports = mm_list_pda.lamports();
    if cur_lamports > new_rent {
       let sweep = cur_lamports - new_rent;
@@ -139,9 +102,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mint,
       token_program,
       associated_token_program,
+      rent_sysvar,
       system_program,
-      lookup_table,
-      lookup_table_program,
       mm_token_account,
       mm_quote_buffer,
       mm_parlay_quote_buffer,
@@ -160,6 +122,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_authority(aggregator_admin, our_config_pda)?;
    verify_mm_program_executable(mm_program)?;
    verify_mm_admin(mm_admin, mm_program, mm_config_pda)?;
+   verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_token_program(token_program)?;
    verify_associated_token_program(associated_token_program)?;
@@ -179,8 +142,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mint,
       token_program,
    )?;
-   verify_address_lookup_table_program(lookup_table_program)?;
-   verify_lookup_table(lookup_table)?;
 
    if unlikely(!verify_quote_buffer(mm_quote_buffer, mm_program)) {
       log!("deregister_mm: quote buffer is invalid");
@@ -191,7 +152,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let idx = find_mm_list_index(mm_list_pda, mm_program.address())?;
+   let (idx, number_of_mms) = find_mm_program_in_list(mm_list_pda, mm_program.address())?;
 
    let Some(encumbrance_bump) = verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program) else {
       log!("deregister_mm: invalid mm encumbrance pda");
@@ -222,7 +183,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    close_pda_return_rent(mm_encumbrance_pda, mm_admin)?;
 
-   remove_mm_from_list(mm_list_pda, mm_admin, idx)?;
+   remove_mm_from_list(mm_list_pda, mm_admin, rent_sysvar, idx, number_of_mms)?;
 
    Ok(())
 }

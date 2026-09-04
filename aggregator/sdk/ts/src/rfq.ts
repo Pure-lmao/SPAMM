@@ -16,10 +16,16 @@ import {
 
 import {
    encodeRfqBetMessageBytes,
+   encodeRfqCashoutMessageBytes,
+   encodeRfqCashoutParlayMessageBytes,
    encodeRfqParlayMessageBytes,
 } from './codex.js';
-import { RFQ_NETWORK_DOMAIN } from './constants.js';
-import { getFillRfqBetIx, getFillRfqParlayIx } from './instructions.js';
+import {
+   getFillRfqBetIx,
+   getFillRfqCashoutIx,
+   getFillRfqParlayCashoutIx,
+   getFillRfqParlayIx,
+} from './instructions.js';
 import {
    decodeRfqSignatureBase64,
    encodeMmHelloAuthMessage,
@@ -30,35 +36,31 @@ import {
    type RfqWsHelloMessage,
 } from './rfq_api.js';
 import {
-   BetResult,
    RFQ_SIGNATURE_LEN,
    type FillRfqBetIxData,
+   type FillRfqCashoutIxData,
+   type FillRfqParlayCashoutIxData,
    type FillRfqParlayIxData,
-   type ParlayLegWire,
+   type ParlayLegQuoted,
    type RfqBetMessageInput,
+   type RfqCashoutMessageInput,
+   type RfqCashoutParlayMessageInput,
    type RfqParlayMessageInput,
+   type BetAccountData,
+   type CashoutSnapshot,
+   type ParlayBetAccountData,
+   type SignedRfqBetQuote,
+   type SignedRfqCashoutParlayQuote,
+   type SignedRfqCashoutQuote,
+   type SignedRfqParlayQuote,
+   type RfqFillIxFromQuote,
+   type RfqCashoutFillIxFromQuote,
 } from './types.js';
-import { validateOfferExpiry, validateFillRfqBetIxData, validateFillRfqParlayIxData } from './validate.js';
-
-export type SignedRfqBetQuote = Readonly<{
-   message: Uint8Array;
-   signature: Uint8Array;
-   /** Fields needed for {@link FillRfqBetIxData} except `amount` / `signature`. */
-   offer: Omit<RfqBetMessageInput, 'mmProgramId'>;
-   mmProgramId: Address;
-}>;
-
-export type SignedRfqParlayQuote = Readonly<{
-   message: Uint8Array;
-   signature: Uint8Array;
-   offer: Omit<RfqParlayMessageInput, 'mmProgramId'>;
-   mmProgramId: Address;
-}>;
-
-/** Discriminated fill payload produced from an HTTP request + MM quote (ready for {@link getFillRfqIxFromData}). */
-export type RfqFillIxFromQuote =
-   | { kind: 'fillRfqBet'; data: FillRfqBetIxData; mmProgram: Address }
-   | { kind: 'fillRfqParlay'; data: FillRfqParlayIxData; mmProgram: Address };
+import {
+   validateOfferExpiry,
+   validateFillRfqBetIxData,
+   validateFillRfqParlayIxData,
+} from './validate.js';
 
 /** Verify an ed25519 signature for a Solana address (raw message bytes, no off-chain envelope). */
 export async function verifyEd25519SignatureForAddress(
@@ -135,25 +137,129 @@ export async function verifyMmHelloAuth(hello: RfqWsHelloMessage): Promise<boole
 /** Encode + sign a single-bet RFQ quote. */
 export async function signRfqBetQuote(
    rfqSigner: MessagePartialSigner,
-   input: Omit<RfqBetMessageInput, 'networkDomain'> & Partial<Pick<RfqBetMessageInput, 'networkDomain'>>,
+   input: RfqBetMessageInput,
 ): Promise<SignedRfqBetQuote> {
-   const fullInput: RfqBetMessageInput = { networkDomain: RFQ_NETWORK_DOMAIN, ...input };
-   const message = encodeRfqBetMessageBytes(fullInput);
+   const message = encodeRfqBetMessageBytes(input);
    const signature = await signRfqMessageBytes(rfqSigner, message);
-   const { mmProgramId, ...offer } = fullInput;
+   const { mmProgramId, ...offer } = input;
    return { message, signature, offer, mmProgramId };
 }
 
 /** Encode + sign a parlay RFQ quote. */
 export async function signRfqParlayQuote(
    rfqSigner: MessagePartialSigner,
-   input: Omit<RfqParlayMessageInput, 'networkDomain'> & Partial<Pick<RfqParlayMessageInput, 'networkDomain'>>,
+   input: RfqParlayMessageInput,
 ): Promise<SignedRfqParlayQuote> {
-   const fullInput: RfqParlayMessageInput = { networkDomain: RFQ_NETWORK_DOMAIN, ...input };
-   const message = encodeRfqParlayMessageBytes(fullInput);
+   const message = encodeRfqParlayMessageBytes(input);
    const signature = await signRfqMessageBytes(rfqSigner, message);
-   const { mmProgramId, ...offer } = fullInput;
+   const { mmProgramId, ...offer } = input;
    return { message, signature, offer, mmProgramId };
+}
+
+/** Encode + sign a single-bet cashout RFQ quote. */
+export async function signRfqCashoutQuote(
+   rfqSigner: MessagePartialSigner,
+   input: RfqCashoutMessageInput,
+): Promise<SignedRfqCashoutQuote> {
+   const message = encodeRfqCashoutMessageBytes(input);
+   const signature = await signRfqMessageBytes(rfqSigner, message);
+   const { mmProgramId, ...offer } = input;
+   return { message, signature, offer, mmProgramId };
+}
+
+/** Encode + sign a parlay cashout RFQ quote. */
+export async function signRfqCashoutParlayQuote(
+   rfqSigner: MessagePartialSigner,
+   input: RfqCashoutParlayMessageInput,
+): Promise<SignedRfqCashoutParlayQuote> {
+   const message = encodeRfqCashoutParlayMessageBytes(input);
+   const signature = await signRfqMessageBytes(rfqSigner, message);
+   const { mmProgramId, ...offer } = input;
+   return { message, signature, offer, mmProgramId };
+}
+
+/** Verify a signed single-bet cashout RFQ quote against `rfqSigner`. */
+export async function verifyRfqCashoutQuote(
+   rfqSigner: Address,
+   quote: SignedRfqCashoutQuote,
+): Promise<boolean> {
+   const message = encodeRfqCashoutMessageBytes({
+      ...quote.offer,
+      mmProgramId: quote.mmProgramId,
+   });
+   return verifyEd25519SignatureForAddress(rfqSigner, quote.signature, message);
+}
+
+/** Verify a signed parlay cashout RFQ quote against `rfqSigner`. */
+export async function verifyRfqCashoutParlayQuote(
+   rfqSigner: Address,
+   quote: SignedRfqCashoutParlayQuote,
+): Promise<boolean> {
+   const message = encodeRfqCashoutParlayMessageBytes({
+      ...quote.offer,
+      mmProgramId: quote.mmProgramId,
+   });
+   return verifyEd25519SignatureForAddress(rfqSigner, quote.signature, message);
+}
+
+/** Combine a signed single-bet cashout RFQ offer with fill fields. */
+export function signedRfqCashoutToFillIxData(
+   quote: SignedRfqCashoutQuote,
+   minPayout: bigint,
+): FillRfqCashoutIxData {
+   return {
+      origBetId: quote.offer.origBetId,
+      cashoutId: quote.offer.cashoutId,
+      amount: quote.offer.amount,
+      minPayout,
+      maxPayment: quote.offer.maxPayment,
+      offerExpiry: quote.offer.offerExpiry,
+      eventStateSequence: quote.offer.eventStateSequence,
+      eventGameState: quote.offer.eventGameState,
+      signature: quote.signature,
+   };
+}
+
+/** Combine a signed parlay cashout RFQ offer with fill fields. */
+export function signedRfqCashoutParlayToFillIxData(
+   quote: SignedRfqCashoutParlayQuote,
+   minPayout: bigint,
+): FillRfqParlayCashoutIxData {
+   return {
+      origBetId: quote.offer.origBetId,
+      cashoutId: quote.offer.cashoutId,
+      amount: quote.offer.amount,
+      minPayout,
+      maxPayment: quote.offer.maxPayment,
+      offerExpiry: quote.offer.offerExpiry,
+      numLegs: quote.offer.numLegs,
+      snapshots: quote.offer.snapshots,
+      signature: quote.signature,
+   };
+}
+
+/**
+ * One-shot: sign a single-bet cashout RFQ quote and produce {@link FillRfqCashoutIxData}.
+ */
+export async function makeSignedRfqCashoutFill(
+   rfqSigner: MessagePartialSigner,
+   input: RfqCashoutMessageInput & { minPayout: bigint },
+): Promise<FillRfqCashoutIxData> {
+   const { minPayout, ...offer } = input;
+   const quote = await signRfqCashoutQuote(rfqSigner, offer);
+   return signedRfqCashoutToFillIxData(quote, minPayout);
+}
+
+/**
+ * One-shot: sign a parlay cashout RFQ quote and produce {@link FillRfqParlayCashoutIxData}.
+ */
+export async function makeSignedRfqCashoutParlayFill(
+   rfqSigner: MessagePartialSigner,
+   input: RfqCashoutParlayMessageInput & { minPayout: bigint },
+): Promise<FillRfqParlayCashoutIxData> {
+   const { minPayout, ...offer } = input;
+   const quote = await signRfqCashoutParlayQuote(rfqSigner, offer);
+   return signedRfqCashoutParlayToFillIxData(quote, minPayout);
 }
 
 /** Combine a signed single-bet RFQ offer with the user's fill `amount`. */
@@ -183,11 +289,11 @@ export function signedRfqParlayToFillIxData(
    return {
       betId: quote.offer.betId,
       amount,
-      numLegs: quote.offer.numLegs,
-      legs: quote.offer.legs,
       maxStake: quote.offer.maxStake,
       oddsScaled: quote.offer.oddsScaled,
       offerExpiry: quote.offer.offerExpiry,
+      numLegs: quote.offer.numLegs,
+      legs: quote.offer.legs,
       signature: quote.signature,
    };
 }
@@ -198,8 +304,7 @@ export function signedRfqParlayToFillIxData(
  */
 export async function makeSignedRfqBetFill(
    rfqSigner: MessagePartialSigner,
-   input: Omit<RfqBetMessageInput, 'networkDomain'> &
-      Partial<Pick<RfqBetMessageInput, 'networkDomain'>> & { amount: bigint },
+   input: RfqBetMessageInput & { amount: bigint },
 ): Promise<FillRfqBetIxData> {
    const { amount, ...offer } = input;
    const quote = await signRfqBetQuote(rfqSigner, offer);
@@ -212,8 +317,7 @@ export async function makeSignedRfqBetFill(
  */
 export async function makeSignedRfqParlayFill(
    rfqSigner: MessagePartialSigner,
-   input: Omit<RfqParlayMessageInput, 'networkDomain'> &
-      Partial<Pick<RfqParlayMessageInput, 'networkDomain'>> & { amount: bigint },
+   input: RfqParlayMessageInput & { amount: bigint },
 ): Promise<FillRfqParlayIxData> {
    const { amount, ...offer } = input;
    const quote = await signRfqParlayQuote(rfqSigner, offer);
@@ -271,13 +375,12 @@ export function rfqRequestAndQuoteToFillIxData(
       throw new RangeError('selections must be non-empty');
    }
 
-   const legs: ParlayLegWire[] = request.selections.map((sel, i) => ({
+   const legs: ParlayLegQuoted[] = request.selections.map((sel, i) => ({
       marketId: marketIdFromJson(sel.marketId),
       side: sel.side,
       eventStateSequence: sel.eventStateSequence,
       eventGameState: sel.eventGameState,
       oddsScaled: BigInt(quote.legOddsScaled[i]!),
-      result: BetResult.Pending,
    }));
 
    const data: FillRfqParlayIxData = {
@@ -301,10 +404,56 @@ export async function getFillRfqIxFromData(
    fill: RfqFillIxFromQuote,
    feepayer: Address,
    user: Address,
-   mmNetting?: Address,
+   hasActiveNetting: boolean,
 ): Promise<Instruction> {
    if (fill.kind === 'fillRfqBet') {
-      return getFillRfqBetIx(fill.data, feepayer, user, fill.mmProgram, mmNetting);
+      return getFillRfqBetIx(fill.data, feepayer, user, fill.mmProgram, hasActiveNetting);
    }
    return getFillRfqParlayIx(fill.data, feepayer, user, fill.mmProgram);
+}
+
+/**
+ * Data → Instruction helper for cashout RFQ fills.
+ */
+export async function getFillRfqCashoutIxFromData(
+   fill: Extract<RfqCashoutFillIxFromQuote, { kind: 'fillRfqCashout' }>,
+   feepayer: Address,
+   bet: BetAccountData,
+): Promise<Instruction>;
+export async function getFillRfqCashoutIxFromData(
+   fill: Extract<RfqCashoutFillIxFromQuote, { kind: 'fillRfqParlayCashout' }>,
+   feepayer: Address,
+   parlay: ParlayBetAccountData,
+): Promise<Instruction>;
+export async function getFillRfqCashoutIxFromData(
+   fill: RfqCashoutFillIxFromQuote,
+   feepayer: Address,
+   ticket: BetAccountData | ParlayBetAccountData,
+): Promise<Instruction> {
+   if (fill.kind === 'fillRfqCashout') {
+      return getFillRfqCashoutIx(
+         fill.data,
+         feepayer,
+         ticket as BetAccountData,
+         fill.marketId,
+         fill.mmProgram,
+      );
+   }
+   return getFillRfqParlayCashoutIx(
+      fill.data,
+      feepayer,
+      ticket as ParlayBetAccountData,
+      fill.origLegs,
+      fill.mmProgram,
+   );
+}
+
+/** Helper to build cashout snapshots from live event state sequences. */
+export function cashoutSnapshotsFromLegs(
+   legs: { eventStateSequence: number; eventGameState: CashoutSnapshot['eventGameState'] }[],
+): CashoutSnapshot[] {
+   return legs.map((leg) => ({
+      eventStateSequence: leg.eventStateSequence,
+      eventGameState: leg.eventGameState,
+   }));
 }

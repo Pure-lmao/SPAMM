@@ -1,40 +1,108 @@
 //! Decode account state after Mollusk runs for stronger assertions.
 
+use core::mem::MaybeUninit;
+use std::ops::Deref;
+
 use solana_account::Account;
 use solana_pubkey::Pubkey;
 use solana_program_pack::Pack;
 use spl_token_interface::state::Account as TokenAccount;
 
-use spamm_aggregator::constants::ODDS_SCALE;
+use spamm_aggregator::constants::{ADDRESS_LEN, MAX_NUMBER_OF_MMS, MAX_RFQ_PARLAY_LEGS, ODDS_SCALE};
 use spamm_aggregator::helpers::{calc_potential_profit, calc_potential_payout};
-use spamm_aggregator::state::account_bet::{BetAccountData, BetResult};
+use spamm_aggregator::state::account_bet::{
+   BetAccountData, BetAccountHeader, BetFiller, BetResult,
+};
 use spamm_aggregator::state::account_netting::NETTING_ACCOUNT_ALLOC_LEN;
-use spamm_aggregator::state::account_parlay_bet::{ParlayBetAccountData, PARLAY_BET_ACCOUNT_DISCRIMINATOR};
+use spamm_aggregator::state::account_parlay_bet::{
+   ParlayBetAccountData, ParlayBetAccountHeader, PARLAY_BET_ACCOUNT_DISCRIMINATOR,
+};
 use spamm_aggregator::state::other::{
    CONFIG_PDA_AUTHORITY_OFFSET, CONFIG_PDA_DISCRIMINATOR, CONFIG_PDA_LEN, CONFIG_PDA_STATUS_OFFSET,
    MM_ENCUMBRANCE_PDA_DISCRIMINATOR, MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_LEN,
    MM_LIST_HEADER_LEN, MM_LIST_PDA_DISCRIMINATOR, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET,
+   MM_LIST_ENTRY_LEN,
 };
-use spamm_aggregator::state::{EventId, MarketId, NETTING_HEADER_LEN, NETTING_LINE_LEN, NETTING_PDA_DISCRIMINATOR};
+use spamm_aggregator::state::{
+   CashoutAccountData, CashoutAccountHeader, EventId, MarketId, NETTING_HEADER_LEN, NETTING_LINE_LEN,
+   NETTING_PDA_DISCRIMINATOR, ParlayLegWire,
+};
 
 /// First `i64` header liability (`home`) after `discriminator` + `bump` + wire `EventId`.
 const NETTING_HEADER_HOME_OFFSET: usize = 2 + EventId::WIRE_SIZE;
 
 use super::env::Env;
 use super::fixtures::{
-   agg_program_id, encumbrance_pda, mm_program_id, user_collateral_ata,
+   agg_program_id, encumbrance_pda, liability_token_ata, mm_program_id, user_collateral_ata,
 };
 
-pub fn decode_bet(env: &Env, bet_pda: &Pubkey) -> BetAccountData {
-   let acct = env.get_account(bet_pda).unwrap_or_else(|| panic!("missing bet account {bet_pda}"));
-   BetAccountData::decode(&acct.data).expect("decode BetAccountData")
+fn take_live<T: Copy>(buf: &[MaybeUninit<T>], n: usize) -> Vec<T> {
+   let mut out = Vec::with_capacity(n);
+   for slot in buf.iter().take(n) {
+      out.push(unsafe { slot.assume_init() });
+   }
+   out
 }
 
-pub fn decode_parlay_bet(env: &Env, bet_pda: &Pubkey) -> ParlayBetAccountData {
+/// Header + live fillers only (no unused-slot zeros).
+#[derive(Clone)]
+pub struct DecodedBet {
+   pub header: BetAccountHeader,
+   pub fillers: Vec<BetFiller>,
+}
+
+impl Deref for DecodedBet {
+   type Target = BetAccountHeader;
+   fn deref(&self) -> &Self::Target {
+      &self.header
+   }
+}
+
+/// Header + live legs only.
+#[derive(Clone)]
+pub struct DecodedParlayBet {
+   pub header: ParlayBetAccountHeader,
+   pub legs: Vec<ParlayLegWire>,
+}
+
+impl Deref for DecodedParlayBet {
+   type Target = ParlayBetAccountHeader;
+   fn deref(&self) -> &Self::Target {
+      &self.header
+   }
+}
+
+pub fn decode_bet(env: &Env, bet_pda: &Pubkey) -> DecodedBet {
+   let acct = env.get_account(bet_pda).unwrap_or_else(|| panic!("missing bet account {bet_pda}"));
+   let header = BetAccountData::decode_header(&acct.data).expect("decode BetAccountHeader");
+   let n = header.num_fillers as usize;
+   let mut buf = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
+   BetAccountData::decode_fillers_into(&acct.data, n, &mut buf).expect("decode bet fillers");
+   DecodedBet {
+      header,
+      fillers: take_live(&buf, n),
+   }
+}
+
+pub fn decode_parlay_bet(env: &Env, bet_pda: &Pubkey) -> DecodedParlayBet {
    let acct = env
       .get_account(bet_pda)
       .unwrap_or_else(|| panic!("missing parlay bet account {bet_pda}"));
-   ParlayBetAccountData::decode(&acct.data).expect("decode ParlayBetAccountData")
+   let header = ParlayBetAccountData::decode_header(&acct.data).expect("decode ParlayBetAccountHeader");
+   let n = header.num_legs as usize;
+   let mut buf = [const { MaybeUninit::<ParlayLegWire>::uninit() }; MAX_RFQ_PARLAY_LEGS];
+   ParlayBetAccountData::decode_legs_into(&acct.data, n, &mut buf).expect("decode parlay legs");
+   DecodedParlayBet {
+      header,
+      legs: take_live(&buf, n),
+   }
+}
+
+pub fn decode_cashout(env: &Env, cashout_pda: &Pubkey) -> CashoutAccountHeader {
+   let acct = env
+      .get_account(cashout_pda)
+      .unwrap_or_else(|| panic!("missing cashout account {cashout_pda}"));
+   CashoutAccountData::decode_header(&acct.data).expect("decode CashoutAccountHeader")
 }
 
 pub fn read_encumbrance(env: &Env, enc_pda: &Pubkey) -> i64 {
@@ -75,7 +143,7 @@ pub fn read_config_authority_status(env: &Env, config_pda: &Pubkey) -> (Pubkey, 
    assert_eq!(acct.data[0], CONFIG_PDA_DISCRIMINATOR);
    let status = acct.data[CONFIG_PDA_STATUS_OFFSET];
    let authority = Pubkey::new_from_array(
-      acct.data[CONFIG_PDA_AUTHORITY_OFFSET..CONFIG_PDA_AUTHORITY_OFFSET + 32]
+      acct.data[CONFIG_PDA_AUTHORITY_OFFSET..CONFIG_PDA_AUTHORITY_OFFSET + ADDRESS_LEN]
          .try_into()
          .unwrap(),
    );
@@ -85,7 +153,6 @@ pub fn read_config_authority_status(env: &Env, config_pda: &Pubkey) -> (Pubkey, 
 /// Overwrite `mm_list` body with `entries` (header + pubkeys); for swap-remove tests.
 pub fn patch_mm_list_entries(env: &mut Env, mm_list_key: &Pubkey, entries: &[Pubkey]) {
    use spamm_aggregator::state::{MM_LIST_HEADER_LEN, MM_LIST_PDA_DISCRIMINATOR};
-   use spamm_aggregator::state::other::{MM_LIST_ENTRY_LEN, MM_LIST_PDA_NUMBER_OF_MMS_OFFSET};
 
    let len = MM_LIST_HEADER_LEN + entries.len() * MM_LIST_ENTRY_LEN;
    let mut acct = env
@@ -113,7 +180,7 @@ pub fn read_mm_list_tail(env: &Env, mm_list_pda: &Pubkey) -> (u16, Vec<Pubkey>) 
       acct.data[MM_LIST_PDA_NUMBER_OF_MMS_OFFSET],
       acct.data[MM_LIST_PDA_NUMBER_OF_MMS_OFFSET + 1],
    ]);
-   let expected_len = MM_LIST_HEADER_LEN + (n as usize) * 32;
+   let expected_len = MM_LIST_HEADER_LEN + (n as usize) * MM_LIST_ENTRY_LEN;
    assert_eq!(
       acct.data.len(),
       expected_len,
@@ -121,8 +188,8 @@ pub fn read_mm_list_tail(env: &Env, mm_list_pda: &Pubkey) -> (u16, Vec<Pubkey>) 
    );
    let mut addrs = Vec::with_capacity(n as usize);
    for i in 0..(n as usize) {
-      let off = MM_LIST_HEADER_LEN + i * 32;
-      addrs.push(Pubkey::new_from_array(acct.data[off..off + 32].try_into().unwrap()));
+      let off = MM_LIST_HEADER_LEN + i * MM_LIST_ENTRY_LEN;
+      addrs.push(Pubkey::new_from_array(acct.data[off..off + MM_LIST_ENTRY_LEN].try_into().unwrap()));
    }
    (n, addrs)
 }
@@ -153,7 +220,7 @@ pub fn read_netting_lines_snapshot(env: &Env, netting_pda: &Pubkey) -> (u8, Vec<
    (n, lines)
 }
 
-/// Soccer 1X2 header liabilities (`home` / `away` / `draw`, wire order) plus sorted line rows with outcomes.
+/// Soccer 1X2 header open profit (`open_home` / `open_away` / `open_draw`) plus sorted line rows.
 pub fn read_netting_soccer_header_and_lines(
    env: &Env,
    netting_pda: &Pubkey,
@@ -161,18 +228,18 @@ pub fn read_netting_soccer_header_and_lines(
    let acct = env
       .get_account(netting_pda)
       .unwrap_or_else(|| panic!("missing netting {netting_pda}"));
-   assert_eq!(
-      acct.data.len(),
-      NETTING_ACCOUNT_ALLOC_LEN,
+   assert!(acct.data.len() >= NETTING_HEADER_LEN, "netting header");
+   assert_eq!(acct.data[0], NETTING_PDA_DISCRIMINATOR);
+   let n = acct.data[NETTING_HEADER_LEN - 1];
+   assert!(
+      acct.data.len() >= NETTING_HEADER_LEN + (n as usize) * NETTING_LINE_LEN,
       "netting alloc len"
    );
-   assert_eq!(acct.data[0], NETTING_PDA_DISCRIMINATOR);
    let mut ft = [0i64; 3];
    for (i, slot) in ft.iter_mut().enumerate() {
       let off = NETTING_HEADER_HOME_OFFSET + i * 8;
       *slot = i64::from_le_bytes(acct.data[off..off + 8].try_into().unwrap());
    }
-   let n = acct.data[NETTING_HEADER_LEN - 1];
    let mut out = Vec::with_capacity(n as usize);
    let lines_start = NETTING_HEADER_LEN;
    for i in 0..(n as usize) {
@@ -233,13 +300,13 @@ pub fn assert_fill_bet_single_mm_economics(
 ) {
    let b = decode_bet(env, bet_pda);
    assert!(b.market_id.eq(&expected_market));
+   assert_eq!(b.num_fillers, 1);
    let exp_payout = calc_potential_payout(b.amount, odds_scaled).expect("payout calc");
    assert_eq!(b.payout, exp_payout);
-   assert_eq!(b.filler_0.amount, b.amount);
-   assert_eq!(b.filler_0.odds_scaled, odds_scaled);
-   assert!(!b.filler_0.is_potentially_netted);
+   assert_eq!(b.fillers[0].amount, b.amount);
+   assert_eq!(b.fillers[0].odds_scaled, odds_scaled);
+   assert!(!b.fillers[0].is_potentially_netted);
    let exp_profit = calc_potential_profit(b.amount, odds_scaled).expect("profit calc");
-   assert_eq!(b.filler_0.encumbrance_delta, exp_profit as i64);
 
    assert_eq!(
       read_token_balance(env, &user_collateral_ata()),
@@ -248,7 +315,12 @@ pub fn assert_fill_bet_single_mm_economics(
    assert_eq!(read_token_balance(env, bet_ata), b.amount);
    assert_eq!(
       read_encumbrance(env, &encumbrance_pda()),
-      enc_pre + b.filler_0.encumbrance_delta
+      enc_pre + exp_profit as i64
+   );
+   let liab = read_token_balance(env, &liability_token_ata());
+   assert!(
+      liab >= exp_profit,
+      "liability ATA should hold at least the posted profit {exp_profit}, got {liab}"
    );
 }
 
@@ -262,8 +334,8 @@ pub fn assert_bet_after_fill(
    assert!(matches!(b.result, BetResult::Pending));
    assert_eq!(b.amount, expected_amount);
    assert_eq!(b.side, expected_side);
-   let mut mmaddr = [0u8; 32];
-   mmaddr.copy_from_slice(b.filler_0.mm_address.as_ref());
+   let mut mmaddr = [0u8; ADDRESS_LEN];
+   mmaddr.copy_from_slice(b.fillers[0].mm_address.as_ref());
    assert_eq!(Pubkey::new_from_array(mmaddr), mm_program_id());
 }
 
@@ -296,7 +368,7 @@ pub fn assert_parlay_after_fill(
    let exp_payout = calc_potential_payout(expected_amount, combined_odds_scaled).expect("payout");
    let exp_profit = calc_potential_profit(expected_amount, combined_odds_scaled).expect("profit");
    assert_eq!(p.payout, exp_payout);
-   let mut fa = [0u8; 32];
+   let mut fa = [0u8; ADDRESS_LEN];
    fa.copy_from_slice(p.filler_address.as_ref());
    assert_eq!(Pubkey::new_from_array(fa), mm_program_id());
    assert_eq!(

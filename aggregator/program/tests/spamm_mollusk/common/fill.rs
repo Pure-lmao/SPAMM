@@ -8,14 +8,16 @@ use solana_sdk_ids::sysvar::instructions::ID as INSTRUCTIONS_SYSVAR_ID;
 
 use spamm_aggregator::instructions::{
    FillBetIxData, FillParlayIxData, FillRfqBetIxData, FillRfqParlayIxData, FILL_BET_IX_DATA_LEN,
-   FILL_PARLAY_IX_DATA_LEN, FILL_RFQ_BET_IX_DATA_LEN, FILL_RFQ_PARLAY_IX_DATA_LEN,
+   FILL_BET_IX_DISCRIMINATOR, FILL_PARLAY_IX_DISCRIMINATOR, FILL_RFQ_BET_IX_DATA_LEN,
+   FILL_RFQ_BET_IX_DISCRIMINATOR, FILL_RFQ_PARLAY_IX_DISCRIMINATOR, GRADE_PARLAY_IX_DISCRIMINATOR,
 };
-use spamm_aggregator::state::{EventGameState, MarketId, ParlayLegTable, ParlayLegWire};
+use spamm_aggregator::constants::{MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS};
+use spamm_aggregator::state::{EventGameState, MarketId, ParlayLegQuoted, ParlayLegSel};
 
 use super::fixtures::*;
 
-/// Fixed accounts before the first MM group on `fill_bet` / `fill_parlay` (through `clock_program`).
-pub const FILL_MM_GROUP_OFFSET: usize = 12;
+/// Fixed accounts before the first MM group on `fill_bet` / `fill_parlay` (through `clock_sysvar`).
+pub const FILL_MM_GROUP_OFFSET: usize = 13;
 /// `fill_bet` accounts per MM after the fixed prefix.
 pub const FILL_BET_MM_ACCOUNTS: usize = 9;
 
@@ -50,12 +52,13 @@ pub fn fill_bet_metas_one_mm(
       AccountMeta::new_readonly(mint_pubkey(), false),
       AccountMeta::new_readonly(token::ID, false),
       AccountMeta::new_readonly(associated_token::ID, false),
+      AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
       AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new(mm_config_pda(), false),
-      AccountMeta::new_readonly(event_state_pda(&eid), false),
+      AccountMeta::new(event_state_pda(&eid), false),
       AccountMeta::new(market_data_pda(market), false),
       AccountMeta::new(mm_quote_buffer_pda(), false),
       AccountMeta::new(encumbrance_pda(), false),
@@ -72,7 +75,7 @@ pub fn fill_bet_instruction(
    market: &MarketId,
    mm_netting: Pubkey,
 ) -> Instruction {
-   let mut buf = vec![3u8];
+   let mut buf = vec![FILL_BET_IX_DISCRIMINATOR];
    let mut payload = [0u8; FILL_BET_IX_DATA_LEN];
    data.write_wire(&mut payload).expect("fill bet wire");
    buf.extend_from_slice(&payload);
@@ -96,6 +99,7 @@ pub fn fill_parlay_metas(bet_pda: Pubkey, bet_ata: Pubkey, markets: &[MarketId])
       AccountMeta::new_readonly(mint_pubkey(), false),
       AccountMeta::new_readonly(token::ID, false),
       AccountMeta::new_readonly(associated_token::ID, false),
+      AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
       AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
@@ -107,16 +111,18 @@ pub fn fill_parlay_metas(bet_pda: Pubkey, bet_ata: Pubkey, markets: &[MarketId])
       AccountMeta::new(mm_collateral_ata(), false),
    ];
    for mid in markets {
-      m.push(AccountMeta::new(market_data_pda(mid), false));
+      m.push(AccountMeta::new_readonly(market_data_pda(mid), false));
       m.push(AccountMeta::new_readonly(event_state_pda(&mid.event_id), false));
    }
    m
 }
 
 pub fn fill_parlay_instruction(payload: &FillParlayIxData, bet_pda: Pubkey, bet_ata: Pubkey, markets: &[MarketId]) -> Instruction {
-   let mut buf = vec![4u8];
-   let mut wire = [0u8; FILL_PARLAY_IX_DATA_LEN];
+   let n = payload.num_legs as usize;
+   let wire_len = FillParlayIxData::wire_len(n);
+   let mut wire = vec![0u8; wire_len];
    payload.write_wire(&mut wire).expect("parlay wire");
+   let mut buf = vec![FILL_PARLAY_IX_DISCRIMINATOR];
    buf.extend_from_slice(&wire);
    Instruction::new_with_bytes(agg_program_id(), &buf, fill_parlay_metas(bet_pda, bet_ata, markets))
 }
@@ -140,12 +146,13 @@ pub fn fill_rfq_bet_metas(
       AccountMeta::new_readonly(mint_pubkey(), false),
       AccountMeta::new_readonly(token::ID, false),
       AccountMeta::new_readonly(associated_token::ID, false),
+      AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
       AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new(mm_config_pda(), false),
-      AccountMeta::new_readonly(event_state_pda(&eid), false),
+      AccountMeta::new(event_state_pda(&eid), false),
       AccountMeta::new(market_data_pda(market), false),
       AccountMeta::new(encumbrance_pda(), false),
       AccountMeta::new(liability_token_ata(), false),
@@ -162,7 +169,7 @@ pub fn fill_rfq_bet_instruction(
    market: &MarketId,
    mm_netting: Pubkey,
 ) -> Instruction {
-   let mut buf = vec![12u8];
+   let mut buf = vec![FILL_RFQ_BET_IX_DISCRIMINATOR];
    let mut payload = [0u8; FILL_RFQ_BET_IX_DATA_LEN];
    data.write_wire_with_signature(signature, &mut payload)
       .expect("fill rfq bet wire");
@@ -174,9 +181,9 @@ pub fn fill_rfq_bet_instruction(
    )
 }
 
-pub fn fill_rfq_parlay_metas(bet_pda: Pubkey, bet_ata: Pubkey, markets: &[MarketId]) -> Vec<AccountMeta> {
+pub fn fill_rfq_parlay_metas(bet_pda: Pubkey, bet_ata: Pubkey) -> Vec<AccountMeta> {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
-   let mut m = vec![
+   vec![
       AccountMeta::new(bet_feepayer(), true),
       AccountMeta::new_readonly(user(), true),
       AccountMeta::new(user_collateral_ata(), false),
@@ -186,6 +193,7 @@ pub fn fill_rfq_parlay_metas(bet_pda: Pubkey, bet_ata: Pubkey, markets: &[Market
       AccountMeta::new_readonly(mint_pubkey(), false),
       AccountMeta::new_readonly(token::ID, false),
       AccountMeta::new_readonly(associated_token::ID, false),
+      AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
       AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
@@ -194,12 +202,7 @@ pub fn fill_rfq_parlay_metas(bet_pda: Pubkey, bet_ata: Pubkey, markets: &[Market
       AccountMeta::new(encumbrance_pda(), false),
       AccountMeta::new(liability_token_ata(), false),
       AccountMeta::new(mm_collateral_ata(), false),
-   ];
-   for mid in markets {
-      m.push(AccountMeta::new(market_data_pda(mid), false));
-      m.push(AccountMeta::new_readonly(event_state_pda(&mid.event_id), false));
-   }
-   m
+   ]
 }
 
 pub fn fill_rfq_parlay_instruction(
@@ -207,71 +210,67 @@ pub fn fill_rfq_parlay_instruction(
    signature: &[u8; 64],
    bet_pda: Pubkey,
    bet_ata: Pubkey,
-   markets: &[MarketId],
 ) -> Instruction {
-   let mut buf = vec![13u8];
-   let mut wire = [0u8; FILL_RFQ_PARLAY_IX_DATA_LEN];
+   let n = payload.num_legs as usize;
+   let wire_len = FillRfqParlayIxData::wire_len(n);
+   let mut wire = vec![0u8; wire_len];
    payload
       .write_wire_with_signature(signature, &mut wire)
       .expect("fill rfq parlay wire");
+   let mut buf = vec![FILL_RFQ_PARLAY_IX_DISCRIMINATOR];
    buf.extend_from_slice(&wire);
    Instruction::new_with_bytes(
       agg_program_id(),
       &buf,
-      fill_rfq_parlay_metas(bet_pda, bet_ata, markets),
+      fill_rfq_parlay_metas(bet_pda, bet_ata),
    )
 }
 
-pub fn parlay_leg(market_id: MarketId, side: u8, seq: u16, game_state: EventGameState) -> ParlayLegWire {
-   ParlayLegWire {
+pub fn parlay_leg(market_id: MarketId, side: u8, seq: u16, game_state: EventGameState) -> ParlayLegSel {
+   ParlayLegSel {
       market_id,
       side,
       event_state_sequence: seq,
       event_game_state: game_state,
-      odds_scaled: ODDS_1_9_SCALED,
-      result: spamm_aggregator::state::account_bet::BetResult::Pending,
    }
 }
 
-pub fn parlay_table(legs: &[ParlayLegWire]) -> ParlayLegTable {
-   assert!(!legs.is_empty(), "at least one leg");
-   let pad = *legs.last().unwrap();
-   let g = |i: usize| legs.get(i).copied().unwrap_or(pad);
-   ParlayLegTable {
-      leg_0: g(0),
-      leg_1: g(1),
-      leg_2: g(2),
-      leg_3: g(3),
-      leg_4: g(4),
-   }
+/// Pack live legs into a fixed `fill_parlay` / get-quote buffer array (unused slots are placeholders).
+pub fn parlay_legs_fill(legs: &[ParlayLegSel]) -> [ParlayLegSel; MAX_PARLAY_LEGS] {
+   assert!(legs.len() <= MAX_PARLAY_LEGS, "too many legs for fill_parlay");
+   let mut out = [ParlayLegSel::placeholder(); MAX_PARLAY_LEGS];
+   out[..legs.len()].copy_from_slice(legs);
+   out
 }
 
-/// Build a `[u8; 5]` `grade_parlay` mask (`255` = skip leg).
-pub fn grade_parlay_leg_mask(leg_grades: &[u8]) -> [u8; 5] {
-   let mut mask = [spamm_aggregator::state::account_bet::GRADE_PARLAY_LEG_SKIP; 5];
-   for (i, g) in leg_grades.iter().enumerate() {
-      if i < 5 {
-         mask[i] = *g;
-      }
-   }
-   mask
+/// Pack live legs into a fixed RFQ parlay ix / bet PDA array (unused slots are placeholders).
+pub fn parlay_legs_rfq(legs: &[ParlayLegQuoted]) -> [ParlayLegQuoted; MAX_RFQ_PARLAY_LEGS] {
+   assert!(legs.len() <= MAX_RFQ_PARLAY_LEGS, "too many legs for RFQ parlay");
+   let mut out = [ParlayLegQuoted::placeholder(); MAX_RFQ_PARLAY_LEGS];
+   out[..legs.len()].copy_from_slice(legs);
+   out
+}
+
+/// Build a `grade_parlay` mask (`255` = skip leg); length equals `num_legs` (no padding).
+pub fn grade_parlay_leg_mask(leg_grades: &[u8]) -> Vec<u8> {
+   leg_grades.to_vec()
 }
 
 pub fn grade_parlay_instruction(
-   masks: &[&[u8; 5]],
-   bets: &[Pubkey],
+   mask: &[u8],
+   bet: Pubkey,
    authority: Pubkey,
 ) -> Instruction {
-   let mut metas = vec![
-      AccountMeta::new(authority, true),
-      AccountMeta::new_readonly(config_pda(), false),
-   ];
-   for b in bets {
-      metas.push(AccountMeta::new(*b, false));
-   }
-   let mut buf = vec![11u8];
-   for m in masks {
-      buf.extend_from_slice(*m);
-   }
-   Instruction::new_with_bytes(agg_program_id(), &buf, metas)
+   Instruction::new_with_bytes(
+      agg_program_id(),
+      &[GRADE_PARLAY_IX_DISCRIMINATOR]
+         .into_iter()
+         .chain(mask.iter().copied())
+         .collect::<Vec<_>>(),
+      vec![
+         AccountMeta::new(authority, true),
+         AccountMeta::new_readonly(config_pda(), false),
+         AccountMeta::new(bet, false),
+      ],
+   )
 }

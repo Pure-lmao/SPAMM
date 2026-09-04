@@ -25,7 +25,8 @@
       "prepack": "bun run build"
    },
    "dependencies": {
-      "@solana/kit": "^6.8.0"
+      "@solana/kit": "^6.8.0",
+      "spamm-aggregator-sdk": "file:../../../aggregator/sdk/ts"
    },
    "devDependencies": {
       "typescript": "^5.7.2"

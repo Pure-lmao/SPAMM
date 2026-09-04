@@ -1,8 +1,8 @@
 //! Signed-quote RFQ fill for a single bet (one MM, no quote buffer).
 //!
-//! Accounts: **12** fixed + **8** MM (same fixed prefix as [`super::fill_parlay`]).
-//! **Fixed (12)**
-//! 0. `feepayer` (writable signer)
+//! Accounts: **13** fixed + **8** MM (same fixed prefix as [`super::fill_bet`]).
+//! **Fixed (13)**
+//! 0. `feepayer` (writable signer) — pays netting PDA rent if a fill inserts a new line
 //! 1. `user` (readonly signer)
 //! 2. `user_ata` (writable)
 //! 3. `bet_pda` (writable)
@@ -11,125 +11,39 @@
 //! 6. `mint` (readonly)
 //! 7. `token_program` (readonly)
 //! 8. `associated_token_program` (readonly)
-//! 9. `system_program` (readonly)
-//! 10. `instructions_sysvar` (readonly)
-//! 11. `clock_program` (readonly)
+//! 9. `rent_sysvar` (readonly)
+//! 10. `system_program` (readonly)
+//! 11. `instructions_sysvar` (readonly)
+//! 12. `clock_sysvar` (readonly)
 //!
 //! **MM (8)**
 //! 0. `mm_program` (readonly)
 //! 1. `mm_config_pda` (writable)
-//! 2. `mm_event_state_pda` (readonly)
-//! 3. `mm_market_data_pda` (writable) — passed through to MM `fill_bet_rfq` for future market updates
+//! 2. `mm_event_state_pda` (writable) — verified via `verify_event_state` before MM `fill_bet_rfq` (MM CPI may still ignore it)
+//! 3. `mm_market_data_pda` (writable) — verified via `verify_mm_market_data_pda` before MM `fill_bet_rfq` (MM may write on fill)
 //! 4. `mm_encumbrance_pda` (writable)
 //! 5. `mm_liability_token_account` (writable)
 //! 6. `mm_token_account` (writable)
 //! 7. `mm_netting_pda` (writable) — real netting PDA, or system program if none
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, address::address_eq, cpi::{Seed, Signer, invoke},
+   AccountView, Address, ProgramResult, cpi::invoke,
    error::ProgramError, hint::unlikely,
    instruction::{InstructionAccount, InstructionView},
-   sysvars::clock::Clock,
 };
-use pinocchio_associated_token_account::instructions::Create;
 use pinocchio_log::log;
-use pinocchio_system::instructions::CreateAccount;
-use pinocchio_token::instructions::Transfer;
-use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
-   ID,
-   helpers::{
-      calc_potential_payout, calc_potential_profit, get_rent_local, verify_associated_token_program,
-      verify_config_pda, verify_event_state, verify_instructions_sysvar, verify_mint,
-      verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda,
-      verify_mm_program_executable, verify_netting_pda_or_placeholder, verify_signer,
-      verify_system_program, verify_token_account, verify_token_program,
-   },
-   instructions::fill_helpers::{compute_liability_shortfall, ensure_bet_pda_unused},
-   parsers::{get_encumbrance, get_token_account_balance, parse_fill_rfq_bet_data},
-   rfq_verify::verify_rfq_ed25519_signature,
-   state::{
-      BET_ACCOUNT_DISCRIMINATOR, BET_ACCOUNT_LEN, BET_ACCOUNT_SEED, BetAccountData, BetFiller,
-      EventGameState, FILL_BET_RFQ_IX_DISCRIMINATOR, FillRfqIxData, MarketId, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET,
-      account_bet::BetResult,
-      account_netting::{NettingCalc, apply_netting, calculate_netting},
-      build_rfq_bet_message,
-      other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
-      rfq_message::RFQ_BET_MESSAGE_LEN,
-   },
-   writers::write_i64_le_unchecked,
+   errors::SpammError, helpers::{
+      calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, get_encumbrance, get_token_account_balance, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state, verify_instructions_sysvar, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_netting_pda_or_placeholder, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
+      fill_helpers::{compute_liability_shortfall, create_single_bet_account, require_exact_token_increase},
+      freebet_helpers::{odds_in_freebet_range, require_freebet_mm_allowed, require_freebet_operator_allowed, verify_freebet_for_fill},
+   }, instructions::fill_bet::FillBetStake, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
+      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_RFQ_IX_DISCRIMINATOR, FillRfqBetIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, build_rfq_bet_message, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, rfq_message::RFQ_BET_MESSAGE_LEN,
+   }, writers::write_i64_le_unchecked,
 };
 
 pub const FILL_RFQ_BET_IX_DISCRIMINATOR: u8 = 12;
-
-const SIGNATURE_LEN: usize = 64;
-
-/// Router payload for `fill_rfq_bet` (quote fields + ed25519 signature).
-#[derive(Copy, Clone, ZeroPod)]
-#[repr(C)]
-pub struct FillRfqBetIxData {
-   pub bet_id: u64,
-   pub market_id: MarketId,
-   pub side: u8,
-   pub amount: u64,
-   pub event_state_sequence: u16,
-   pub event_game_state: EventGameState,
-   pub max_stake: u64,
-   pub odds_scaled: u32,
-   pub offer_expiry: u32,
-}
-
-pub const FILL_RFQ_BET_IX_BODY_LEN: usize = <FillRfqBetIxData as ZeroPodFixed>::SIZE;
-pub const FILL_RFQ_BET_IX_DATA_LEN: usize = FILL_RFQ_BET_IX_BODY_LEN + SIGNATURE_LEN;
-
-impl FillRfqBetIxData {
-   #[inline(always)]
-   pub fn decode_with_signature(data: &[u8]) -> Result<(Self, [u8; 64]), ProgramError> {
-      if data.len() != FILL_RFQ_BET_IX_DATA_LEN {
-         return Err(ProgramError::InvalidInstructionData);
-      }
-      let zc = <Self as ZeroPodFixed>::from_bytes(&data[..FILL_RFQ_BET_IX_BODY_LEN])
-         .map_err(|_| ProgramError::InvalidInstructionData)?;
-      let parsed = Self {
-         bet_id: zc.bet_id.get(),
-         market_id: MarketId::from_zc(&zc.market_id).ok_or(ProgramError::InvalidInstructionData)?,
-         side: zc.side,
-         amount: zc.amount.get(),
-         event_state_sequence: zc.event_state_sequence.get(),
-         event_game_state: EventGameState::from_zc(&zc.event_game_state),
-         max_stake: zc.max_stake.get(),
-         odds_scaled: zc.odds_scaled.get(),
-         offer_expiry: zc.offer_expiry.get(),
-      };
-      let mut sig = [0u8; 64];
-      sig.copy_from_slice(&data[FILL_RFQ_BET_IX_BODY_LEN..]);
-      Ok((parsed, sig))
-   }
-
-   #[inline(always)]
-   pub fn write_wire_with_signature(&self, signature: &[u8; 64], out: &mut [u8]) -> Result<(), ProgramError> {
-      if out.len() != FILL_RFQ_BET_IX_DATA_LEN {
-         return Err(ProgramError::InvalidInstructionData);
-      }
-      let zc = FillRfqBetIxDataZc {
-         bet_id: self.bet_id.into(),
-         market_id: self.market_id.to_zc(),
-         side: self.side,
-         amount: self.amount.into(),
-         event_state_sequence: self.event_state_sequence.into(),
-         event_game_state: self.event_game_state.to_zc(),
-         max_stake: self.max_stake.into(),
-         odds_scaled: self.odds_scaled.into(),
-         offer_expiry: self.offer_expiry.into(),
-      };
-      unsafe {
-         core::ptr::write(out.as_mut_ptr().cast(), zc);
-      }
-      out[FILL_RFQ_BET_IX_BODY_LEN..].copy_from_slice(signature);
-      Ok(())
-   }
-}
 
 #[inline(never)]
 fn verify_rfq_bet_ed25519(
@@ -140,7 +54,7 @@ fn verify_rfq_bet_ed25519(
    signature: &[u8; 64],
 ) -> Result<(), ProgramError> {
    let rfq_signer = unsafe {
-      *(mm_config_pda.data_ptr().add(MM_CONFIG_PDA_RFQ_SIGNER_OFFSET) as *const Address)
+      read_address_ref_unchecked(mm_config_pda.data_ptr(), MM_CONFIG_PDA_RFQ_SIGNER_OFFSET)
    };
    let mut message = [0u8; RFQ_BET_MESSAGE_LEN];
    build_rfq_bet_message(
@@ -156,33 +70,86 @@ fn verify_rfq_bet_ed25519(
       parsed.offer_expiry,
       mm_program,
    )?;
-   verify_rfq_ed25519_signature(&rfq_signer, signature, &message)
+   verify_rfq_ed25519_signature(rfq_signer, signature, &message)
 }
 
 #[inline(never)]
-pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
-      feepayer, //verified as signer
-      user, //verified as signer
-      user_ata, //verified by verify_token_account
-      bet_pda, //verified by find_program_address
-      bet_ata, //verified by verify_token_account after creation
-      config_pda, //verified by verify_config_pda
-      mint, //verified by verify_mint
-      token_program, //verified by equ const
-      associated_token_program, //verified by equ const
-      system_program, //verified by equ const
-      instructions_sysvar, //verified by verify_instructions_sysvar
-      clock_program, //verified by equ const
-      mm_program_account, //verified by verify_mm_program_executable
-      mm_config_pda, //verified by verify_mm_config_pda
-      mm_event_state_pda, //verified by verify_event_state
-      mm_market_data_pda, //verified by verify_mm_market_data_pda
-      mm_encumbrance_pda, //verified by verify_mm_encumbrance_pda
-      mm_liability_token_account, //verified by verify_token_account
-      mm_token_account, //verified by verify_token_account
-      mm_netting_pda, //verified by verify_netting_pda_or_placeholder
+      feepayer,
+      user,
+      user_ata,
+      bet_pda,
+      bet_ata,
+      config_pda,
+      mint,
+      token_program,
+      associated_token_program,
+      rent_sysvar,
+      system_program,
+      instructions_sysvar,
+      clock_sysvar,
+      mm_accounts @ ..,
    ] = accounts else {
+      log!("fill_rfq_bet: accounts mismatch");
+      return Err(ProgramError::NotEnoughAccountKeys);
+   };
+   let (parsed, signature) = FillRfqBetIxData::decode_with_signature(data)?;
+   run_fill_rfq_bet(
+      feepayer,
+      user,
+      bet_pda,
+      bet_ata,
+      config_pda,
+      mint,
+      token_program,
+      associated_token_program,
+      rent_sysvar,
+      system_program,
+      instructions_sysvar,
+      clock_sysvar,
+      mm_accounts,
+      parsed,
+      signature,
+      FillBetStake {
+         token_account: user_ata,
+         authority: user,
+         issuer_sign: None,
+         freebet_id: 0,
+         freebet: None,
+      },
+   )
+}
+
+#[inline(never)]
+pub(crate) fn run_fill_rfq_bet(
+   feepayer: &AccountView,
+   user: &AccountView,
+   bet_pda: &mut AccountView,
+   bet_ata: &AccountView,
+   config_pda: &AccountView,
+   mint: &AccountView,
+   token_program: &AccountView,
+   associated_token_program: &AccountView,
+   rent_sysvar: &AccountView,
+   system_program: &AccountView,
+   instructions_sysvar: &AccountView,
+   clock_sysvar: &AccountView,
+   mm_accounts: &mut [AccountView],
+   parsed: FillRfqBetIxData,
+   signature: [u8; 64],
+   stake: FillBetStake<'_>,
+) -> ProgramResult {
+   let [
+      mm_program_account,
+      mm_config_pda,
+      mm_event_state_pda,
+      mm_market_data_pda,
+      mm_encumbrance_pda,
+      mm_liability_token_account,
+      mm_token_account,
+      mm_netting_pda,
+   ] = mm_accounts else {
       log!("fill_rfq_bet: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
@@ -191,15 +158,14 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
    verify_signer(&user)?;
    verify_token_program(token_program)?;
    verify_associated_token_program(associated_token_program)?;
+   verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_instructions_sysvar(instructions_sysvar)?;
+   verify_clock_sysvar(clock_sysvar)?;
    verify_mint(mint)?;
-   verify_token_account(true, user_ata, user, mint, token_program)?;
+   verify_token_account(true, stake.token_account, stake.authority, mint, token_program)?;
    verify_config_pda(config_pda, true)?;
-   ensure_bet_pda_unused(bet_pda, "fill_rfq_bet")?;
-
-   let (parsed, signature) = FillRfqBetIxData::decode_with_signature(data)?;
-   parse_fill_rfq_bet_data(&parsed)?;
+   ensure_pda_unused(bet_pda, "fill_rfq_bet")?;
 
    let bet_id = parsed.bet_id;
    let amount = parsed.amount;
@@ -209,18 +175,27 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
    let event_state_sequence = parsed.event_state_sequence;
    let odds_scaled = parsed.odds_scaled;
 
-   let clock = Clock::from_account_view(clock_program)?;
-   if unlikely(clock.unix_timestamp > i64::from(parsed.offer_expiry)) {
+   let now = clock_unix_timestamp_u32(clock_sysvar)?;
+   if unlikely(now > parsed.offer_expiry) {
       log!("fill_rfq_bet: quote expired");
-      return Err(ProgramError::InvalidInstructionData);
+      return Err(SpammError::QuoteExpired.into());
    }
 
    verify_mm_program_executable(mm_program_account)?;
    let mm_address = *mm_program_account.address();
 
+   if let Some(fb) = stake.freebet {
+      verify_freebet_for_fill(fb, user.address(), amount, 1, now)?;
+      require_freebet_mm_allowed(fb, &mm_address)?;
+      require_freebet_operator_allowed(fb, &market_id.operator)?;
+      if !odds_in_freebet_range(odds_scaled, fb) {
+         return Err(SpammError::FreebetOddsOutOfRange.into());
+      }
+   }
+
    if unlikely(!verify_mm_config_pda(mm_config_pda, mm_program_account)) {
       log!("fill_rfq_bet: invalid mm config pda");
-      return Err(ProgramError::InvalidAccountData);
+      return Err(SpammError::MmNotRegistered.into());
    }
 
    verify_rfq_bet_ed25519(
@@ -231,7 +206,11 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
       &signature,
    )?;
 
-   if unlikely(!verify_mm_market_data_pda(mm_market_data_pda, mm_program_account, &market_id)) {
+   if unlikely(!verify_mm_market_data_pda(
+      mm_market_data_pda, 
+      mm_program_account, 
+      &market_id.as_bytes()
+   )) {
       log!("fill_rfq_bet: invalid market data pda");
       return Err(ProgramError::InvalidAccountData);
    }
@@ -239,9 +218,9 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
    if unlikely(!verify_event_state(
       mm_event_state_pda,
       mm_program_account,
-      &market_id.event_id,
+      &market_id.event_id.as_wire_bytes(),
       &event_game_state,
-      &event_state_sequence,
+      event_state_sequence,
    )) {
       log!("fill_rfq_bet: invalid event state");
       return Err(ProgramError::InvalidAccountData);
@@ -268,7 +247,7 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
       return Err(ProgramError::InvalidAccountData);
    }
 
-   if unlikely(!verify_netting_pda_or_placeholder(mm_netting_pda, mm_program_account, &market_id.event_id)) {
+   if unlikely(!verify_netting_pda_or_placeholder(mm_netting_pda, mm_program_account, &market_id.event_id.as_wire_bytes())) {
       log!("fill_rfq_bet: invalid netting pda");
       return Err(ProgramError::InvalidAccountData);
    }
@@ -284,7 +263,8 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
    };
 
    let netting_calc: Option<NettingCalc> =
-      if !mm_netting_pda.is_data_empty() && market_id.is_pregame() {
+      if !mm_netting_pda.is_data_empty() {
+         ensure_netting_space_for_market(mm_netting_pda, &market_id, feepayer, rent_sysvar)?;
          calculate_netting(
             mm_netting_pda,
             &market_id,
@@ -296,7 +276,6 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
          None
       };
    let is_potentially_netted = netting_calc.is_some();
-   let netting_delta_i64: i64 = netting_calc.map(|c| c.delta).unwrap_or(0);
 
    let Ok(gross_margin_u64) = calc_potential_profit(amount, odds_scaled) else {
       log!("fill_rfq_bet: failed to calc potential profit");
@@ -307,8 +286,8 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
       ProgramError::InvalidInstructionData
    })?;
 
-   let encumbrance_delta_i64: i64 = if is_potentially_netted {
-      netting_delta_i64
+   let delta_i64: i64 = if is_potentially_netted {
+      netting_calc.map(|c| c.delta).unwrap_or(0)
    } else {
       gross_margin_i64
    };
@@ -316,7 +295,7 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
    let (amount_to_send, new_outstanding_liability) = compute_liability_shortfall(
       mm_liability_account_balance_before,
       outstanding_liability,
-      encumbrance_delta_i64,
+      delta_i64,
    )?;
 
    let fill_ix_data = FillRfqIxData {
@@ -329,6 +308,7 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
    let fill_rfq_ix_account_metas = [
       InstructionAccount::new(user.address(), false, false),
       InstructionAccount::new(mm_market_data_pda.address(), true, false),
+      InstructionAccount::new(mm_event_state_pda.address(), true, false),
       InstructionAccount::new(mm_config_pda.address(), true, false),
       InstructionAccount::new(mm_token_account.address(), true, false),
       InstructionAccount::new(mm_liability_token_account.address(), true, false),
@@ -339,6 +319,7 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
    let fill_rfq_invoke_accounts = [
       user.as_ref(),
       mm_market_data_pda.as_ref(),
+      mm_event_state_pda.as_ref(),
       mm_config_pda.as_ref(),
       mm_token_account.as_ref(),
       mm_liability_token_account.as_ref(),
@@ -355,21 +336,11 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
       &fill_rfq_invoke_accounts,
    )?;
 
-   let Ok(mm_liability_account_balance_after) = get_token_account_balance(mm_liability_token_account) else {
-      log!("fill_rfq_bet: failed to read liability balance after CPI");
-      return Err(ProgramError::InvalidAccountData);
-   };
-   let Some(mm_liability_token_account_increase) =
-      mm_liability_account_balance_after.checked_sub(mm_liability_account_balance_before)
-   else {
-      log!("fill_rfq_bet: liability balance decreased");
-      return Err(ProgramError::InvalidInstructionData);
-   };
-
-   if unlikely(mm_liability_token_account_increase != amount_to_send) {
-      log!("fill_rfq_bet: liability deposit mismatch");
-      return Err(ProgramError::InvalidInstructionData);
-   }
+   require_exact_token_increase(
+      mm_liability_token_account,
+      mm_liability_account_balance_before,
+      amount_to_send,
+   )?;
 
    if let Some(NettingCalc { write: netting_write, .. }) = netting_calc {
       apply_netting(mm_netting_pda, &netting_write)?;
@@ -385,91 +356,47 @@ pub fn fill_rfq_bet(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult 
 
    let filled_payout = calc_potential_payout(amount, odds_scaled)?;
 
-   let bet_id_bytes = bet_id.to_le_bytes();
-   let bet_pda_seed = [BET_ACCOUNT_SEED, user.address().as_ref(), &bet_id_bytes];
-   let (expected_bet_pda, bet_bump) = Address::find_program_address(&bet_pda_seed, &ID);
-   if !address_eq(bet_pda.address(), &expected_bet_pda) {
-      log!("fill_rfq_bet: bet pda mismatch");
-      return Err(ProgramError::InvalidSeeds);
-   }
-
-   let bet_bump_bytes = [bet_bump];
-   let bet_pda_signer_seed = [
-      Seed::from(BET_ACCOUNT_SEED),
-      Seed::from(user.address().as_ref()),
-      Seed::from(&bet_id_bytes),
-      Seed::from(&bet_bump_bytes),
-   ];
-   let bet_pda_signers = [Signer::from(&bet_pda_signer_seed)];
-
-   let timestamp: u32 = clock.unix_timestamp.try_into().map_err(|_| {
-      log!("fill_rfq_bet: failed to convert timestamp to u32");
-      ProgramError::InvalidAccountData
-   })?;
-
    let filler = BetFiller {
       mm_address,
       amount,
+      reserved_profit: gross_margin_u64,
       odds_scaled,
       is_potentially_netted,
-      encumbrance_delta: encumbrance_delta_i64,
    };
-   let mut empty_fillers = [BetFiller {
-      mm_address: Address::default(),
-      amount: 0,
-      odds_scaled: 0,
-      is_potentially_netted: false,
-      encumbrance_delta: 0,
-   }; 5];
-   empty_fillers[0] = filler;
-
-   let bet_account_data = BetAccountData {
+   let header = BetAccountHeader {
       discriminator: BET_ACCOUNT_DISCRIMINATOR,
-      bump: bet_bump,
-      event_state_sequence,
-      side,
+      bump: 0,
       owner: *user.address(),
       feepayer: *feepayer.address(),
       bet_id,
+      market_id,
+      side,
       amount,
       payout: filled_payout,
-      market_id,
+      timestamp: now,
+      freebet_id: stake.freebet_id,
+      event_state_sequence,
       event_game_state,
-      timestamp,
       result: BetResult::Pending,
-      filler_0: empty_fillers[0],
-      filler_1: empty_fillers[1],
-      filler_2: empty_fillers[2],
-      filler_3: empty_fillers[3],
-      filler_4: empty_fillers[4],
+      num_fillers: 1,
    };
-
-   CreateAccount {
-      from: feepayer,
-      to: bet_pda,
-      lamports: get_rent_local(BET_ACCOUNT_LEN),
-      space: BET_ACCOUNT_LEN,
-      owner: &ID,
-   }
-   .invoke_signed(&bet_pda_signers)?;
-
-   {
-      let mut bet_pda_data = bet_pda.try_borrow_mut()?;
-      bet_account_data.write_to_account(&mut bet_pda_data)?;
-   }
-
-   Create {
-      funding_account: feepayer,
-      account: bet_ata,
-      wallet: bet_pda,
+   create_single_bet_account(
+      feepayer,
+      user,
+      stake.token_account,
+      stake.authority,
+      bet_pda,
+      bet_ata,
       mint,
-      system_program,
       token_program,
-   }
-   .invoke()?;
-
-   verify_token_account(true, bet_ata, bet_pda, mint, token_program)?;
-   Transfer::new(user_ata, bet_ata, user, amount).invoke()?;
+      rent_sysvar,
+      system_program,
+      &header,
+      core::slice::from_ref(&filler),
+      stake.issuer_sign,
+      "fill_rfq_bet",
+   )?;
 
    Ok(())
 }
+

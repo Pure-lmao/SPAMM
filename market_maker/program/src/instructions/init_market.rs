@@ -1,38 +1,41 @@
 //! Create the MM market-data PDA for one market: `["market_data", market_id_body_wire, operator]`.
 //!
-//! On-chain account layout: **`[u8 disc][u8 bump][u8; 2 pad][u32 sequence LE][oracle_body]`** —
-//! `get_quote` reads odds from `oracle_body` at offset **8** (3 × `u32` LE
-//! for soccer `mkt` 1 or 5 in order **home, away, draw**).
+//! On-chain account layout: **`[u8 disc][u8 bump][u32 sequence LE][oracle_body padded to ≥12]`** —
+//! `get_quote` reads odds from `oracle_body` at offset **6** (2 or 3 × `u32` LE;
+//! `mkt` 1 or 5 is **home, away, draw**).
 //!
-//! Accounts **(4)**
+//! Accounts **(5)**
 //! 0. `feepayer` (signer) — must match `admin` for `config_pda`
 //! 1. `config_pda` (readonly) — PDA `["config"]`
-//! 2. `mm_market_data_pda` (writable) — created; space `8 + oracle_body.len()` (8-byte header + body)
-//! 3. `system_program` (readonly)
+//! 2. `mm_market_data_pda` (writable) — created; space `6 + max(oracle_body.len(), 12)`
+//! 3. `rent_sysvar` (readonly)
+//! 4. `system_program` (readonly)
 //!
 //! Instruction `data`: [`InitMarketIxPayload`] — `market_id` + `oracle_body`.
 
-use pinocchio::ProgramResult;
-use pinocchio::address::address_eq;
-use pinocchio::cpi::Seed;
-use pinocchio::cpi::Signer;
-use pinocchio::error::ProgramError;
-use pinocchio::hint::unlikely;
-use pinocchio::{AccountView, Address};
+use pinocchio::{
+   AccountView, Address, ProgramResult,
+   address::address_eq,
+   cpi::{Seed, Signer},
+   error::ProgramError,
+   hint::unlikely,
+};
 use pinocchio_log::log;
 use pinocchio_system::instructions::CreateAccount;
-use spamm_aggregator::state::{MarketId, market_id_pda_seed_parts};
 
-use spamm_aggregator::helpers::{verify_signer, verify_system_program, get_rent_local};
-use spamm_aggregator::writers::write_arbitrary_bytes_unchecked;
+use crate::{
+   constants::MM_MARKET_DATA_PDA_SEED,
+   mm_helpers::{find_market_data_pda, verify_mm_config_auth},
+   state::InitMarketIxPayload,
+};
+use spamm_aggregator::{
+   helpers::{get_rent, verify_rent_sysvar, verify_signer, verify_system_program},
+   state::{MarketId, MM_MARKET_DATA_PDA_DISCRIMINATOR, market_id_pda_seed_parts},
+   writers::write_arbitrary_bytes_unchecked,
+};
 
-use crate::constants::MM_MARKET_DATA_PDA_SEED;
-use crate::mm_helpers::{find_market_data_pda, verify_mm_config_auth};
 
-use crate::state::InitMarketIxPayload;
-
-
-pub const INIT_MARKET_IX_DISCRIMINATOR: u8 = 10;
+pub const INIT_MARKET_IX_DISCRIMINATOR: u8 = 111;
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let InitMarketIxPayload { market_id, oracle_body } = InitMarketIxPayload::decode(data)?;
@@ -40,6 +43,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       feepayer,
       config_pda,
       mm_market_data_pda,
+      rent_sysvar,
       system_program,
    ] = accounts else {
       log!("init_market: accounts mismatch");
@@ -47,6 +51,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    };
 
    verify_signer(feepayer)?;
+   verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_mm_config_auth(feepayer, config_pda)?;
 
@@ -63,13 +68,14 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Err(ProgramError::InvalidSeeds);
    }
 
-   let body_len: u64 = u64::try_from(oracle_body.len()).map_err(|_| {
+   let body_len_usize = oracle_body.len();
+   let body_len: u64 = u64::try_from(body_len_usize).map_err(|_| {
       log!("init_market: body length");
       ProgramError::InvalidInstructionData
    })?;
+   let stored_body_len: u64 = core::cmp::max(body_len, 12);
    let oracle_space: u64 = 6u64
-      .checked_add(body_len)
-      .ok_or(ProgramError::InvalidInstructionData)?;
+      .checked_add(stored_body_len).ok_or(ProgramError::InvalidInstructionData)?;
    log!("init_market: oracle space: {}", oracle_space);
    {
       let b = [bump];
@@ -89,7 +95,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       CreateAccount {
          from: feepayer,
          to: mm_market_data_pda,
-         lamports: get_rent_local(oracle_space),
+         lamports: get_rent(rent_sysvar, oracle_space)?,
          space: oracle_space,
          owner: program_id,
       }
@@ -98,13 +104,17 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    unsafe {
       let ptr = mm_market_data_pda.data_mut_ptr();
       let header = [
-         0u8,    // discriminator
+         MM_MARKET_DATA_PDA_DISCRIMINATOR,
          bump,
          0, 0, 0, 0, // u32 sequence LE = 0
       ];
       write_arbitrary_bytes_unchecked(ptr, 0, &header);
-      if body_len > 0 {
+      if body_len_usize > 0 {
          write_arbitrary_bytes_unchecked(ptr, 6, &oracle_body);
+      }
+      if body_len_usize < 12 {
+         let pad = [0u8; 12];
+         write_arbitrary_bytes_unchecked(ptr, 6 + body_len_usize, &pad[..12 - body_len_usize]);
       }
    }
    Ok(())

@@ -6,6 +6,8 @@ import {
    type KeyPairSigner,
    type ReadonlyUint8Array,
 } from '@solana/kit';
+import Bun from 'bun';
+import { ADDRESS_LEN } from 'spamm-aggregator-sdk';
 
 const addressEncoder = getAddressEncoder();
 
@@ -23,11 +25,11 @@ function formatAddressAsRustNewFromArrayBody(address: Address): string {
 // console.log(formatAddressAsRustNewFromArrayBody("9cg4mZSLwjtL3D2JBhockpfw7kprmrXxcg6K5Um68Pga" as Address));
 
 const pkString = '';
-/** Base58-encoded 32-byte seed or 64-byte secret key (wallet export format). */
+/** Base58-encoded seed (`ADDRESS_LEN`) or 64-byte secret key (wallet export format). */
 function convertPkStringToArray(pkString: string): Uint8Array {
    const bytes = new Uint8Array(getBase58Encoder().encode(pkString));
-   if (bytes.length !== 32 && bytes.length !== 64) {
-      throw new Error(`Expected base58 secret to decode to 32 or 64 bytes, got ${bytes.length}`);
+   if (bytes.length !== ADDRESS_LEN && bytes.length !== 64) {
+      throw new Error(`Expected base58 secret to decode to ${ADDRESS_LEN} or 64 bytes, got ${bytes.length}`);
    }
    return bytes;
 }

@@ -3,11 +3,16 @@ import type { Rpc } from '@solana/rpc-spec';
 import type { SolanaRpcApi } from '@solana/rpc-api';
 import type { Base64EncodedBytes, GetProgramAccountsMemcmpFilter } from '@solana/rpc-types';
 
-import { AGGREGATOR_PROGRAM_ID } from './constants.js';
+import { ADDRESS_LEN, AGGREGATOR_PROGRAM_ID, U32_LEN, U64_LEN } from './constants.js';
 import {
    decodeBetAccountDataStrict,
+   decodeCashoutAccountDataStrict,
+   decodeCashoutEscrow,
+   decodeCashoutParlayAccountDataStrict,
    decodeConfigPdaData,
    decodeEventStateData,
+   decodeFreebetAccountData,
+   decodeFreebetIssuer,
    decodeMmAccountConfig,
    decodeMmEncumbrancePdaData,
    decodeMmListPdaData,
@@ -20,8 +25,13 @@ import {
 import {
    encodeEventIdWire,
    getBetPda,
+   getCashoutEscrowPda,
+   getCashoutPda,
+   getCashoutParlayPda,
    getConfigPda,
    getEventStatePda,
+   getFreebetIssuerPda,
+   getFreebetPda,
    getAta,
    getMmConfigPda,
    getMmEncumbrancePda,
@@ -33,13 +43,21 @@ import {
 } from './helpers.js';
 import {
    BET_ACCOUNT_DISCRIMINATOR,
-   BET_ACCOUNT_LEN,
+   CASHOUT_ACCOUNT_DISCRIMINATOR,
+   CASHOUT_ESCROW_DISCRIMINATOR,
+   CASHOUT_PARLAY_ACCOUNT_DISCRIMINATOR,
+   EVENT_GAME_STATE_LEN,
+   MARKET_ID_WIRE_SIZE,
    PARLAY_BET_ACCOUNT_DISCRIMINATOR,
-   PARLAY_BET_ACCOUNT_LEN,
    type BetAccountData,
+   type CashoutAccountData,
+   type CashoutEscrow,
+   type CashoutParlayAccountData,
    type ConfigPdaData,
    type EventId,
    type EventStateData,
+   type FreebetAccountData,
+   type FreebetIssuer,
    type MarketId,
    type MmAccountConfig,
    type MmEncumbrancePdaData,
@@ -55,46 +73,154 @@ const marketIdEncoder = getMarketIdEncoder();
 
 const MAX_GET_PROGRAM_ACCOUNTS_FILTERS = 4;
 
+function packedOffsets<T extends Record<string, number>>(build: (add: (len: number) => number) => T): T {
+   let o = 0;
+   return build((len) => {
+      const start = o;
+      o += len;
+      return start;
+   });
+}
+
 /**
- * Byte offsets for on-chain `BetAccountDataZc` (`account_bet.rs` `to_zc`, zeropod alignment-1 packed).
- * `1 + 1 + 32 + 32 + 8 + 23 + 1 + 8 + 8 + 4 + 2 + 8 + 1 = 129` bytes before fillers;
- * `result` (128) matches Rust `BET_RESULT_OFFSET`.
+ * Byte offsets for on-chain `BetAccountHeader` (`account_bet.rs`, zeropod alignment-1 packed).
+ * `result` matches Rust `BET_RESULT_OFFSET`.
  */
-export const BET_ACCOUNT_WIRE_OFFSETS = {
-   discriminator: 0, // u8, 1 byte
-   bump: 1, // u8, 1 byte
-   owner: 2, // Pubkey, 32 bytes
-   feepayer: 34, // Pubkey, 32 bytes
-   betId: 66, // u64, 8 bytes
-   marketId: 74, // MarketId, 23 bytes
-   side: 97, // u8, 1 byte
-   amount: 98, // u64, 8 bytes
-   payout: 106, // u64, 8 bytes
-   timestamp: 114, // u32, 4 bytes
-   eventStateSequence: 118, // u16, 2 bytes
-   eventGameState: 120, // EventGameState, 8 bytes
-   result: 128, // u8, 1 byte
-   filler0: 129, // BetFiller
-} as const;
+export const BET_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
+   discriminator: add(1),
+   bump: add(1),
+   owner: add(ADDRESS_LEN),
+   feepayer: add(ADDRESS_LEN),
+   betId: add(U64_LEN),
+   marketId: add(MARKET_ID_WIRE_SIZE),
+   side: add(1),
+   amount: add(U64_LEN),
+   payout: add(U64_LEN),
+   timestamp: add(U32_LEN),
+   freebetId: add(U32_LEN),
+   eventStateSequence: add(2),
+   eventGameState: add(EVENT_GAME_STATE_LEN),
+   result: add(1),
+   numFillers: add(1),
+   fillers: add(0),
+} as const));
 
 /**
  * Byte offsets for on-chain `ParlayBetAccountData` (`account_parlay_bet.rs`, zeropod alignment-1 packed).
- * `result` (126) matches Rust `PARLAY_BET_RESULT_OFFSET`.
+ * `result` matches Rust `PARLAY_BET_RESULT_OFFSET`.
  */
-export const PARLAY_BET_ACCOUNT_WIRE_OFFSETS = {
-   discriminator: 0, // u8, 1 byte
-   bump: 1, // u8, 1 byte
-   owner: 2, // Pubkey, 32 bytes
-   feepayer: 34, // Pubkey, 32 bytes
-   betId: 66, // u64, 8 bytes
-   amount: 74, // u64, 8 bytes
-   payout: 82, // u64, 8 bytes
-   timestamp: 90, // u32, 4 bytes
-   fillerAddress: 94, // Pubkey, 32 bytes
-   result: 126, // u8, 1 byte
-   numLegs: 127, // u8, 1 byte
-   legs: 128, // ParlayLegTable
-} as const;
+export const PARLAY_BET_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
+   discriminator: add(1),
+   bump: add(1),
+   owner: add(ADDRESS_LEN),
+   feepayer: add(ADDRESS_LEN),
+   betId: add(U64_LEN),
+   amount: add(U64_LEN),
+   payout: add(U64_LEN),
+   timestamp: add(U32_LEN),
+   freebetId: add(U32_LEN),
+   fillerAddress: add(ADDRESS_LEN),
+   result: add(1),
+   numLegs: add(1),
+   legs: add(0),
+} as const));
+
+/**
+ * Byte offsets for on-chain `FreebetIssuer` (`account_freebet_issuer.rs`).
+ */
+export const FREEBET_ISSUER_WIRE_OFFSETS = packedOffsets((add) => ({
+   discriminator: add(1),
+   bump: add(1),
+   auth: add(ADDRESS_LEN),
+   openCount: add(U32_LEN),
+} as const));
+
+/**
+ * Byte offsets for on-chain `FreebetAccountHeader` (`account_freebet.rs`, packed ZeroPod).
+ * Allowed MM addresses follow at {@link FREEBET_ACCOUNT_HEADER_LEN}.
+ * Allowed operator addresses follow the MM list (`freebetAllowedOperatorsOffset(numMms)`).
+ */
+export const FREEBET_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
+   discriminator: add(1),
+   bump: add(1),
+   state: add(1),
+   numMms: add(1),
+   minLegs: add(1),
+   numOperators: add(1),
+   freebetId: add(U32_LEN),
+   expiry: add(U32_LEN),
+   minOddsScaled: add(U32_LEN),
+   maxOddsScaled: add(U32_LEN),
+   amount: add(U64_LEN),
+   issuerAuth: add(ADDRESS_LEN),
+   user: add(ADDRESS_LEN),
+   allowedMms: add(0),
+} as const));
+
+/**
+ * Byte offsets for on-chain `CashoutEscrow` (`account_cashout_escrow.rs`).
+ */
+export const CASHOUT_ESCROW_WIRE_OFFSETS = packedOffsets((add) => ({
+   discriminator: add(1),
+   bump: add(1),
+   owner: add(ADDRESS_LEN),
+   feepayer: add(ADDRESS_LEN),
+   origBetId: add(U64_LEN),
+   cashoutId: add(U64_LEN),
+   timestamp: add(U32_LEN),
+   amount: add(U64_LEN),
+   payoutRemoved: add(U64_LEN),
+   payment: add(U64_LEN),
+   marketMaker: add(ADDRESS_LEN),
+   isParlay: add(1),
+} as const));
+
+/**
+ * Byte offsets for on-chain `CashoutAccountHeader` (`account_cashout.rs`, packed ZeroPod).
+ * Fillers follow at {@link CASHOUT_ACCOUNT_HEADER_LEN}.
+ */
+export const CASHOUT_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
+   discriminator: add(1),
+   bump: add(1),
+   mm: add(ADDRESS_LEN),
+   feepayer: add(ADDRESS_LEN),
+   origOwner: add(ADDRESS_LEN),
+   origBetId: add(U64_LEN),
+   cashoutId: add(U64_LEN),
+   marketId: add(MARKET_ID_WIRE_SIZE),
+   side: add(1),
+   amount: add(U64_LEN),
+   payout: add(U64_LEN),
+   timestamp: add(U32_LEN),
+   origEventStateSequence: add(2),
+   origEventGameState: add(EVENT_GAME_STATE_LEN),
+   cashoutEventStateSequence: add(2),
+   cashoutEventGameState: add(EVENT_GAME_STATE_LEN),
+   result: add(1),
+   numFillers: add(1),
+   fillers: add(0),
+} as const));
+
+/**
+ * Byte offsets for on-chain `CashoutParlayHeader` (`account_cashout_parlay.rs`, packed ZeroPod).
+ * Legs follow at {@link CASHOUT_PARLAY_HEADER_LEN}.
+ */
+export const CASHOUT_PARLAY_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
+   discriminator: add(1),
+   bump: add(1),
+   mm: add(ADDRESS_LEN),
+   feepayer: add(ADDRESS_LEN),
+   origOwner: add(ADDRESS_LEN),
+   origBetId: add(U64_LEN),
+   cashoutId: add(U64_LEN),
+   amount: add(U64_LEN),
+   payout: add(U64_LEN),
+   timestamp: add(U32_LEN),
+   result: add(1),
+   originalFillerAddress: add(ADDRESS_LEN),
+   numLegs: add(1),
+   legs: add(0),
+} as const));
 
 export type ProgramAccountRaw = Readonly<{
    address: Address;
@@ -124,7 +250,7 @@ function u8WireByte(value: number): Uint8Array {
 }
 
 function u64Le(value: bigint): Uint8Array {
-   const out = new Uint8Array(8);
+   const out = new Uint8Array(U64_LEN);
    new DataView(out.buffer).setBigUint64(0, value, true);
    return out;
 }
@@ -283,7 +409,7 @@ export type GetBetsDataFilters = Readonly<{
 }>;
 
 /**
- * Bet PDA accounts under {@link AGGREGATOR_PROGRAM_ID}, filtered by discriminator and fixed size.
+ * Bet PDA accounts under {@link AGGREGATOR_PROGRAM_ID}, filtered by discriminator only (variable account size).
  * Optional `memcmp` filters are merged when their byte ranges are adjacent (e.g. `user` + `feepayer`, or
  * `betId` + `marketId`), staying within Solana's filter limit ({@link MAX_GET_PROGRAM_ACCOUNTS_FILTERS} total).
  */
@@ -292,7 +418,6 @@ export async function getBetsData(
    optional?: GetBetsDataFilters,
 ): Promise<ReadonlyArray<Readonly<{ address: Address; data: BetAccountData }>>> {
    const filters: (GetProgramAccountsMemcmpFilter | { readonly dataSize: bigint })[] = [
-      { dataSize: BigInt(BET_ACCOUNT_LEN) },
       memcmp(BigInt(BET_ACCOUNT_WIRE_OFFSETS.discriminator), u8WireByte(BET_ACCOUNT_DISCRIMINATOR)),
    ];
 
@@ -356,14 +481,13 @@ export type GetParlaysDataFilters = Readonly<{
 }>;
 
 /**
- * Parlay bet PDA accounts under {@link AGGREGATOR_PROGRAM_ID}, filtered by discriminator and fixed size.
+ * Parlay bet PDA accounts under {@link AGGREGATOR_PROGRAM_ID}, filtered by discriminator only (variable account size).
  */
 export async function getParlaysData(
    rpc: Rpc<SolanaRpcApi>,
    optional?: GetParlaysDataFilters,
 ): Promise<ReadonlyArray<Readonly<{ address: Address; data: ParlayBetAccountData }>>> {
    const filters: (GetProgramAccountsMemcmpFilter | { readonly dataSize: bigint })[] = [
-      { dataSize: BigInt(PARLAY_BET_ACCOUNT_LEN) },
       memcmp(BigInt(PARLAY_BET_ACCOUNT_WIRE_OFFSETS.discriminator), u8WireByte(PARLAY_BET_ACCOUNT_DISCRIMINATOR)),
    ];
 
@@ -494,4 +618,279 @@ export async function getMmParlayQuoteBufferData(
       throw new Error('MM parlay quote buffer account not found');
    }
    return decodeMmParlayQuoteBuffer(raw);
+}
+
+export type GetCashoutEscrowsDataFilters = Readonly<{
+   owner?: Address;
+   feepayer?: Address;
+   origBetId?: bigint;
+   cashoutId?: bigint;
+   marketMaker?: Address;
+   isParlay?: boolean;
+}>;
+
+/** Cashout escrow PDAs under {@link AGGREGATOR_PROGRAM_ID}. */
+export async function getCashoutEscrowsData(
+   rpc: Rpc<SolanaRpcApi>,
+   optional?: GetCashoutEscrowsDataFilters,
+): Promise<ReadonlyArray<Readonly<{ address: Address; data: CashoutEscrow }>>> {
+   const filters: (GetProgramAccountsMemcmpFilter | { readonly dataSize: bigint })[] = [
+      memcmp(BigInt(CASHOUT_ESCROW_WIRE_OFFSETS.discriminator), u8WireByte(CASHOUT_ESCROW_DISCRIMINATOR)),
+   ];
+   const segments: MemcmpSeg[] = [];
+   if (optional?.owner !== undefined) {
+      segments.push({
+         offset: CASHOUT_ESCROW_WIRE_OFFSETS.owner,
+         bytes: new Uint8Array(addressEncoder.encode(optional.owner)),
+      });
+   }
+   if (optional?.feepayer !== undefined) {
+      segments.push({
+         offset: CASHOUT_ESCROW_WIRE_OFFSETS.feepayer,
+         bytes: new Uint8Array(addressEncoder.encode(optional.feepayer)),
+      });
+   }
+   if (optional?.origBetId !== undefined) {
+      segments.push({ offset: CASHOUT_ESCROW_WIRE_OFFSETS.origBetId, bytes: u64Le(optional.origBetId) });
+   }
+   if (optional?.cashoutId !== undefined) {
+      segments.push({ offset: CASHOUT_ESCROW_WIRE_OFFSETS.cashoutId, bytes: u64Le(optional.cashoutId) });
+   }
+   if (optional?.marketMaker !== undefined) {
+      segments.push({
+         offset: CASHOUT_ESCROW_WIRE_OFFSETS.marketMaker,
+         bytes: new Uint8Array(addressEncoder.encode(optional.marketMaker)),
+      });
+   }
+   if (optional?.isParlay !== undefined) {
+      segments.push({
+         offset: CASHOUT_ESCROW_WIRE_OFFSETS.isParlay,
+         bytes: u8WireByte(optional.isParlay ? 1 : 0),
+      });
+   }
+   const merged = mergeAdjacentMemcmpSegments(segments);
+   for (const m of merged) {
+      if (filters.length >= MAX_GET_PROGRAM_ACCOUNTS_FILTERS) {
+         throw new RangeError(
+            `getCashoutEscrowsData: at most ${MAX_GET_PROGRAM_ACCOUNTS_FILTERS} filters after merging`,
+         );
+      }
+      filters.push(memcmp(BigInt(m.offset), m.bytes));
+   }
+   const rows = await readProgramAccountsRaw(rpc, AGGREGATOR_PROGRAM_ID, filters);
+   return rows.map((row) => ({
+      address: row.address,
+      data: decodeCashoutEscrow(row.data),
+   }));
+}
+
+export type GetCashoutsDataFilters = Readonly<{
+   mm?: Address;
+   feepayer?: Address;
+   origBetId?: bigint;
+   cashoutId?: bigint;
+   marketId?: MarketId;
+   eventId?: EventId;
+   result?: CashoutAccountData['result'];
+}>;
+
+/** Single-bet cashout ticket PDAs under {@link AGGREGATOR_PROGRAM_ID}. */
+export async function getCashoutsData(
+   rpc: Rpc<SolanaRpcApi>,
+   optional?: GetCashoutsDataFilters,
+): Promise<ReadonlyArray<Readonly<{ address: Address; data: CashoutAccountData }>>> {
+   const filters: (GetProgramAccountsMemcmpFilter | { readonly dataSize: bigint })[] = [
+      memcmp(BigInt(CASHOUT_ACCOUNT_WIRE_OFFSETS.discriminator), u8WireByte(CASHOUT_ACCOUNT_DISCRIMINATOR)),
+   ];
+   const segments: MemcmpSeg[] = [];
+   if (optional?.marketId !== undefined) {
+      segments.push({
+         offset: CASHOUT_ACCOUNT_WIRE_OFFSETS.marketId,
+         bytes: encodeMarketIdWire(optional.marketId),
+      });
+   } else if (optional?.eventId !== undefined) {
+      segments.push({
+         offset: CASHOUT_ACCOUNT_WIRE_OFFSETS.marketId,
+         bytes: encodeEventIdWire(optional.eventId),
+      });
+   }
+   if (optional?.mm !== undefined) {
+      segments.push({
+         offset: CASHOUT_ACCOUNT_WIRE_OFFSETS.mm,
+         bytes: new Uint8Array(addressEncoder.encode(optional.mm)),
+      });
+   }
+   if (optional?.feepayer !== undefined) {
+      segments.push({
+         offset: CASHOUT_ACCOUNT_WIRE_OFFSETS.feepayer,
+         bytes: new Uint8Array(addressEncoder.encode(optional.feepayer)),
+      });
+   }
+   if (optional?.origBetId !== undefined) {
+      segments.push({ offset: CASHOUT_ACCOUNT_WIRE_OFFSETS.origBetId, bytes: u64Le(optional.origBetId) });
+   }
+   if (optional?.cashoutId !== undefined) {
+      segments.push({ offset: CASHOUT_ACCOUNT_WIRE_OFFSETS.cashoutId, bytes: u64Le(optional.cashoutId) });
+   }
+   if (optional?.result !== undefined) {
+      segments.push({ offset: CASHOUT_ACCOUNT_WIRE_OFFSETS.result, bytes: u8WireByte(optional.result) });
+   }
+   const merged = mergeAdjacentMemcmpSegments(segments);
+   for (const m of merged) {
+      if (filters.length >= MAX_GET_PROGRAM_ACCOUNTS_FILTERS) {
+         throw new RangeError(
+            `getCashoutsData: at most ${MAX_GET_PROGRAM_ACCOUNTS_FILTERS} filters after merging`,
+         );
+      }
+      filters.push(memcmp(BigInt(m.offset), m.bytes));
+   }
+   const rows = await readProgramAccountsRaw(rpc, AGGREGATOR_PROGRAM_ID, filters);
+   return rows.map((row) => ({
+      address: row.address,
+      data: decodeCashoutAccountDataStrict(row.data),
+   }));
+}
+
+export type GetCashoutParlaysDataFilters = Readonly<{
+   mm?: Address;
+   feepayer?: Address;
+   origBetId?: bigint;
+   cashoutId?: bigint;
+   result?: CashoutParlayAccountData['result'];
+}>;
+
+/** Parlay cashout ticket PDAs under {@link AGGREGATOR_PROGRAM_ID}. */
+export async function getCashoutParlaysData(
+   rpc: Rpc<SolanaRpcApi>,
+   optional?: GetCashoutParlaysDataFilters,
+): Promise<ReadonlyArray<Readonly<{ address: Address; data: CashoutParlayAccountData }>>> {
+   const filters: (GetProgramAccountsMemcmpFilter | { readonly dataSize: bigint })[] = [
+      memcmp(
+         BigInt(CASHOUT_PARLAY_ACCOUNT_WIRE_OFFSETS.discriminator),
+         u8WireByte(CASHOUT_PARLAY_ACCOUNT_DISCRIMINATOR),
+      ),
+   ];
+   const segments: MemcmpSeg[] = [];
+   if (optional?.mm !== undefined) {
+      segments.push({
+         offset: CASHOUT_PARLAY_ACCOUNT_WIRE_OFFSETS.mm,
+         bytes: new Uint8Array(addressEncoder.encode(optional.mm)),
+      });
+   }
+   if (optional?.feepayer !== undefined) {
+      segments.push({
+         offset: CASHOUT_PARLAY_ACCOUNT_WIRE_OFFSETS.feepayer,
+         bytes: new Uint8Array(addressEncoder.encode(optional.feepayer)),
+      });
+   }
+   if (optional?.origBetId !== undefined) {
+      segments.push({
+         offset: CASHOUT_PARLAY_ACCOUNT_WIRE_OFFSETS.origBetId,
+         bytes: u64Le(optional.origBetId),
+      });
+   }
+   if (optional?.cashoutId !== undefined) {
+      segments.push({
+         offset: CASHOUT_PARLAY_ACCOUNT_WIRE_OFFSETS.cashoutId,
+         bytes: u64Le(optional.cashoutId),
+      });
+   }
+   if (optional?.result !== undefined) {
+      segments.push({
+         offset: CASHOUT_PARLAY_ACCOUNT_WIRE_OFFSETS.result,
+         bytes: u8WireByte(optional.result),
+      });
+   }
+   const merged = mergeAdjacentMemcmpSegments(segments);
+   for (const m of merged) {
+      if (filters.length >= MAX_GET_PROGRAM_ACCOUNTS_FILTERS) {
+         throw new RangeError(
+            `getCashoutParlaysData: at most ${MAX_GET_PROGRAM_ACCOUNTS_FILTERS} filters after merging`,
+         );
+      }
+      filters.push(memcmp(BigInt(m.offset), m.bytes));
+   }
+   const rows = await readProgramAccountsRaw(rpc, AGGREGATOR_PROGRAM_ID, filters);
+   return rows.map((row) => ({
+      address: row.address,
+      data: decodeCashoutParlayAccountDataStrict(row.data),
+   }));
+}
+
+export type GetCashoutDataKey =
+   | Address
+   | Readonly<{ fillingMm: Address; cashoutId: bigint }>;
+
+function isCashoutPdaKey(
+   key: GetCashoutDataKey,
+): key is Readonly<{ fillingMm: Address; cashoutId: bigint }> {
+   return typeof key === 'object' && key !== null && 'fillingMm' in key && 'cashoutId' in key;
+}
+
+export async function getCashoutEscrowData(
+   rpc: Rpc<SolanaRpcApi>,
+   key: Address | Readonly<{ user: Address; origBetId: bigint }>,
+): Promise<CashoutEscrow> {
+   const address =
+      typeof key === 'object' && key !== null && 'user' in key
+         ? (await getCashoutEscrowPda(key.user, key.origBetId))[0]
+         : key;
+   const raw = await readAccountDataRaw(rpc, address);
+   if (raw === null) {
+      throw new Error(`Cashout escrow not found: ${String(address)}`);
+   }
+   return decodeCashoutEscrow(raw);
+}
+
+export async function getCashoutData(
+   rpc: Rpc<SolanaRpcApi>,
+   key: GetCashoutDataKey,
+): Promise<CashoutAccountData> {
+   const address = isCashoutPdaKey(key)
+      ? (await getCashoutPda(key.fillingMm, key.cashoutId))[0]
+      : key;
+   const raw = await readAccountDataRaw(rpc, address);
+   if (raw === null) {
+      throw new Error(`Cashout account not found: ${String(address)}`);
+   }
+   return decodeCashoutAccountDataStrict(raw);
+}
+
+export async function getCashoutParlayData(
+   rpc: Rpc<SolanaRpcApi>,
+   key: GetCashoutDataKey,
+): Promise<CashoutParlayAccountData> {
+   const address = isCashoutPdaKey(key)
+      ? (await getCashoutParlayPda(key.fillingMm, key.cashoutId))[0]
+      : key;
+   const raw = await readAccountDataRaw(rpc, address);
+   if (raw === null) {
+      throw new Error(`Cashout parlay account not found: ${String(address)}`);
+   }
+   return decodeCashoutParlayAccountDataStrict(raw);
+}
+
+export async function getFreebetIssuerData(
+   rpc: Rpc<SolanaRpcApi>,
+   auth: Address,
+): Promise<FreebetIssuer> {
+   const [address] = await getFreebetIssuerPda(auth);
+   const raw = await readAccountDataRaw(rpc, address);
+   if (raw === null) {
+      throw new Error(`Freebet issuer not found: ${String(address)}`);
+   }
+   return decodeFreebetIssuer(raw);
+}
+
+export async function getFreebetData(
+   rpc: Rpc<SolanaRpcApi>,
+   auth: Address,
+   freebetId: number,
+): Promise<FreebetAccountData> {
+   const [address] = await getFreebetPda(auth, freebetId);
+   const raw = await readAccountDataRaw(rpc, address);
+   if (raw === null) {
+      throw new Error(`Freebet account not found: ${String(address)}`);
+   }
+   return decodeFreebetAccountData(raw);
 }

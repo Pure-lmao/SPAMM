@@ -1,8 +1,8 @@
-import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda, getWithdrawFromTokenAccountIx, getWriteArbitraryDataIx, MM_ACCOUNT_CONFIG_MIN_LEN, readAccountDataRaw } from 'spamm-market-maker-sdk';
+import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getSetRfqSignerIx, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda, getWithdrawFromTokenAccountIx } from 'spamm-market-maker-sdk';
 import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from './utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
-import { getAddressEncoder, getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
+import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -184,7 +184,13 @@ async function getQuote() {
    if (!returnData) {
       throw new Error("No return data");
    }
-   const parsedReturnData = returnDataDecoder.decode(Buffer.from(...returnData));
+   const [b64] = returnData;
+   const bin = atob(b64);
+   const bytes = new Uint8Array(bin.length);
+   for (let i = 0; i < bin.length; i++) {
+      bytes[i] = bin.charCodeAt(i);
+   }
+   const parsedReturnData = returnDataDecoder.decode(bytes);
    console.log(parsedReturnData);
 }
 // getQuote().catch(console.error);
@@ -212,30 +218,14 @@ async function forceClosePda(pda: Address) {
 //    (await getMmConfigPda(MARKET_MAKER_PROGRAM_ID))[0]
 // ).catch(console.error);
 
-async function writeArbitraryData(account: Address, data: Uint8Array) {
-   const ix = await getWriteArbitraryDataIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, account, data);
+async function setRfqSigner(rfqSigner: Address) {
+   const ix = await getSetRfqSignerIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, rfqSigner);
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
-   console.log(txResult);
-}
-
-/** Grow legacy 34-byte config to `MmAccountConfig` and set `rfqSigner`. */
-async function setRfqSignerViaWriteArbitrary(rfqSigner: Address) {
-   const [configPda] = await getMmConfigPda(MARKET_MAKER_PROGRAM_ID);
-   const raw = await readAccountDataRaw(clients.rpc, configPda);
-   if (raw === null) {
-      throw new Error('MM config account not found');
-   }
-   const header = raw.length >= 34 ? raw.subarray(0, 34) : raw;
-   const rfqBytes = new Uint8Array(getAddressEncoder().encode(rfqSigner));
-   const data = new Uint8Array(MM_ACCOUNT_CONFIG_MIN_LEN);
-   data.set(header.subarray(0, Math.min(header.length, 34)), 0);
-   data.set(rfqBytes, 34);
-   const sig = await writeArbitraryData(configPda, data);
    const updated = await getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID);
-   console.log('config after write:', updated);
-   return sig;
+   console.log('config after set_rfq_signer:', updated);
+   return txResult;
 }
 
 const RFQ_SIGNER = '95Zg5Wp4RWgUWghjkrGNReXVuNWU6tU9y26tkqnsPBgF' as Address;
-// setRfqSignerViaWriteArbitrary(RFQ_SIGNER).catch(console.error);
+// setRfqSigner(RFQ_SIGNER).catch(console.error);
 

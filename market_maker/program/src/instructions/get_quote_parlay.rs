@@ -1,36 +1,40 @@
 //! CPI entry for parlay quotes: per-leg event state + market data, combined scaled odds
 //! (product with `ODDS_SCALE` normalization), writes [`MMParlayQuoteBuffer`], return data includes per-leg odds.
 //!
-//! Accounts **(3 + 2×L)** — must match aggregator CPI order in `fill_parlay`:
+//! Accounts **(4 + 2×L)** — must match aggregator CPI order:
 //! 0. `user`
-//! 1. `mm_config_pda`
-//! 2. `mm_parlay_quote_buffer` — PDA [`crate::constants::MM_PARLAY_QUOTE_BUFFER_SEED`]
-//! 3..3+2L−1: alternating `mm_market_data_pda`, `event_state_pda` per leg
+//! 1. `clock_sysvar`
+//! 2. `mm_config_pda`
+//! 3. `mm_parlay_quote_buffer` — PDA [`crate::constants::MM_PARLAY_QUOTE_BUFFER_SEED`]
+//! 4..4+2L−1: alternating `mm_market_data_pda`, `event_state_pda` per leg
 //!
 //! Instruction `data`: [`crate::state::GetQuoteParlayIxPayload`] (after MM router discriminator).
 
 use pinocchio::{AccountView, Address, address::address_eq, hint::unlikely};
 use pinocchio_log::log;
-use zeropod::ZeroPodFixed;
 
-use crate::constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA};
-use crate::instructions::quote_helpers::{
-   assign_same_event_companion_odds, odds_from_market_data_body, product_parlay_odds,
-   validate_parlay_same_event_odds,
+use crate::{
+   constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA},
+   instructions::quote_helpers::{
+      assign_same_event_companion_odds, product_parlay_odds,
+      read_parlay_leg_market_odds, validate_parlay_same_event_odds, validate_quote_leg_context,
+   },
+   state::GetQuoteParlayIxPayload,
 };
-use spamm_aggregator::QuoteResult;
-use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state};
-use crate::state::GetQuoteParlayIxPayload;
-use spamm_aggregator::constants::{MAX_PARLAY_LEGS, ODDS_SCALE};
-use spamm_aggregator::state::mm_parlay_quote::{MMParlayQuoteBuffer, MM_PARLAY_QUOTE_BUFFER_LEN, ParlayLegTable};
-use spamm_aggregator::state::mm_quote::GetParlayQuoteReturnWire;
-use spamm_aggregator::state::Sport;
-pub use spamm_aggregator::state::GET_QUOTE_PARLAY_IX_DISCRIMINATOR;
+use spamm_aggregator::{
+   QuoteResult,
+   constants::{MAX_PARLAY_LEGS, ODDS_SCALE},
+   state::{
+      parlay_quote_return_wire_len, Sport, PARLAY_QUOTE_RETURN_WIRE_LEN,
+      mm_parlay_quote::{MMParlayQuoteBuffer, ParlayLegQuoted, MM_PARLAY_QUOTE_BUFFER_LEN},
+      mm_quote::GetParlayQuoteReturnWire,
+   },
+};
 
 pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> QuoteResult {
    let [
       user,
-      _clock_program,
+      _clock_sysvar,
       mm_config_pda,
       mm_parlay_quote_buffer,
       leg_accounts @ ..,
@@ -39,13 +43,14 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
       return Ok(());
    };
-   let parsed = GetQuoteParlayIxPayload::decode(data);
-   if unlikely(parsed.is_err()) {
-      log!("get_quote_parlay: decode failed");
-      set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-      return Ok(());
-   }
-   let parsed = parsed.unwrap();
+   let parsed = match GetQuoteParlayIxPayload::decode(data) {
+      Ok(p) => p,
+      Err(_) => {
+         log!("get_quote_parlay: decode failed");
+         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
+         return Ok(());
+      }
+   };
    log!(
       "get_quote_parlay: decoded num_legs {} amount {} min_odds_scaled {}",
       parsed.num_legs,
@@ -77,108 +82,69 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Ok(());
    }
 
-   let mut legs_out = parsed.legs;
+   let mut legs_out = [ParlayLegQuoted::placeholder(); MAX_PARLAY_LEGS];
    let mut market_odds = [0u32; MAX_PARLAY_LEGS];
 
    for (i, leg_pair) in leg_accounts.chunks_exact(2).enumerate() {
       let md = &leg_pair[0];
       let es = &leg_pair[1];
-      let leg = parsed.legs.get(i);
-      if unlikely(leg.is_none()) {
-         log!("get_quote_parlay: leg index out of bounds");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-      let leg = leg.unwrap();
-      let side = leg.side;
-      let mkt = leg.market_id.mkt;
-      if unlikely(side > 2) {
-         log!("get_quote_parlay: side must be 0, 1, or 2");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-      if unlikely(side == 2 && mkt != 1 && mkt != 5) {
-         log!("get_quote_parlay: side 2 is only valid for mkt 1 or 5");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-      if unlikely(leg.event_state_sequence == 0) {
-         log!("get_quote_parlay: leg event_state_sequence must be greater than 0");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-      if leg.market_id.is_pregame() {
-         if unlikely(leg.event_state_sequence != 1) {
-            log!("get_quote_parlay: pregame leg event_state_sequence must be 1");
+      let leg = match parsed.legs.get(i) {
+         Some(l) => l,
+         None => {
+            log!("get_quote_parlay: leg index out of bounds");
             set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
             return Ok(());
          }
-      } else if unlikely(leg.event_state_sequence < 2) {
-         log!("get_quote_parlay: live leg event_state_sequence must be >= 2");
+      };
+      if unlikely(validate_quote_leg_context(&leg.market_id, leg.side, leg.event_state_sequence).is_err()) {
+         log!("get_quote_parlay: invalid leg context");
          set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
          return Ok(());
       }
       let sport = leg.market_id.event_id.sport;
       if unlikely(!matches!(
          sport,
-         Sport::Soccer | Sport::IceHockey | Sport::AmericanFootball | Sport::Basketball | Sport::Baseball
+         Sport::Soccer
+            | Sport::IceHockey
+            | Sport::AmericanFootball
+            | Sport::Basketball
+            | Sport::Baseball
+            | Sport::Tennis
+            | Sport::Cs2
+            | Sport::Dota
+            | Sport::Lol
+            | Sport::Valorant
       )) {
          log!("get_quote_parlay: invalid sport");
          set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
          return Ok(());
       }
 
-      let mid = &leg.market_id;
-      if unlikely(!mm_market_data_pda_ok(md, program_id, mid)) {
-         log!("get_quote_parlay: market data pda invalid");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-      if unlikely(!verify_event_state(
-         es,
-         program_id,
-         &mid.event_id,
-         &leg.event_game_state,
-         leg.event_state_sequence,
-      )) {
-         log!("get_quote_parlay: event state invalid");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-
-      let market_data = md.try_borrow();
-      if unlikely(market_data.is_err()) {
-         log!("get_quote_parlay: market data borrow failed");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-      let market_data = market_data.unwrap();
-      if unlikely(market_data.len() < 8) {
-         log!("get_quote_parlay: market data too short");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-      let body = &market_data[6..] as &[u8];
-      let leg_odds = odds_from_market_data_body(mid, body, side);
-      if unlikely(leg_odds.is_err()) {
-         log!("get_quote_parlay: odds from market data body failed");
-         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-         return Ok(());
-      }
-      market_odds[i] = leg_odds.unwrap();
+      market_odds[i] = match read_parlay_leg_market_odds(program_id, md, es, leg) {
+         Ok(o) => o,
+         Err(_) => {
+            log!("get_quote_parlay: leg market odds failed");
+            set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
+            return Ok(());
+         }
+      };
    }
 
-   assign_same_event_companion_odds(n, &mut legs_out, &market_odds);
+   if unlikely(assign_same_event_companion_odds(n, &parsed.legs[..n], &market_odds, &mut legs_out[..n]).is_err()) {
+      log!("get_quote_parlay: assign_same_event_companion_odds failed");
+      set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
+      return Ok(());
+   }
 
-   if unlikely(validate_parlay_same_event_odds(n, &legs_out).is_err()) {
+   if unlikely(validate_parlay_same_event_odds(n, &legs_out[..n]).is_err()) {
       log!("get_quote_parlay: same-event odds layout invalid");
       set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
       return Ok(());
    }
 
-   let odds_scaled = match product_parlay_odds(n, &legs_out) {
-      Some(v) => v,
-      None => {
+   let odds_scaled = match product_parlay_odds(n, &legs_out[..n]) {
+      Ok(v) => v,
+      Err(_) => {
          log!("get_quote_parlay: arithmetic overflow");
          set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
          return Ok(());
@@ -197,7 +163,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Ok(());
    }
 
-   let max_amount = MAX_QUOTE_STAKE_UNITS;
+   let max_amount = core::cmp::min(parsed.amount, MAX_QUOTE_STAKE_UNITS);
    let leg_odds_arr = {
       let mut out = [0u32; MAX_PARLAY_LEGS];
       for i in 0..n {
@@ -212,35 +178,33 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       odds_scaled,
       parsed.odds_scaled
    );
+
+   match mm_parlay_quote_buffer.try_borrow_mut() {
+      Ok(mut buf) if buf.len() == MM_PARLAY_QUOTE_BUFFER_LEN => {
+         if unlikely(
+            MMParlayQuoteBuffer::write_fresh_quote(
+               &mut buf,
+               *user.address(),
+               parsed.num_legs,
+               max_amount,
+               odds_scaled,
+               &legs_out[..n],
+            )
+            .is_err(),
+         ) {
+            log!("get_quote_parlay: quote write failed");
+            set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
+            return Ok(());
+         }
+      }
+      _ => {
+         log!("get_quote_parlay: quote buffer borrow failed or len mismatch");
+         set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
+         return Ok(());
+      }
+   }
+
    set_get_parlay_quote_return_data(max_amount, odds_scaled, parsed.num_legs, leg_odds_arr)?;
-
-   let quote = MMParlayQuoteBuffer::new_fresh_quote(
-      *user.address(),
-      parsed.num_legs,
-      max_amount,
-      odds_scaled,
-      legs_out,
-   );
-
-   let buf = mm_parlay_quote_buffer.try_borrow_mut();
-   if unlikely(buf.is_err()) {
-      log!("get_quote_parlay: quote buffer borrow failed");
-      set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-      return Ok(());
-   }
-   let mut buf = buf.unwrap();
-   if unlikely(buf.len() != MM_PARLAY_QUOTE_BUFFER_LEN) {
-      log!("get_quote_parlay: quote buffer len mismatch");
-      set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-      return Ok(());
-   }
-   let result = quote.write_wire(&mut buf);
-   if unlikely(result.is_err()) {
-      log!("get_quote_parlay: quote write failed");
-      set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
-      return Ok(());
-   }
-
    Ok(())
 }
 
@@ -255,20 +219,18 @@ fn set_get_parlay_quote_return_data(
       max_amount,
       odds_scaled,
       num_legs,
-      leg_odds_0: leg_odds[0],
-      leg_odds_1: leg_odds[1],
-      leg_odds_2: leg_odds[2],
-      leg_odds_3: leg_odds[3],
-      leg_odds_4: leg_odds[4],
+      leg_odds,
    };
-   let zc = ret.to_zc();
-   let mut out = [0u8; <GetParlayQuoteReturnWire as ZeroPodFixed>::SIZE];
-   unsafe {
-      core::ptr::write(out.as_mut_ptr().cast(), zc);
+   let n = num_legs as usize;
+   let wire_len = parlay_quote_return_wire_len(n);
+   let mut out = [0u8; PARLAY_QUOTE_RETURN_WIRE_LEN];
+   if ret.write_wire(&mut out[..wire_len]).is_err() {
+      log!("get_quote_parlay: return wire write failed");
+      return Ok(());
    }
    #[cfg(any(target_os = "solana", target_arch = "bpf"))]
    unsafe {
-      pinocchio::syscalls::sol_set_return_data(out.as_ptr(), out.len() as u64);
+      pinocchio::syscalls::sol_set_return_data(out.as_ptr(), wire_len as u64);
    }
    #[cfg(not(any(target_os = "solana", target_arch = "bpf")))]
    {
@@ -277,5 +239,3 @@ fn set_get_parlay_quote_return_data(
    Ok(())
 }
 
-// silence unused import
-const _: () = assert!(core::mem::size_of::<ParlayLegTable>() > 0);

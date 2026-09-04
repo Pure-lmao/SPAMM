@@ -2,8 +2,6 @@ import {
    getAddressEncoder,
    getProgramDerivedAddress,
    type ProgramDerivedAddressBump,
-   type Rpc,
-   type SolanaRpcApi,
    type Address,
 } from '@solana/kit';
 
@@ -11,7 +9,12 @@ import {
    AGGREGATOR_PROGRAM_ID,
    MINT_ID,
    BET_ACCOUNT_SEED,
+   CASHOUT_ACCOUNT_SEED,
+   CASHOUT_ESCROW_SEED,
+   CASHOUT_PARLAY_ACCOUNT_SEED,
    CONFIG_PDA_SEED,
+   FREEBET_ACCOUNT_SEED,
+   FREEBET_ISSUER_SEED,
    EVENT_STATE_SEED,
    MM_ACCOUNT_CONFIG_SEED,
    MM_ENCUMBRANCE_PDA_SEED,
@@ -23,10 +26,14 @@ import {
    PARLAY_BET_ACCOUNT_SEED,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    SPL_TOKEN_PROGRAM_ID,
+   ADDRESS_LEN,
+   U32_LEN,
+   U64_LEN,
 } from './constants.js';
 import { getEventIdEncoder, getMarketIdEncoder } from './codex.js';
 import {
    MARKET_ID_BODY_WIRE_SIZE,
+   MARKET_QUOTES_PROXY_RETURN_MAX,
    type EventGameState,
    type EventId,
    type MarketId,
@@ -55,11 +62,6 @@ export function encodeEventIdWire(eventId: EventId): Uint8Array {
 }
 
 
-export async function getRecentSlot(rpc: Rpc<SolanaRpcApi>): Promise<bigint> {
-   const slot = await rpc.getSlot().send();
-   return slot;
-}
-
 /**
  * **`u64` bet id** as **8 little-endian bytes** for bet PDA seeds (`["bet", user, bet_id]`).
  *
@@ -69,8 +71,20 @@ export async function getRecentSlot(rpc: Rpc<SolanaRpcApi>): Promise<bigint> {
  * @returns **`Uint8Array`** — length 8, LE. **Note:** does not validate range; callers should validate `u64` if needed.
  */
 export function encodeBetIdLe(betId: bigint): Uint8Array {
-   const out = new Uint8Array(8);
+   const out = new Uint8Array(U64_LEN);
    new DataView(out.buffer).setBigUint64(0, betId, true);
+   return out;
+}
+
+/**
+ * Encodes a freebet id as 4 little-endian bytes (PDA seed / ix prefix).
+ */
+export function encodeFreebetIdLe(freebetId: number): Uint8Array {
+   if (!Number.isInteger(freebetId) || freebetId < 0 || freebetId > 0xffff_ffff) {
+      throw new RangeError(`freebetId must be a u32 (${freebetId})`);
+   }
+   const out = new Uint8Array(U32_LEN);
+   new DataView(out.buffer).setUint32(0, freebetId, true);
    return out;
 }
 
@@ -79,7 +93,7 @@ export function encodeBetIdLe(betId: bigint): Uint8Array {
  *
  * **Rust:** `verify_config_pda` / `CONFIG_PDA_SEED` with program id `aggregator::ID`.
  *
- * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — config PDA address and bump. **Note:** uses SDK {@link AGGREGATOR_PROGRAM_ID} placeholder until deployment pins the real program id.
+ * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — config PDA address and bump.
  */
 export async function getConfigPda(): Promise<readonly [Address, ProgramDerivedAddressBump]> {
    return await getProgramDerivedAddress({
@@ -93,7 +107,7 @@ export async function getConfigPda(): Promise<readonly [Address, ProgramDerivedA
  *
  * **Rust:** `MM_LIST_PDA_SEED` / `verify_mm_list_pda` against fixed layout header + MM pubkeys.
  *
- * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — MM list PDA address and bump. **Note:** same program-id placeholder caveat as {@link getConfigPda}.
+ * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — MM list PDA address and bump.
  */
 export async function getMmListPda(): Promise<readonly [Address, ProgramDerivedAddressBump]> {
    return await getProgramDerivedAddress({
@@ -199,7 +213,7 @@ export async function getEventStatePda(mmProgramId: Address, eventId: EventId): 
  * **Rust:** `MM_MARKET_DATA_PDA_SEED` + `MarketId` wire bytes from `to_zc` (`verify_mm_market_data_pda`).
  *
  * @param mmProgramId - **TS:** `Address` — MM program id. **Rust:** owner program for PDA.
- * @param marketId - **TS:** {@link MarketId}. **Rust:** `MarketId` (same bytes as {@link marketIdForSeed} in TS).
+ * @param marketId - **TS:** {@link MarketId}. **Rust:** `MarketId` (same bytes as {@link marketIdPdaSeeds} in TS).
  * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — MM market-data PDA address and bump.
  */
 export async function getMmMarketDataPda(mmProgramId: Address, marketId: MarketId): Promise<readonly [Address, ProgramDerivedAddressBump]> {
@@ -238,6 +252,74 @@ export async function getParlayBetPda(
    return await getProgramDerivedAddress({
       programAddress: AGGREGATOR_PROGRAM_ID,
       seeds: [PARLAY_BET_ACCOUNT_SEED, addressEncoder.encode(user), encodeBetIdLe(betId)],
+   });
+}
+
+/**
+ * Derives the **cashout escrow PDA** (`["cashout_escrow", user, orig_bet_id_le]`).
+ */
+export async function getCashoutEscrowPda(
+   user: Address,
+   origBetId: bigint,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      seeds: [CASHOUT_ESCROW_SEED, addressEncoder.encode(user), encodeBetIdLe(origBetId)],
+   });
+}
+
+/**
+ * Derives the **single-bet cashout ticket PDA** (`["cashout", filling_mm, cashout_id_le]`).
+ */
+export async function getCashoutPda(
+   fillingMm: Address,
+   cashoutId: bigint,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      seeds: [CASHOUT_ACCOUNT_SEED, addressEncoder.encode(fillingMm), encodeBetIdLe(cashoutId)],
+   });
+}
+
+/**
+ * Derives the **parlay cashout ticket PDA** (`["cashout_parlay", filling_mm, cashout_id_le]`).
+ */
+export async function getCashoutParlayPda(
+   fillingMm: Address,
+   cashoutId: bigint,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      seeds: [
+         CASHOUT_PARLAY_ACCOUNT_SEED,
+         addressEncoder.encode(fillingMm),
+         encodeBetIdLe(cashoutId),
+      ],
+   });
+}
+
+/**
+ * Derives the **freebet issuer PDA** (`["freebet_issuer", auth]`).
+ */
+export async function getFreebetIssuerPda(
+   auth: Address,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      seeds: [FREEBET_ISSUER_SEED, addressEncoder.encode(auth)],
+   });
+}
+
+/**
+ * Derives the **freebet PDA** (`["freebet", auth, freebet_id_le]`).
+ */
+export async function getFreebetPda(
+   auth: Address,
+   freebetId: number,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      seeds: [FREEBET_ACCOUNT_SEED, addressEncoder.encode(auth), encodeFreebetIdLe(freebetId)],
    });
 }
 
@@ -323,15 +405,18 @@ export function numSidesForMkt(mkt: number): number | undefined {
    if (mkt >= 5000 && mkt <= 5999) {
       return 6;
    }
-   if (mkt >= 10000 && mkt <= 0xffff) {
+   if (mkt >= 10000 && mkt <= 10909) {
       return 1;
+   }
+   if (mkt >= 11000) {
+      return 2;
    }
    return undefined;
 }
 
 /** `mm_quote::proxy_market_mm_entry_wire_len` */
 export function proxyMarketMmEntryWireLen(numSides: number): number {
-   return 32 + numSides * 4;
+   return ADDRESS_LEN + numSides * U32_LEN;
 }
 
 /** `mm_quote::max_proxy_mms_for_market_quotes` */
@@ -339,5 +424,5 @@ export function maxProxyMmsForMarketQuotes(numSides: number): number {
    if (numSides <= 0) {
       return 0;
    }
-   return Math.floor(1024 / proxyMarketMmEntryWireLen(numSides));
+   return Math.floor(MARKET_QUOTES_PROXY_RETURN_MAX / proxyMarketMmEntryWireLen(numSides));
 }

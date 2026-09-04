@@ -1,1 +1,1 @@
-console.log("Hello via Bun!");
+/** Client scripts live in `admin.ts`. Run that file directly. */

@@ -36,6 +36,8 @@ const getBoolU8Decoder = (): Decoder<boolean> =>
 
 function sportFromWire(b: number): Sport {
    switch (b) {
+      case Sport.Invalid:
+         return Sport.Invalid;
       case Sport.Soccer:
          return Sport.Soccer;
       case Sport.AmericanFootball:
@@ -46,6 +48,16 @@ function sportFromWire(b: number): Sport {
          return Sport.Basketball;
       case Sport.IceHockey:
          return Sport.IceHockey;
+      case Sport.Tennis:
+         return Sport.Tennis;
+      case Sport.Cs2:
+         return Sport.Cs2;
+      case Sport.Dota:
+         return Sport.Dota;
+      case Sport.Lol:
+         return Sport.Lol;
+      case Sport.Valorant:
+         return Sport.Valorant;
       default:
          throw new RangeError(`invalid Sport wire byte: ${b}`);
    }
@@ -53,11 +65,17 @@ function sportFromWire(b: number): Sport {
 
 function sportToWire(s: Sport): number {
    switch (s) {
+      case Sport.Invalid:
       case Sport.Soccer:
       case Sport.AmericanFootball:
       case Sport.Baseball:
       case Sport.Basketball:
       case Sport.IceHockey:
+      case Sport.Tennis:
+      case Sport.Cs2:
+      case Sport.Dota:
+      case Sport.Lol:
+      case Sport.Valorant:
          return s;
       default:
          throw new RangeError(`invalid Sport enum value: ${s}`);

@@ -1,6 +1,9 @@
+use core::mem::offset_of;
+
 use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
+use crate::constants::ADDRESS_LEN;
 use crate::state::EventId;
 
 
@@ -10,17 +13,13 @@ pub struct ConfigPdaData {
    pub discriminator: u8,
    pub status: u8,
    pub authority: Address,
-   /// Address lookup table owned by `ADDRESS_LOOKUP_TABLE_PROGRAM`; authority = config PDA.
-   pub lookup_table: Address,
 }
 
-pub const CONFIG_PDA_DISCRIMINATOR: u8 = 2;
+pub const CONFIG_PDA_DISCRIMINATOR: u8 = 4;
+/// Aggregator config PDA packed size (`discriminator` + `status` + `authority`).
 pub const CONFIG_PDA_LEN: usize = <ConfigPdaData as ZeroPodFixed>::SIZE;
-pub const CONFIG_PDA_STATUS_OFFSET: usize = 1;
-pub const CONFIG_PDA_AUTHORITY_OFFSET: usize = 2;
-pub const CONFIG_PDA_LOOKUP_TABLE_OFFSET: usize = 34;
-
-const _: () = assert!(core::mem::size_of::<ConfigPdaData>() == CONFIG_PDA_LEN);
+pub const CONFIG_PDA_STATUS_OFFSET: usize = offset_of!(ConfigPdaDataZc, status);
+pub const CONFIG_PDA_AUTHORITY_OFFSET: usize = offset_of!(ConfigPdaDataZc, authority);
 
 
 #[derive(Copy, Clone, ZeroPod)]
@@ -32,12 +31,12 @@ pub struct MmListPdaData {
 }
 pub const MM_LIST_PDA_DISCRIMINATOR: u8 = 3;
 pub const MM_LIST_HEADER_LEN: usize = <MmListPdaData as ZeroPodFixed>::SIZE;
-pub const MM_LIST_PDA_NUMBER_OF_MMS_OFFSET: usize = 1;
-pub const MM_LIST_ENTRY_LEN: usize = 32;
+pub const MM_LIST_PDA_NUMBER_OF_MMS_OFFSET: usize = offset_of!(MmListPdaDataZc, number_of_mms);
+pub const MM_LIST_ENTRY_LEN: usize = ADDRESS_LEN;
 
 
 pub const EVENT_STATE_SEED: &[u8] = b"event_state";
-pub const EVENT_STATE_DISCRIMINATOR: u8 = 4;
+pub const EVENT_STATE_DISCRIMINATOR: u8 = 104;
 
 /// Packed live snapshot carried on the event-state PDA and echoed in quote / fill instruction data.
 /// Wire order is fixed; equality is defined as matching little-endian `u64` over the eight bytes.
@@ -75,18 +74,21 @@ impl EventGameState {
    }
 
    #[inline(always)]
-   pub fn as_u64(self) -> u64 {
-      let mut b = [0u8; 8];
-      b[..4].copy_from_slice(&self.game_phase);
-      b[4] = self.home_primary;
-      b[5] = self.away_primary;
-      b[6] = self.home_secondary;
-      b[7] = self.away_secondary;
-      u64::from_le_bytes(b)
+   pub fn as_u64(&self) -> u64 {
+      u64::from_le_bytes([
+         self.game_phase[0],
+         self.game_phase[1],
+         self.game_phase[2],
+         self.game_phase[3],
+         self.home_primary,
+         self.away_primary,
+         self.home_secondary,
+         self.away_secondary,
+      ])
    }
 
    #[inline(always)]
-   pub fn to_zc(self) -> EventGameStateZc {
+   pub fn to_zc(&self) -> EventGameStateZc {
       EventGameStateZc {
          game_phase: self.game_phase,
          home_primary: self.home_primary,
@@ -114,6 +116,7 @@ impl EventGameState {
    }
 }
 
+/// Fixed prefix of the MM event-state PDA. Accounts may be longer; bytes after this header are MM-owned.
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
 pub struct EventStateData {
@@ -124,10 +127,14 @@ pub struct EventStateData {
    pub game_state: EventGameState,
 }
 
-pub const EVENT_STATE_LEN: usize = <EventStateData as ZeroPodFixed>::SIZE;
+pub const EVENT_STATE_HEADER_LEN: usize = <EventStateData as ZeroPodFixed>::SIZE;
+pub const EVENT_STATE_DISCRIMINATOR_OFFSET: usize = offset_of!(EventStateDataZc, discriminator);
+pub const EVENT_STATE_BUMP_OFFSET: usize = offset_of!(EventStateDataZc, bump);
+pub const EVENT_STATE_SEQUENCE_OFFSET: usize = offset_of!(EventStateDataZc, sequence);
+pub const EVENT_STATE_GAME_STATE_OFFSET: usize = offset_of!(EventStateDataZc, game_state);
 
 pub const MM_MARKET_DATA_PDA_SEED: &[u8] = b"market_data";
-pub const MM_MARKET_DATA_PDA_DISCRIMINATOR: u8 = 0;
+pub const MM_MARKET_DATA_PDA_DISCRIMINATOR: u8 = 100;
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
 pub struct MmMarketDataPdaData {
@@ -136,7 +143,7 @@ pub struct MmMarketDataPdaData {
    // anything else they want
 }
 pub const MM_MARKET_DATA_PDA_MIN_LEN: usize = <MmMarketDataPdaData as ZeroPodFixed>::SIZE;
-pub const MM_MARKET_DATA_PDA_BUMP_OFFSET: usize = 1;
+pub const MM_MARKET_DATA_PDA_BUMP_OFFSET: usize = offset_of!(MmMarketDataPdaDataZc, bump);
 
 
 pub const MM_ENCUMBRANCE_PDA_SEED: &[u8] = b"encumbrance";
@@ -146,8 +153,9 @@ pub const MM_ENCUMBRANCE_PDA_DISCRIMINATOR: u8 = 5;
 pub struct MmEncumbrancePdaData {
    pub discriminator: u8,
    pub bump: u8,
+   /// Sum of per-line peaks (and unnetted ticket P). Withdraw/deregister reserve.
    pub encumbrance: i64,
 }
 pub const MM_ENCUMBRANCE_PDA_LEN: usize = <MmEncumbrancePdaData as ZeroPodFixed>::SIZE;
-pub const MM_ENCUMBRANCE_PDA_BUMP_OFFSET: usize = 1;
-pub const MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET: usize = 2;
+pub const MM_ENCUMBRANCE_PDA_BUMP_OFFSET: usize = offset_of!(MmEncumbrancePdaDataZc, bump);
+pub const MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET: usize = offset_of!(MmEncumbrancePdaDataZc, encumbrance);

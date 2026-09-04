@@ -20,13 +20,21 @@ export const SYSTEM_PROGRAM_ID: Address = address(
    '11111111111111111111111111111111',
 );
 
+export const SYSVAR_RENT_ID: Address = address(
+   'SysvarRent111111111111111111111111111111111',
+);
+
 export const PREDICTION_ACCOUNT_SEED = 'prediction' as const;
 
 export const PREDICTION_ACCOUNT_DISCRIMINATOR = 1;
 export const TWEET_LINK_LEN = 70;
-export const PREDICTION_ACCOUNT_LEN = 154;
+export const ADDRESS_LEN = 32;
+export const U32_LEN = 4;
+export const U64_LEN = 8;
+export const PREDICTION_ACCOUNT_LEN =
+   1 + 1 + U64_LEN + U32_LEN + ADDRESS_LEN + U32_LEN + 2 + ADDRESS_LEN + TWEET_LINK_LEN;
 
 export const CREATE_PREDICTION_IX_DISCRIMINATOR = 0;
 export const CLOSE_PREDICTION_IX_DISCRIMINATOR = 1;
 
-export const CREATE_PREDICTION_IX_DATA_LEN = 8 + 4 + 2 + 32 + TWEET_LINK_LEN;
+export const CREATE_PREDICTION_IX_DATA_LEN = U64_LEN + U32_LEN + 2 + ADDRESS_LEN + TWEET_LINK_LEN;

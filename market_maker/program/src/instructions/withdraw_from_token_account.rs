@@ -1,12 +1,23 @@
+//! Withdraw the full MM collateral ATA balance to a destination ATA.
+//!
+//! Accounts **(6)**:
+//! 0. `admin` (writable signer) — must match config admin
+//! 1. `config_pda` (readonly)
+//! 2. `token_account` (writable) — MM ATA (authority = config PDA)
+//! 3. `mint` (readonly)
+//! 4. `token_program` (readonly)
+//! 5. `destination_ata` (writable)
+//!
+//! Data: none
+
 use pinocchio::{AccountView, Address, ProgramResult, cpi::{Seed, Signer}, error::ProgramError};
 use pinocchio_log::log;
 use pinocchio_token::instructions::Transfer;
-use spamm_aggregator::{helpers::{verify_mint, verify_signer, verify_token_account, verify_token_program}, parsers::get_token_account_balance, state::MM_ACCOUNT_CONFIG_SEED};
+use spamm_aggregator::{helpers::{get_token_account_balance, verify_mint, verify_signer, verify_token_account, verify_token_program}, state::{MM_ACCOUNT_CONFIG_SEED, mm_account_config::MM_CONFIG_PDA_BUMP_OFFSET}};
 
 use crate::mm_helpers::verify_mm_config_auth;
 
-
-
+pub const WITHDRAW_FROM_TOKEN_ACCOUNT_IX_DISCRIMINATOR: u8 = 150;
 
 pub fn process(_program_id: &Address, accounts: &mut [AccountView], _data: &[u8]) -> ProgramResult {
    let [
@@ -36,7 +47,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], _data: &[u8]
 
    let mm_config_pda_data = config_pda.try_borrow()?;
 
-   let config_bump_seed = [mm_config_pda_data[1]];
+   let config_bump_seed = [mm_config_pda_data[MM_CONFIG_PDA_BUMP_OFFSET]];
    let config_pda_seeds = [
       Seed::from(MM_ACCOUNT_CONFIG_SEED),
       Seed::from(&config_bump_seed),

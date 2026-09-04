@@ -2,9 +2,8 @@
 
 use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
-use solana_sdk_ids::address_lookup_table;
 use solana_sdk_ids::sysvar::clock;
-use spamm_aggregator::constants::INIT_PROGRAM_RECENT_SLOT;
+use solana_sdk_ids::sysvar::rent;
 use spamm_aggregator::state::{EventId, MarketId, Sport};
 
 /// Aggregator program id (`spamm_aggregator::constants::ID`).
@@ -30,32 +29,12 @@ pub fn mm_list_pda() -> Pubkey {
 }
 
 pub fn mint_pubkey() -> Pubkey {
-   // Must match `spamm_aggregator::constants::MINT` (mainnet USDC).
-   Pubkey::new_from_array([
-      0xc6, 0xfa, 0x7a, 0xf3, 0xbe, 0xdb, 0xad, 0x3a, 0x3d, 0x65, 0xf3, 0x6a, 0xab, 0xc9, 0x74, 0x31,
-      0xb1, 0xbb, 0xe4, 0xc2, 0xd2, 0xf6, 0xe0, 0xe4, 0x7c, 0xa6, 0x02, 0x03, 0x45, 0x2f, 0x5d, 0x61,
-   ])
-}
-
-/// SPL Address Lookup Table program (`AddressLookupTab1e1111111111111111111111111`).
-pub fn address_lookup_table_program_pubkey() -> Pubkey {
-   address_lookup_table::id()
-}
-
-/// Aggregator ALT (`spamm_aggregator::constants::LOOKUP_TABLE`): PDA(config, [`INIT_PROGRAM_RECENT_SLOT`]).
-pub fn lookup_table_pubkey() -> Pubkey {
-   Pubkey::find_program_address(
-      &[
-         config_pda().as_ref(),
-         INIT_PROGRAM_RECENT_SLOT.to_le_bytes().as_slice(),
-      ],
-      &address_lookup_table_program_pubkey(),
-   )
-   .0
+   // Must match `spamm_aggregator::constants::MINT` (cluster-specific USDC).
+   Pubkey::new_from_array(*spamm_aggregator::constants::MINT.as_array())
 }
 
 pub fn init_program_ix_data() -> Vec<u8> {
-   INIT_PROGRAM_RECENT_SLOT.to_le_bytes().to_vec()
+   vec![]
 }
 
 /// Metas for aggregator `init_program` (router disc `0`); pair with [`init_program_ix_data`].
@@ -64,9 +43,8 @@ pub fn init_program_account_metas(admin: Pubkey, admin_signer: bool, system_prog
       AccountMeta::new(admin, admin_signer),
       AccountMeta::new(config_pda(), false),
       AccountMeta::new(mm_list_pda(), false),
+      AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(system_program, false),
-      AccountMeta::new(lookup_table_pubkey(), false),
-      AccountMeta::new_readonly(address_lookup_table_program_pubkey(), false),
    ]
 }
 
@@ -104,6 +82,10 @@ pub fn mm_parlay_quote_buffer_pda() -> Pubkey {
 
 pub fn clock_sysvar_pubkey() -> Pubkey {
    clock::id()
+}
+
+pub fn rent_sysvar_pubkey() -> Pubkey {
+   rent::id()
 }
 
 pub fn admin() -> Pubkey {
@@ -224,7 +206,7 @@ pub fn market_spread_pregame(eid: EventId) -> MarketId {
    MarketId {
       event_id: eid,
       player: 0,
-      mkt: 200,
+      mkt: 400,
       period: 1,
       is_pregame: true,
       operator: market_operator(),
@@ -325,4 +307,46 @@ pub fn parlay_bet_pda_for(user_pk: &Pubkey, bet_id: u64) -> Pubkey {
       &agg_program_id(),
    )
    .0
+}
+
+/// Cashout ticket PDA: `["cashout", filling_mm, cashout_id_le]`.
+pub fn cashout_pda_for(filling_mm: &Pubkey, cashout_id: u64) -> Pubkey {
+   Pubkey::find_program_address(
+      &[b"cashout", filling_mm.as_ref(), &cashout_id.to_le_bytes()],
+      &agg_program_id(),
+   )
+   .0
+}
+
+/// Parlay cashout ticket PDA: `["cashout_parlay", filling_mm, cashout_id_le]`.
+pub fn cashout_parlay_pda_for(filling_mm: &Pubkey, cashout_id: u64) -> Pubkey {
+   Pubkey::find_program_address(
+      &[b"cashout_parlay", filling_mm.as_ref(), &cashout_id.to_le_bytes()],
+      &agg_program_id(),
+   )
+   .0
+}
+
+/// Live cashout escrow PDA: `["cashout_escrow", user, orig_bet_id_le]`.
+pub fn cashout_escrow_pda_for(owner: &Pubkey, orig_bet_id: u64) -> Pubkey {
+   Pubkey::find_program_address(
+      &[b"cashout_escrow", owner.as_ref(), &orig_bet_id.to_le_bytes()],
+      &agg_program_id(),
+   )
+   .0
+}
+
+/// Always six accounts: admin, mm program, mm config, netting PDA, rent, system.
+pub fn add_line_account_metas(np: Pubkey) -> Vec<AccountMeta> {
+   vec![
+      AccountMeta::new(mm_admin(), true),
+      AccountMeta::new_readonly(mm_program_id(), false),
+      AccountMeta::new_readonly(mm_config_pda(), false),
+      AccountMeta::new(np, false),
+      AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
+      AccountMeta::new_readonly(
+         mollusk_svm::program::keyed_account_for_system_program().0,
+         false,
+      ),
+   ]
 }

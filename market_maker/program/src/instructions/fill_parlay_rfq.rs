@@ -15,13 +15,11 @@ use pinocchio::{
 };
 use pinocchio_log::log;
 
-use crate::instructions::rfq_helpers::transfer_rfq_collateral;
+use crate::instructions::rfq_helpers::transfer_mm_collateral;
 use spamm_aggregator::{
-   helpers::verify_invoked_via_aggregator_rfq_ix,
-   instructions::FILL_RFQ_PARLAY_IX_DISCRIMINATOR,
+   helpers::verify_invoked_via_aggregator,
+   instructions::{FILL_RFQ_PARLAY_IX_DISCRIMINATOR, FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR},
 };
-
-pub const FILL_PARLAY_RFQ_IX_DISCRIMINATOR: u8 = 16;
 
 pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -39,13 +37,13 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   let parent_disc = verify_invoked_via_aggregator_rfq_ix(instructions_sysvar)?;
-   if unlikely(parent_disc != FILL_RFQ_PARLAY_IX_DISCRIMINATOR) {
-      log!("fill_parlay_rfq: parent must be fill_rfq_parlay");
+   let parent_disc = verify_invoked_via_aggregator(instructions_sysvar)?;
+   if unlikely(parent_disc != FILL_RFQ_PARLAY_IX_DISCRIMINATOR && parent_disc != FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR) {
+      log!("fill_parlay_rfq: parent must be fill_rfq_parlay or freebet_fill_rfq_parlay");
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   transfer_rfq_collateral(
+   transfer_mm_collateral(
       mm_config_pda,
       mm_token_account,
       liability_account,

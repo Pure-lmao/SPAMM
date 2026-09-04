@@ -1,20 +1,25 @@
 use core::result::Result;
 
-use pinocchio::account::AccountView;
-use pinocchio::address::{Address, address_eq};
-use pinocchio::error::ProgramError;
-use pinocchio::hint::unlikely;
-use pinocchio::ProgramResult;
+use pinocchio::{
+   ProgramResult,
+   account::AccountView,
+   address::{Address, address_eq},
+   error::ProgramError,
+   hint::unlikely,
+};
 use pinocchio_log::log;
-use spamm_aggregator::state::mm_account_config::{
-   MM_CONFIG_PDA_ADMIN_OFFSET,
-};
-use spamm_aggregator::state::{
-   EVENT_STATE_DISCRIMINATOR, EVENT_STATE_LEN, EVENT_STATE_SEED, EventGameState, EventId, EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId, market_id_pda_seed_parts,
-};
 use zeropod::ZeroPodFixed;
 
 use crate::constants::{MM_CONFIG_PDA, MM_MARKET_DATA_PDA_SEED};
+use spamm_aggregator::{
+   readers::read_u8_unchecked,
+   state::{
+      EVENT_STATE_DISCRIMINATOR, EVENT_STATE_HEADER_LEN, EVENT_STATE_SEED, EventGameState, EventId,
+      EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId, MARKET_ID_LEN, market_id_pda_seed_parts,
+      mm_account_config::MM_CONFIG_PDA_ADMIN_OFFSET,
+      other::{MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN},
+   },
+};
 
 /// MM config PDA `["config"]` under `program_id`; `feepayer` must match `admin`.
 #[inline(always)]
@@ -45,31 +50,62 @@ pub fn find_event_state_pda(program_id: &Address, event_id: &EventId) -> (Addres
 }
 
 #[inline(always)]
-pub fn verify_event_state_pda(
+fn verify_event_state_core(
    event_state_pda: &AccountView,
    program_id: &Address,
    event_id: &EventId,
-) -> Result<EventStateDataZc, ProgramError> {
+   event_game_state: Option<&EventGameState>,
+   event_state_sequence: Option<u16>,
+   throw_on_fail: bool,
+) -> Result<Option<EventStateDataZc>, ProgramError> {
    if unlikely(!address_eq(event_state_pda.owner(), program_id)) {
-      return Err(ProgramError::InvalidAccountOwner);
+      if throw_on_fail {
+         return Err(ProgramError::InvalidAccountOwner);
+      }
+      log!("verify_event_state: wrong owner");
+      return Ok(None);
    }
 
    let event_state_data = match event_state_pda.try_borrow() {
       Ok(data) => data,
-      Err(_) => return Err(ProgramError::InvalidAccountData),
+      Err(_) => {
+         if throw_on_fail {
+            return Err(ProgramError::InvalidAccountData);
+         }
+         log!("verify_event_state: borrow failed");
+         return Ok(None);
+      }
    };
 
-   if unlikely(event_state_data.len() != EVENT_STATE_LEN) {
-      return Err(ProgramError::InvalidAccountData);
+   if unlikely(event_state_data.len() < EVENT_STATE_HEADER_LEN) {
+      if throw_on_fail {
+         return Err(ProgramError::InvalidAccountData);
+      }
+      log!(
+         "verify_event_state: len got {} want>={}",
+         event_state_data.len(),
+         EVENT_STATE_HEADER_LEN
+      );
+      return Ok(None);
    }
 
-   let state = match EventStateData::from_bytes(&event_state_data) {
+   let state = match EventStateData::from_bytes(&event_state_data[..EVENT_STATE_HEADER_LEN]) {
       Ok(s) => s,
-      Err(_) => return Err(ProgramError::InvalidAccountData),
+      Err(_) => {
+         if throw_on_fail {
+            return Err(ProgramError::InvalidAccountData);
+         }
+         log!("verify_event_state: from_bytes failed");
+         return Ok(None);
+      }
    };
 
    if unlikely(state.discriminator != EVENT_STATE_DISCRIMINATOR) {
-      return Err(ProgramError::InvalidAccountData);
+      if throw_on_fail {
+         return Err(ProgramError::InvalidAccountData);
+      }
+      log!("verify_event_state: bad disc got {}", state.discriminator);
+      return Ok(None);
    }
 
    let event_id_wire = event_id.as_wire_bytes();
@@ -80,41 +116,75 @@ pub fn verify_event_state_pda(
    );
 
    if unlikely(!address_eq(event_state_pda.address(), &expected_pda)) {
-      return Err(ProgramError::InvalidSeeds);
+      if throw_on_fail {
+         return Err(ProgramError::InvalidSeeds);
+      }
+      log!("verify_event_state: pda mismatch");
+      return Ok(None);
    }
 
-   let wire_event_id = EventId::from_zc(&state.event_id).ok_or(ProgramError::InvalidAccountData)?;
+   let wire_event_id = match EventId::from_zc(&state.event_id) {
+      Some(id) => id,
+      None => {
+         if throw_on_fail {
+            return Err(ProgramError::InvalidAccountData);
+         }
+         log!("verify_event_state: event_id decode failed");
+         return Ok(None);
+      }
+   };
    if unlikely(
       wire_event_id.event != event_id.event
          || wire_event_id.league != event_id.league
          || wire_event_id.sport != event_id.sport,
    ) {
-      return Err(ProgramError::InvalidAccountData);
+      if throw_on_fail {
+         return Err(ProgramError::InvalidAccountData);
+      }
+      log!("verify_event_state: event_id mismatch");
+      return Ok(None);
    }
 
-   Ok(*state)
+   if let Some(seq) = event_state_sequence {
+      if unlikely(state.sequence.get() != seq) {
+         if throw_on_fail {
+            return Err(ProgramError::InvalidAccountData);
+         }
+         log!(
+            "verify_event_state: seq on_chain {} want {}",
+            state.sequence.get(),
+            seq
+         );
+         return Ok(None);
+      }
+   }
+
+   if let Some(game_state) = event_game_state {
+      if unlikely(EventGameState::from_zc(&state.game_state) != *game_state) {
+         if throw_on_fail {
+            return Err(ProgramError::InvalidAccountData);
+         }
+         let on_chain = EventGameState::from_zc(&state.game_state);
+         log!(
+            "verify_event_state: game_state mismatch on_chain_u64 {} want_u64 {}",
+            on_chain.as_u64(),
+            game_state.as_u64()
+         );
+         return Ok(None);
+      }
+   }
+
+   Ok(Some(*state))
 }
 
-/// Market-data PDA: `["market_data", market_id_body_wire, operator]` (`MarketId` body = legacy wire without operator).
 #[inline(always)]
-pub fn find_market_data_pda(program_id: &Address, market_id: &MarketId) -> (Address, u8) {
-   let mut market_wire = [0u8; MarketId::WIRE_SIZE];
-   let zc = market_id.to_zc();
-   unsafe {
-      core::ptr::write(market_wire.as_mut_ptr().cast(), zc);
-   }
-   let (body, operator) = market_id_pda_seed_parts(&market_wire);
-   let seeds: [&[u8]; 3] = [MM_MARKET_DATA_PDA_SEED, body, operator];
-   Address::find_program_address(&seeds, program_id)
-}
-
-#[inline(always)]
-pub fn mm_market_data_pda_ok(market_data: &AccountView, program_id: &Address, market_id: &MarketId) -> bool {
-   if unlikely(!address_eq(market_data.owner(), program_id)) {
-      return false;
-   }
-   let (expected, _) = find_market_data_pda(program_id, market_id);
-   address_eq(market_data.address(), &expected)
+pub fn verify_event_state_pda(
+   event_state_pda: &AccountView,
+   program_id: &Address,
+   event_id: &EventId,
+) -> Result<EventStateDataZc, ProgramError> {
+   verify_event_state_core(event_state_pda, program_id, event_id, None, None, true)?
+      .ok_or(ProgramError::InvalidAccountData)
 }
 
 /// Event state PDA `["event_state", event_id]`, plus sequence and game state.
@@ -126,98 +196,69 @@ pub fn verify_event_state(
    event_game_state: &EventGameState,
    event_state_sequence: u16,
 ) -> bool {
-   if unlikely(!address_eq(event_state_pda.owner(), program_id)) {
-      log!("verify_event_state: wrong owner");
-      return false;
-   }
-
-   let event_state_data = match event_state_pda.try_borrow() {
-      Ok(data) => data,
-      Err(_) => {
-         log!("verify_event_state: borrow failed");
-         return false;
-      }
-   };
-
-   if unlikely(event_state_data.len() != EVENT_STATE_LEN) {
-      log!(
-         "verify_event_state: len got {} want {}",
-         event_state_data.len(),
-         EVENT_STATE_LEN
-      );
-      return false;
-   }
-
-   let state = match EventStateData::from_bytes(&event_state_data) {
-      Ok(s) => s,
-      Err(_) => {
-         log!("verify_event_state: from_bytes failed");
-         return false;
-      }
-   };
-   if unlikely(state.discriminator != EVENT_STATE_DISCRIMINATOR) {
-      log!("verify_event_state: bad disc got {}", state.discriminator);
-      return false;
-   }
-
-   let event_id_wire = event_id.as_wire_bytes();
-   let seeds = [EVENT_STATE_SEED, event_id_wire.as_slice()];
-   let expected_pda = Address::derive_address(
-      &seeds,
-      Some(state.bump),
-      program_id
-   );
-   if unlikely(!address_eq(event_state_pda.address(), &expected_pda)) {
-      log!("verify_event_state: pda mismatch");
-      return false;
-   }
-
-   if unlikely(state.sequence.get() != event_state_sequence) {
-      log!(
-         "verify_event_state: seq on_chain {} want {}",
-         state.sequence.get(),
-         event_state_sequence
-      );
-      return false;
-   }
-
-   if unlikely(EventGameState::from_zc(&state.game_state) != *event_game_state) {
-      let on_chain = EventGameState::from_zc(&state.game_state);
-      log!(
-         "verify_event_state: game_state mismatch on_chain_u64 {} want_u64 {}",
-         on_chain.as_u64(),
-         event_game_state.as_u64()
-      );
-      return false;
-   }
-
-   if unlikely(state.event_id.event != event_id.event
-      || state.event_id.league != event_id.league
-      || state.event_id.sport != event_id.sport)
-   {
-      log!("verify_event_state: event_id mismatch");
-      return false;
-   }
-
-   true
-}
-
-/// Transfers all lamports from `pda` to `recipient` (PDA signs with `signers`), then closes `pda`.
-#[inline(never)]
-pub fn close_pda_return_rent(
-   pda: &mut AccountView,
-   recipient: &mut AccountView,
-) -> ProgramResult {
-   let dest_lamports = recipient.lamports();
-   let pda_lamports = pda.lamports();
-
-   pda.set_lamports(0);
-   recipient.set_lamports(dest_lamports + pda_lamports);
-   pda.close()
+   verify_event_state_core(
+      event_state_pda,
+      program_id,
+      event_id,
+      Some(event_game_state),
+      Some(event_state_sequence),
+      false,
+   )
+   .ok()
+   .flatten()
+   .is_some()
 }
 
 #[inline(always)]
-pub fn check_quote_matches(expected: &MMQuoteBuffer, account: &MMQuoteBuffer) -> ProgramResult {
+fn market_id_wire_bytes(market_id: &MarketId) -> [u8; MarketId::WIRE_SIZE] {
+   let mut market_wire = [0u8; MarketId::WIRE_SIZE];
+   let zc = market_id.to_zc();
+   unsafe {
+      core::ptr::write(market_wire.as_mut_ptr().cast(), zc);
+   }
+   market_wire
+}
+
+/// Market-data PDA: `["market_data", market_id_body_wire, operator]` (`MarketId` body = legacy wire without operator).
+#[inline(always)]
+pub fn find_market_data_pda_from_wire(program_id: &Address, market_wire: &[u8; MARKET_ID_LEN]) -> (Address, u8) {
+   let (body, operator) = market_id_pda_seed_parts(market_wire);
+   let seeds: [&[u8]; 3] = [MM_MARKET_DATA_PDA_SEED, body, operator];
+   Address::find_program_address(&seeds, program_id)
+}
+
+/// Market-data PDA: `["market_data", market_id_body_wire, operator]` (`MarketId` body = legacy wire without operator).
+#[inline(always)]
+pub fn find_market_data_pda(program_id: &Address, market_id: &MarketId) -> (Address, u8) {
+   let market_wire = market_id_wire_bytes(market_id);
+   find_market_data_pda_from_wire(program_id, &market_wire)
+}
+
+#[inline(always)]
+pub fn mm_market_data_pda_ok(market_data: &AccountView, program_id: &Address, market_id: &MarketId) -> bool {
+   if unlikely(!address_eq(market_data.owner(), program_id)) {
+      return false;
+   }
+   if unlikely(market_data.data_len() < MM_MARKET_DATA_PDA_MIN_LEN) {
+      return false;
+   }
+   let bump = unsafe { read_u8_unchecked(market_data.data_ptr(), MM_MARKET_DATA_PDA_BUMP_OFFSET) };
+   let market_wire = market_id_wire_bytes(market_id);
+   let (body, operator) = market_id_pda_seed_parts(&market_wire);
+   let expected = Address::derive_address(
+      &[MM_MARKET_DATA_PDA_SEED, body, operator],
+      Some(bump),
+      program_id,
+   );
+   address_eq(market_data.address(), &expected)
+}
+
+#[inline(always)]
+pub fn check_quote_matches(
+   expected: &MMQuoteBuffer,
+   account: &MMQuoteBuffer,
+   check_odds: bool,
+) -> ProgramResult {
    if unlikely(account.is_used != 0) {
       return Err(ProgramError::InvalidAccountData);
    }
@@ -233,8 +274,10 @@ pub fn check_quote_matches(expected: &MMQuoteBuffer, account: &MMQuoteBuffer) ->
    if unlikely(expected.max_amount > account.max_amount) {
       return Err(ProgramError::InvalidInstructionData);
    }
-   if unlikely(expected.odds_scaled != account.odds_scaled) {
-      return Err(ProgramError::InvalidInstructionData);
+   if check_odds {
+      if unlikely(expected.odds_scaled != account.odds_scaled) {
+         return Err(ProgramError::InvalidInstructionData);
+      }
    }
    if unlikely(expected.event_game_state != account.event_game_state) {
       return Err(ProgramError::InvalidInstructionData);

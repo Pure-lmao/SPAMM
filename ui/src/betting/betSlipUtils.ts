@@ -1,4 +1,4 @@
-import { BetResult, ODDS_SCALE, type MarketId, type ParlayLegWire } from "spamm-aggregator-sdk";
+import { ODDS_SCALE, type MarketId, type ParlayLegSel } from "spamm-aggregator-sdk";
 import { apiSportToSdk, buildMarketId, DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG } from "./chainIds";
 import { pickBetSide } from "./outcomeSide";
 import type { BetSlipSelection } from "./types";
@@ -53,14 +53,12 @@ export function buildMarketIdForSelection(sel: BetSlipSelection): MarketId {
    return buildMarketId(sel.eventId, sel.leagueId, sport, sel.marketWireId, sel.periodId);
 }
 
-export function parlayLegFromSelection(sel: BetSlipSelection): ParlayLegWire {
+export function parlayLegFromSelection(sel: BetSlipSelection): ParlayLegSel {
    return {
       marketId: buildMarketIdForSelection(sel),
       side: pickBetSide(sel.column, sel.mktString, sel.outcomeIndex),
       eventStateSequence: DEFAULT_EVENT_STATE_SEQUENCE,
       eventGameState: EVENT_GAME_STATE_PG,
-      oddsScaled: 0n,
-      result: BetResult.Pending,
    };
 }
 
