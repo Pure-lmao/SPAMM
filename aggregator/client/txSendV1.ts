@@ -352,6 +352,7 @@ export type SendInstructionGroupsParams = Readonly<{
  * Groups are independent and may be packed and sent in parallel.
  */
 export async function sendAndConfirmInstructionGroups(
+   clients: RpcClients,
    instructionGroups: readonly (readonly Instruction[])[],
    signers: readonly KeyPairSigner[],
    options?: SendInstructionGroupsParams,
@@ -362,7 +363,6 @@ export async function sendAndConfirmInstructionGroups(
    }
 
    const feePayer = signers[0]!;
-   const clients = createRpcClients();
    const commitment = options?.commitment ?? 'confirmed';
    const estimateAndSet = createEstimateAndSetResourceLimits(clients.rpc);
    const sendAndConfirmTransaction = sendAndConfirmTransactionFactory({

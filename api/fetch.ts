@@ -17,7 +17,7 @@ import {
    MIN_BET_AMOUNT,
 } from "spamm-aggregator-sdk";
 import { address, type Base64EncodedDataResponse } from "@solana/kit";
-import { createRpcClients, simulateTransaction } from "../aggregator/client/txSendV1.ts";
+import { createRpcClients, simulateTransaction, type RpcClients } from "../aggregator/client/txSendV1.ts";
 import { ADMIN_SIGNER } from "../aggregator/client/admin.ts";
 import { gradeBets, gradeParlays } from "./solana.ts";
 import { getAthleteName, getProps } from "./playerProps.ts";
@@ -30,9 +30,13 @@ function returnDataToBytes(raw: Base64EncodedDataResponse): Uint8Array {
 }
 
 const headers = {
-   'Accept': 'application/json',
+   'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7',
    'Content-Type': 'application/json',
-   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
+   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36',
+   'Sec-Ch-Ua': '"Chromium";v="152", "Not?A_Brand";v="24", "Google Chrome";v="152"',
+   'Sec-Ch-Ua-Mobile': '?0',
+   'Sec-Ch-Us-Platform': '"Windows"',
+   'Sec-Fetch-Dest': 'document',
 }
 
 /** Best odds per side index across all MMs from `get_market_quotes_proxy` return data. */
@@ -323,11 +327,15 @@ async function setFinishedEvents() {
 async function cacheOdds() {
    console.log("Caching odds");
    const markets = fetchUpcomingMarkets();
-   const clients = createRpcClients({
-      httpUrl: process.env.SOLANA_RPC_URL,
-      wsUrl: process.env.SOLANA_WS_URL,
-   });
-   const marketMakers = await getMmListData(clients.rpc);
+   const clients = [
+      createRpcClients({
+         httpUrl: process.env.HELIUS_RPC_URL,
+      }),
+      createRpcClients({
+         httpUrl: process.env.CHAINSTACK_RPC_URL,
+      }),
+   ] as [RpcClients, RpcClients];
+   const marketMakers = await getMmListData(clients[0]!.rpc);
    const mmPrograms = marketMakers.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY);
    const fakeSigner = ADMIN_SIGNER;
 
@@ -339,6 +347,7 @@ async function cacheOdds() {
    const eventGameState = getEventGameState("PG", 0, 0, 0, 0);
    const minOddsScaled = ODDS_SCALE + 1n;
 
+   let clientIndex = 0;
    for (const [, market] of markets) {
       const numSides = numSidesForMkt(market.id);
       if (numSides === undefined) {
@@ -374,7 +383,8 @@ async function cacheOdds() {
             eventGameState,
             eventStateSequence: 1,
          }, fakeSigner.address, mmProgramsForMarket);
-         const returnData = await simulateTransaction(clients.rpc, [quoteIx], [fakeSigner]);
+         const returnData = await simulateTransaction(clients[clientIndex]!.rpc, [quoteIx], [fakeSigner]);
+         clientIndex = (clientIndex + 1) % clients.length;
          if (!returnData) {
             continue;
          }

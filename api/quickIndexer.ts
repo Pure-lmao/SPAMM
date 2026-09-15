@@ -37,7 +37,6 @@ import { AGGREGATOR_PROGRAM_ID,
    type ParlayLegQuoted, 
    type EventGameState, 
    type DecodedAggregatorInstruction, 
-   getAndDecodeAccountData 
 } from "spamm-aggregator-sdk";
 import { createRpcClients } from "../aggregator/client/txSend";
 import { withRpcRetry } from "../market_maker/client/txSend";

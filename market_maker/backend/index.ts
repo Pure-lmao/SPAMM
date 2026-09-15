@@ -1,7 +1,7 @@
 import { fetchEventsGrouped } from "../../api/localDb";
 import { getCloseNettingAccountIx, getEventGameState, getEventStateData, ODDS_SCALE, type EventId, type MarketId } from "spamm-aggregator-sdk";
 import { getCloseEventIx, getCloseMarketIx, getInitEventIx, getInitMarketIx, getMmMarketData, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID } from "spamm-market-maker-sdk";
-import { createRpcClients, logSolanaError, sendAndConfirmInstructionGroups, sendAndConfirmInstructions, withRpcRetry } from "../../aggregator/client/txSendV1";
+import { createRpcClients, logSolanaError, sendAndConfirmInstructionGroups, sendAndConfirmInstructions, withRpcRetry, type RpcClients } from "../../aggregator/client/txSendV1";
 import { sleep } from "bun";
 import { ADMIN_SIGNER } from "../client/admin";
 import type { ESPNOdds, GroupedEvent } from "../../api/types";
@@ -33,7 +33,7 @@ async function runMarketMakerCycle() {
       for (const league of sport.leagues) {
          for (const event of league.events) {
             if (event.start_time < Date.now()) {
-               await closeEventAndMarkets(event);
+               await closeEventAndMarkets(event, clients);
             }
             const eventId: EventId = {
                sport: event.sport_id,
@@ -42,10 +42,23 @@ async function runMarketMakerCycle() {
             };
             let oddsData;
             try {
-               // check for event state account
-               const _eventStateData = await withRpcRetry(() =>
-                  getEventStateData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId),
-               );
+               let needToCheckEventState = false;
+               if(event.markets?.length == 0) {
+                  needToCheckEventState = true;
+               } else {
+                  const oddsStrings = event.markets?.map(market => market.last_odds) ?? [];
+                  const oddsArrays = oddsStrings.map(odds => JSON.parse(odds) as number[]);
+                  if (oddsArrays.every(odds => odds.every(odds => odds === 0))) {
+                     needToCheckEventState = true;
+                  }
+               }
+               if (needToCheckEventState) {
+                  // check for event state account
+                  const _eventStateData = await withRpcRetry(() =>
+                     getEventStateData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId),
+                  );
+               }
+               
                oddsData = await getESPNOdds(sport.api_id, league.api_id, event.api_id);
                // console.log(sport.api_id, league.api_id, event.api_id, oddsData);
             } catch (error) {
@@ -83,9 +96,12 @@ async function runMarketMakerCycle() {
                   operator: market.operator as Address,
                };
                try {
-                  const _marketData = await withRpcRetry(() =>
-                     getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId),
-                  );
+                  const odds = JSON.parse(market.last_odds) as number[];
+                  if (odds.every(odds => odds === 0)) {
+                     const _marketData = await withRpcRetry(() =>
+                        getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId),
+                     );
+                  }
                } catch (error) {
                   if (error instanceof Error && error.message.includes('MM market data account not found')) {
                      // create the market onchain
@@ -190,7 +206,7 @@ async function runMarketMakerCycle() {
             // send the ixs
             if (ixs.length > 0) {
                try {
-                  const txResult = await sendAndConfirmInstructionGroups(ixs, [ADMIN_SIGNER]);
+                  const txResult = await sendAndConfirmInstructionGroups(clients, ixs, [ADMIN_SIGNER]);
                   console.log("Markets updated onchain", eventId, txResult);
                } catch (error) {
                   logSolanaError(`Failed to update markets for event ${event.id}:`, error);
@@ -273,7 +289,7 @@ function revigOdds(odds: number[]): number[] {
    const vig = odds.reduce((acc, curr) => acc + 1/curr, 0);
    return odds.map(odds => odds * vig / 1.02);
 }
-async function closeEventAndMarkets(event: GroupedEvent) {
+async function closeEventAndMarkets(event: GroupedEvent, clients: RpcClients) {
    const ixs: Instruction[][] = [];
    ixs.push([await getCloseNettingAccountIx(
       {
@@ -307,6 +323,6 @@ async function closeEventAndMarkets(event: GroupedEvent) {
          },
       )]);
    }
-   const txResult = await sendAndConfirmInstructionGroups(ixs, [ADMIN_SIGNER]);
+   const txResult = await sendAndConfirmInstructionGroups(clients, ixs, [ADMIN_SIGNER]);
    console.log("Event and markets closed onchain", event.id, txResult);
 }
