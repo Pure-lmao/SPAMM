@@ -1,7 +1,6 @@
 import { ADDRESS_LEN, MAX_PARLAY_LEGS, ODDS_SCALE } from './constants.js';
-import { numSidesForMkt } from './helpers.js';
+import { numSidesForMkt, Sport } from 'spamm-aggregator-sdk';
 import {
-   Sport,
    type EventGameState,
    type EventId,
    type FillParlayQuoteIxData,
@@ -110,6 +109,9 @@ export function validateSportEnum(sport: Sport, label = 'sport'): void {
       case Sport.Basketball:
       case Sport.IceHockey:
       case Sport.Tennis:
+      case Sport.Golf:
+      case Sport.Cricket:
+      case Sport.Motorsports:
       case Sport.Cs2:
       case Sport.Dota:
       case Sport.Lol:

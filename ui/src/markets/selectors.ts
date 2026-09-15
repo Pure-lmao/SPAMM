@@ -1,29 +1,133 @@
 import type { BetColumn } from "../betting/types";
 import {
-   handicapTableKind,
-   isPromoMarket,
+   eventGroupKey,
+   isMainPeriod,
+   isPlayerProp,
    isSoccerToQualify,
-   moneylineSectionTitle,
-   totalsSectionTitle,
-   type EventMarketSectionKind,
-} from "./eventMarketsDisplay";
+   playerPropBase,
+   resolveMarketDisplay,
+   type MarketLayout,
+} from "spamm-aggregator-sdk";
+import { isPromoMarket, uiMarketDisplayCtx } from "./eventMarketsDisplay";
 import { lineRawForSpreadOrTotal } from "./lineFromMarket";
 import { decimalOddsFromDb, orderOneX2WireToDisplay, parseOdds } from "./oddsFormat";
 import type { UiGroupedEvent, UiGroupedSport, UiMarket } from "./types";
 
-export type { EventMarketSectionKind } from "./eventMarketsDisplay";
+export type EventMarketSectionKind =
+   | "money"
+   | "tq"
+   | "spread"
+   | "asian"
+   | "total"
+   | "btts"
+   | "promo"
+   | "yesNo"
+   | "multiWay"
+   | "overUnder"
+   | "correctScore"
+   | "playerProp"
+   | "homeTotal"
+   | "awayTotal"
+   | "extra";
 
 export type EventMarketSection = {
    kind: EventMarketSectionKind;
+   layout: MarketLayout;
    title: string;
+   tooltip: string;
    rows: UiMarket[];
 };
 
 function sortById(a: UiMarket, b: UiMarket): number {
-   return a.id - b.id;
+   return a.id - b.id || a.player_id - b.player_id || a.period_id - b.period_id;
 }
 
-/** Soccer: main 1X2 is regular time (`period_id === 1`). Omit cup-only `period_id === 0` 1X2 when RT exists. */
+export type PlayerPropCluster = {
+   playerKey: string;
+   playerId: number;
+   playerName: string;
+   markets: UiMarket[];
+};
+
+function playerPropPlayerKey(m: UiMarket): string {
+   return String(m.player_id ?? 0);
+}
+
+function sortPlayerPropLines(a: UiMarket, b: UiMarket): number {
+   const la = a.line_value;
+   const lb = b.line_value;
+   if (la != null && lb != null && la !== lb) {
+      return la - lb;
+   }
+   if (la != null && lb == null) {
+      return -1;
+   }
+   if (la == null && lb != null) {
+      return 1;
+   }
+   return sortById(a, b);
+}
+
+/** Group player-prop markets in a section into one row per player (all lines). */
+export function clusterPlayerPropMarkets(rows: readonly UiMarket[]): PlayerPropCluster[] {
+   const buckets = new Map<string, UiMarket[]>();
+   for (const m of rows) {
+      const key = playerPropPlayerKey(m);
+      let list = buckets.get(key);
+      if (!list) {
+         list = [];
+         buckets.set(key, list);
+      }
+      list.push(m);
+   }
+   const clusters: PlayerPropCluster[] = [];
+   for (const [playerKey, markets] of buckets) {
+      const first = markets[0]!;
+      clusters.push({
+         playerKey,
+         playerId: first.player_id ?? 0,
+         playerName: first.player_name?.trim() || "Player",
+         markets: [...markets].sort(sortPlayerPropLines),
+      });
+   }
+   clusters.sort((a, b) => a.playerName.localeCompare(b.playerName) || a.playerId - b.playerId);
+   return clusters;
+}
+
+function twoWayBalanceScore(m: UiMarket): number | null {
+   const values = parseOdds(m.last_odds);
+   if (values.length < 2) {
+      return null;
+   }
+   return balanceScoreDb(values[0]!, values[1]!);
+}
+
+/** Prefer the line closest to even two-way odds; otherwise the first sorted line. */
+export function defaultPlayerPropMarket(markets: readonly UiMarket[]): UiMarket {
+   const sorted = [...markets].sort(sortPlayerPropLines);
+   const first = sorted[0];
+   if (first == null) {
+      throw new Error("defaultPlayerPropMarket: empty markets");
+   }
+   let best = first;
+   let bestScore = twoWayBalanceScore(first);
+   for (const m of sorted.slice(1)) {
+      const score = twoWayBalanceScore(m);
+      if (score == null) {
+         continue;
+      }
+      if (bestScore == null || score < bestScore) {
+         best = m;
+         bestScore = score;
+      }
+   }
+   return best;
+}
+
+function marketKey(m: UiMarket): string {
+   return `${m.id}:${m.period_id}:${m.player_id ?? 0}`;
+}
+
 function pickSoccerMain1x2(markets: UiMarket[]): UiMarket | undefined {
    const rt = markets.filter((m) => m.mkt_string === "1X2" && m.period_id === 1);
    if (rt.length) {
@@ -50,12 +154,10 @@ export function pickMainMoneylineMarket(markets: UiMarket[] | undefined, sportId
    return pickNonSoccerMainMl(markets);
 }
 
-/** Front-page spread/total lines use RT for soccer, full game for other sports. */
 function linePeriodOk(m: UiMarket, sportId: number): boolean {
-   return sportId === 1 ? m.period_id === 1 : m.period_id === 0;
+   return isMainPeriod(sportId, m.period_id);
 }
 
-/** Lower is closer to 2.0/2.0 on both sides. `null` = both odds zero (not eligible as “balanced”). */
 function balanceScoreDb(a: number, b: number): number | null {
    if (a === 0 && b === 0) {
       return null;
@@ -84,7 +186,7 @@ function pickBestTwoWayLine(
    const scored: Scored[] = candidates.map((m) => {
       const values = parseValues(m) as [number, number];
       const [x, y] = values;
-      const line = lineRawForSpreadOrTotal(m, lineKind);
+      const line = lineRawForSpreadOrTotal({ ...m, id: m.id }, lineKind);
       return {
          market: m,
          line,
@@ -118,11 +220,20 @@ export function getMainOddsDetail(
    if (!mk) {
       return null;
    }
-   if (mk.mkt_string === "1X2") {
+   if (mk.mkt_string === "1X2" || mk.id === 1) {
       return { market: mk, values: orderOneX2WireToDisplay(parseOdds(mk.last_odds)) };
    }
    const [home, away] = parseOdds(mk.last_odds);
    return { market: mk, values: [home, away] };
+}
+
+function isSpreadFamily(m: UiMarket): boolean {
+   const family = resolveMarketDisplay(m.id, uiMarketDisplayCtx(m)).family;
+   return family === "spread" || family === "asian";
+}
+
+function isMatchTotalFamily(m: UiMarket): boolean {
+   return resolveMarketDisplay(m.id, uiMarketDisplayCtx(m)).family === "total";
 }
 
 export function getSpreadOdds(
@@ -132,7 +243,7 @@ export function getSpreadOdds(
    const r = pickBestTwoWayLine(
       markets,
       sportId,
-      (m) => m.mkt_string.startsWith("AH "),
+      isSpreadFamily,
       (m) => parseOdds(m.last_odds) as [number, number],
       "spread",
    );
@@ -150,7 +261,7 @@ export function getTotalOdds(
    const r = pickBestTwoWayLine(
       markets,
       sportId,
-      (m) => m.mkt_string.startsWith("OU "),
+      isMatchTotalFamily,
       (m) => parseOdds(m.last_odds) as [number, number],
       "total",
    );
@@ -161,14 +272,26 @@ export function getTotalOdds(
    return { market: r.market, line: r.line, values: [o0, o1] };
 }
 
-export function extraMarketsCount(markets: UiMarket[] | undefined): number {
-   if (!markets || markets.length <= 3) {
+export function extraMarketsCount(markets: UiMarket[] | undefined, sportId: number): number {
+   if (!markets?.length) {
       return 0;
    }
-   return markets.length - 3;
+   const featured = new Set<string>();
+   const main = pickMainMoneylineMarket(markets, sportId);
+   const spread = getSpreadOdds(markets, sportId);
+   const total = getTotalOdds(markets, sportId);
+   if (main) {
+      featured.add(marketKey(main));
+   }
+   if (spread) {
+      featured.add(marketKey(spread.market));
+   }
+   if (total) {
+      featured.add(marketKey(total.market));
+   }
+   return markets.filter((m) => !featured.has(marketKey(m)) && !isPromoMarket(m)).length;
 }
 
-/** True if some market has at least one non-zero odds entry in `last_odds` (DB scale). */
 export function eventHasAnyNonZeroOdd(ev: UiGroupedEvent): boolean {
    const mkts = ev.markets;
    if (mkts == null || mkts.length === 0) {
@@ -184,7 +307,6 @@ export function eventHasAnyNonZeroOdd(ev: UiGroupedEvent): boolean {
    return false;
 }
 
-/** Drops events (and empty leagues / sports) where every market’s odds are all zero. */
 export function filterGroupedSportsForHome(tree: readonly UiGroupedSport[]): UiGroupedSport[] {
    return tree
       .map((sport) => ({
@@ -199,8 +321,18 @@ export function filterGroupedSportsForHome(tree: readonly UiGroupedSport[]): UiG
       .filter((sport) => sport.leagues.length > 0);
 }
 
-export function inferBetColumn(mktString: string): BetColumn {
-   if (mktString === "PROMO") {
+export function inferBetColumn(mktString: string, mktWireId?: number): BetColumn {
+   if (mktString === "PROMO" || mktWireId === 9) {
+      return "main";
+   }
+   if (mktWireId != null) {
+      const family = resolveMarketDisplay(mktWireId).family;
+      if (family === "spread" || family === "asian") {
+         return "spread";
+      }
+      if (family === "total" || family === "homeTotal" || family === "awayTotal") {
+         return "total";
+      }
       return "main";
    }
    if (mktString === "1X2" || mktString === "ML") {
@@ -215,69 +347,117 @@ export function inferBetColumn(mktString: string): BetColumn {
    return "main";
 }
 
-function isMoneyCore(m: UiMarket): boolean {
-   return m.mkt_string === "1X2" || m.mkt_string === "ML";
+function familyToKind(m: UiMarket): EventMarketSectionKind {
+   if (isSoccerToQualify(m.id, m.mkt_string, m.sport_id)) {
+      return "tq";
+   }
+   const family = resolveMarketDisplay(m.id, uiMarketDisplayCtx(m)).family;
+   switch (family) {
+      case "promo":
+         return "promo";
+      case "oneX2":
+      case "ml":
+         return "money";
+      case "btts":
+         return "btts";
+      case "spread":
+         return "spread";
+      case "asian":
+         return "asian";
+      case "total":
+         return "total";
+      case "homeTotal":
+         return "homeTotal";
+      case "awayTotal":
+         return "awayTotal";
+      case "correctScore":
+         return "correctScore";
+      case "playerProp":
+         return "playerProp";
+      case "dc":
+      case "ftBtts":
+      case "htFt":
+      case "bttsOu":
+      case "ftOu":
+      case "moneyOdds":
+         return "multiWay";
+      default:
+         return "extra";
+   }
 }
 
-export function groupMarketsForEventPage(markets: UiMarket[]): EventMarketSection[] {
+function sectionPlayerPropBase(rows: readonly UiMarket[]): number {
+   let min = Number.POSITIVE_INFINITY;
+   for (const m of rows) {
+      const base = playerPropBase(m.id);
+      if (base != null && base < min) {
+         min = base;
+      }
+   }
+   return Number.isFinite(min) ? min : Number.POSITIVE_INFINITY;
+}
+
+const SECTION_ORDER: readonly EventMarketSectionKind[] = [
+   "promo",
+   "money",
+   "tq",
+   "btts",
+   "spread",
+   "asian",
+   "total",
+   "homeTotal",
+   "awayTotal",
+   "yesNo",
+   "multiWay",
+   "overUnder",
+   "correctScore",
+   "playerProp",
+   "extra",
+];
+
+export function groupMarketsForEventPage(markets: UiMarket[], teams?: { homeName: string; awayName: string }): EventMarketSection[] {
    const sorted = [...markets].sort(sortById);
-   const money = sorted.filter(isMoneyCore);
-   const tq = sorted.filter((m) => isSoccerToQualify(m, m.sport_id));
-   const btts = sorted.filter((m) => m.mkt_string === "BTTS");
-   const ah = sorted.filter((m) => m.mkt_string.startsWith("AH "));
-   const spreadRows = ah.filter((m) => handicapTableKind(m) === "spread").sort(sortById);
-   const asianRows = ah.filter((m) => handicapTableKind(m) === "asian").sort(sortById);
-   const totals = sorted.filter((m) => m.mkt_string.startsWith("OU ")).sort(sortById);
-   const promo = sorted.filter((m) => isPromoMarket(m));
-   const rest = sorted.filter(
-      (m) =>
-         !isMoneyCore(m) &&
-         !isSoccerToQualify(m, m.sport_id) &&
-         m.mkt_string !== "BTTS" &&
-         !isPromoMarket(m) &&
-         !m.mkt_string.startsWith("AH ") &&
-         !m.mkt_string.startsWith("OU ")
-   );
-   const byMkt = new Map<string, UiMarket[]>();
-   for (const m of rest) {
-      const k = m.mkt_string;
-      let list = byMkt.get(k);
+   const buckets = new Map<string, UiMarket[]>();
+   for (const m of sorted) {
+      const ctx = uiMarketDisplayCtx(m, teams);
+      const key = eventGroupKey(m.id, ctx);
+      let list = buckets.get(key);
       if (!list) {
          list = [];
-         byMkt.set(k, list);
+         buckets.set(key, list);
       }
       list.push(m);
    }
-   const extraSections: EventMarketSection[] = [...byMkt.entries()]
-      .sort(([a], [b]) => a.localeCompare(b))
-      .map(([title, rows]) => ({
-         kind: "extra" as const,
-         title,
-         rows: [...rows].sort(sortById),
-      }));
 
-   const out: EventMarketSection[] = [];
-   if (promo.length) {
-      out.push({ kind: "promo", title: "Promotions", rows: promo });
+   const sections: EventMarketSection[] = [];
+   for (const [, rows] of buckets) {
+      const first = rows[0]!;
+      const ctx = uiMarketDisplayCtx(first, teams);
+      const resolved = resolveMarketDisplay(first.id, ctx);
+      const kind = isPlayerProp(first.id) ? "playerProp" : familyToKind(first);
+      sections.push({
+         kind,
+         layout: resolved.layout,
+         title: resolved.groupTitle,
+         tooltip: resolved.groupTooltip,
+         rows: [...rows].sort(sortById),
+      });
    }
-   if (money.length) {
-      out.push({ kind: "money", title: moneylineSectionTitle(money), rows: money });
-   }
-   if (tq.length) {
-      out.push({ kind: "tq", title: "To Qualify", rows: tq });
-   }
-   if (btts.length) {
-      out.push({ kind: "btts", title: "Both Teams To Score", rows: btts });
-   }
-   if (spreadRows.length) {
-      out.push({ kind: "spread", title: "Spread", rows: spreadRows });
-   }
-   if (asianRows.length) {
-      out.push({ kind: "asian", title: "Asian Handicap", rows: asianRows });
-   }
-   if (totals.length) {
-      out.push({ kind: "total", title: totalsSectionTitle(totals), rows: totals });
-   }
-   out.push(...extraSections);
-   return out;
+
+   sections.sort((a, b) => {
+      const ia = SECTION_ORDER.indexOf(a.kind);
+      const ib = SECTION_ORDER.indexOf(b.kind);
+      if (ia !== ib) {
+         return (ia < 0 ? 99 : ia) - (ib < 0 ? 99 : ib);
+      }
+      if (a.kind === "playerProp" && b.kind === "playerProp") {
+         const ba = sectionPlayerPropBase(a.rows);
+         const bb = sectionPlayerPropBase(b.rows);
+         if (ba !== bb) {
+            return ba - bb;
+         }
+      }
+      return a.title.localeCompare(b.title);
+   });
+   return sections;
 }

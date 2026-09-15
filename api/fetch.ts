@@ -1,7 +1,7 @@
-import { fetch, sleep } from "bun";
-import type { ESPNEvent, ESPNOdds, Event } from "./types";
-import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, getLeagues, updateEventScore, updateMarket } from "./localDb";
-import { safeJSONStringify } from "./utils";
+import { fetch } from "bun";
+import type { ESPNEvent, ESPNOdds, DbEvent } from "./types";
+import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, updateEventScore, updateMarket } from "./localDb";
+import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
 import {
    decodeMarketQuotesProxyReturnData,
    getEventGameState,
@@ -11,19 +11,28 @@ import {
    MAX_NUMBER_OF_MMS_PROXY,
    numSidesForMkt,
    ODDS_SCALE,
+   playerPropStatName,
    type MarketId,
    type ProxyMarketMmQuotes,
+   MIN_BET_AMOUNT,
 } from "spamm-aggregator-sdk";
-import type { Base64EncodedDataResponse } from "@solana/kit";
-import { createRpcClients, simulateTransaction } from "../aggregator/client/txSend";
-import { ADMIN_SIGNER } from "../aggregator/client/admin";
-import { gradeBets, gradeParlays } from "solana";
+import { address, type Base64EncodedDataResponse } from "@solana/kit";
+import { createRpcClients, simulateTransaction } from "../aggregator/client/txSendV1.ts";
+import { ADMIN_SIGNER } from "../aggregator/client/admin.ts";
+import { gradeBets, gradeParlays } from "./solana.ts";
+import { getAthleteName, getProps } from "./playerProps.ts";
 
 /** Unused by on-chain quote proxy; must be > 0 for SDK validation. */
 const QUOTE_PROBE_BET_ID = 1n;
 
 function returnDataToBytes(raw: Base64EncodedDataResponse): Uint8Array {
    return new Uint8Array(Buffer.from(...raw));
+}
+
+const headers = {
+   'Accept': 'application/json',
+   'Content-Type': 'application/json',
+   'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/152.0.0.0 Safari/537.36'
 }
 
 /** Best odds per side index across all MMs from `get_market_quotes_proxy` return data. */
@@ -45,7 +54,8 @@ function bestOddsPerSideFromMarketQuotes(
 
 async function getScoreboard(sport: string, league: string, date: string): Promise<ESPNEvent[]> {
    const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/scoreboard?dates=${date}`
-   const response = await fetch(url);
+   // console.log(url);
+   const response = await fetch(url, {headers});
    const data = await response.json() as {events: ESPNEvent[]};
    return data.events;
 };
@@ -61,7 +71,7 @@ function getScoreFromEvent(event: ESPNEvent): {isCompleted: boolean, homeScore: 
    }
 };
 
-function getUpcomingEvent(event: ESPNEvent, sport_id: number, league_id: number): Event | null {
+function getUpcomingEvent(event: ESPNEvent, sport_id: number, league_id: number): DbEvent | null {
    if (event.status.type.name !== 'STATUS_SCHEDULED') {
       return null;
    }
@@ -71,7 +81,7 @@ function getUpcomingEvent(event: ESPNEvent, sport_id: number, league_id: number)
       const awayTeam = event.competitions[0]!.competitors.find(c => c.homeAway === 'away')!.team;
       const eventId = event.id;
 
-      const dbEvent: Event = {
+      const dbEvent: DbEvent = {
          id: Number(eventId),
          league_id,
          sport_id,
@@ -92,7 +102,7 @@ function getUpcomingEvent(event: ESPNEvent, sport_id: number, league_id: number)
 
 async function getMarketLines(sport: string, league: string, event: string): Promise<{total: number | null, spread: number | null}> {
    const url = `https://sports.core.api.espn.com/v2/sports/${sport}/leagues/${league}/events/${event}/competitions/${event}/odds`
-   const response = await fetch(url);
+   const response = await fetch(url, {headers});
    const data = await response.json() as ESPNOdds;
    try {
       let total = null;
@@ -125,103 +135,151 @@ async function setUpcomingEvents() {
 
    const marketIdSet = new Set<string>();
    for (const [marketId, market] of markets) {
-      marketIdSet.add(`${market.sport_id}-${market.league_id}-${market.event_id}-${market.id}`);
+      marketIdSet.add(`${market.sport_id}-${market.league_id}-${market.event_id}-${market.id}-${market.player_id}`);
    }
 
    for (const [id, league] of leagues) {
       const sport = sports.get(league.sport_id)!;
-      const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${today}-${fiveDaysFromNow}`);
-      for (const event of scoreboard) {
-         let eventExists = events.has(`${sport.id}:${league.id}:${event.id}`) || false;
+      if(sport.id < 100) {
+         const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${today}-${fiveDaysFromNow}`);
+         for (const event of scoreboard) {
+            let eventExists = events.has(`${sport.id}:${league.id}:${event.id}`) || false;
 
-         const dbEvent = getUpcomingEvent(event, sport.id, league.id);
-         if (dbEvent) {
-            if (!eventExists) {
-               addEvent(dbEvent.id, dbEvent);
-            }
-            const last_update = new Date().getTime();
-            // Create ML/FT
-            if (sport.id === 1) {
-               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-1`)) {
-                  addMarket({
-                     id: 1,
-                     event_id: dbEvent.id,
-                     league_id: league.id,
-                     sport_id: sport.id,
-                     last_odds: safeJSONStringify([0,0,0]),
-                     last_update,
-                     mkt_string: "1X2",
-                     period_id: 1,
-                     line_value: null,
-                  });
+            const dbEvent = getUpcomingEvent(event, sport.id, league.id);
+            if (dbEvent) {
+               if (!eventExists) {
+                  addEvent(dbEvent.id, dbEvent);
                }
-               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-4`)) {
-                  addMarket({
-                     id: 4,
-                     event_id: dbEvent.id,
-                     league_id: league.id,
-                     sport_id: sport.id,
-                     last_odds: safeJSONStringify([0,0]),
-                     last_update,
-                     mkt_string: "BTTS",
-                     period_id: 1,
-                     line_value: null,
-                  });
-               }
-            } else {
-               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-0`)) {
-                  addMarket({
-                     id: 0,
-                     event_id: dbEvent.id,
-                     league_id: league.id,
-                     sport_id: sport.id,
-                     last_odds: safeJSONStringify([0,0]),
-                     last_update,
-                     mkt_string: "ML",
-                     period_id: 0,
-                     line_value: null,
-                  });
-               }
-            }  
+               const last_update = new Date().getTime();
+               // Create ML/FT
+               if (sport.id === 1) {
+                  if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-1-0`)) {
+                     addMarket({
+                        id: 1,
+                        event_id: dbEvent.id,
+                        league_id: league.id,
+                        sport_id: sport.id,
+                        player_id: 0,
+                        player_name: "",
+                        last_odds: safeJSONStringify([0,0,0]),
+                        last_update,
+                        mkt_string: "1X2",
+                        period_id: 1,
+                        line_value: null,
+                        operator: DEFAULT_MARKET_OPERATOR,
+                     });
+                  }
+                  if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-4-0`)) {
+                     addMarket({
+                        id: 4,
+                        event_id: dbEvent.id,
+                        league_id: league.id,
+                        sport_id: sport.id,
+                        player_id: 0,
+                        player_name: "",
+                        last_odds: safeJSONStringify([0,0]),
+                        last_update,
+                        mkt_string: "BTTS",
+                        period_id: 1,
+                        line_value: null,
+                        operator: DEFAULT_MARKET_OPERATOR,
+                     });
+                  }
+               } else {
+                  if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-0-0`)) {
+                     addMarket({
+                        id: 0,
+                        event_id: dbEvent.id,
+                        league_id: league.id,
+                        sport_id: sport.id,
+                        player_id: 0,
+                        player_name: "",
+                        last_odds: safeJSONStringify([0,0]),
+                        last_update,
+                        mkt_string: "ML",
+                        period_id: 0,
+                        line_value: null,
+                        operator: DEFAULT_MARKET_OPERATOR,
+                     });
+                  }
+               }  
 
-            const lines = await getMarketLines(sport.api_id, league.api_id, event.id);
+               const lines = await getMarketLines(sport.api_id, league.api_id, event.id);
 
-            if (lines.total !== null) {
-               let id = sport.id === 1 ? 50 : 1000;
-               id += lines.total * (sport.id === 1 ? 4 : 2);
-               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-${id}`)) {
-                  addMarket({
-                     id,
-                     event_id: dbEvent.id,
-                     league_id: league.id,
-                     sport_id: sport.id,
-                     last_odds: safeJSONStringify([0,0]),
-                     last_update,
-                     mkt_string: `OU ${lines.total}`,
-                     period_id: sport.id === 1 ? 1 : 0,
-                     line_value: lines.total,
-                  });
+               if (lines.total !== null) {
+                  let id = sport.id === 1 ? 50 : 1000;
+                  id += lines.total * (sport.id === 1 ? 4 : 2);
+                  if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-${id}-0`)) {
+                     addMarket({
+                        id,
+                        event_id: dbEvent.id,
+                        league_id: league.id,
+                        sport_id: sport.id,
+                        player_id: 0,
+                        player_name: "",
+                        last_odds: safeJSONStringify([0,0]),
+                        last_update,
+                        mkt_string: `OU ${lines.total}`,
+                        period_id: sport.id === 1 ? 1 : 0,
+                        line_value: lines.total,
+                        operator: DEFAULT_MARKET_OPERATOR,
+                     });
+                  }
+               };
+
+               if (lines.spread !== null) {
+                  let id = sport.id === 1 ? 400 : 200;
+                  id += lines.spread * (sport.id === 1 ? 4 : 2);
+                  if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-${id}-0`)
+                  && id !== 200) {
+                     addMarket({
+                        id,
+                        event_id: dbEvent.id,
+                        league_id: league.id,
+                        sport_id: sport.id,
+                        player_id: 0,
+                        player_name: "",
+                        last_odds: safeJSONStringify([0,0]),
+                        last_update,
+                        mkt_string: `AH ${lines.spread > 0 ? '+' : ''}${lines.spread}`,
+                        period_id: sport.id === 1 ? 1 : 0,
+                        line_value: lines.spread,
+                        operator: DEFAULT_MARKET_OPERATOR,
+                     });
+                  }
                }
-            };
 
-            if (lines.spread !== null) {
-               let id = sport.id === 1 ? 400 : 200;
-               id += lines.spread * (sport.id === 1 ? 4 : 2);
-               if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-${id}`)) {
-                  addMarket({
-                     id,
-                     event_id: dbEvent.id,
-                     league_id: league.id,
-                     sport_id: sport.id,
-                     last_odds: safeJSONStringify([0,0]),
-                     last_update,
-                     mkt_string: `AH ${lines.spread > 0 ? '+' : ''}${lines.spread}`,
-                     period_id: sport.id === 1 ? 1 : 0,
-                     line_value: lines.spread,
-                  });
+               const props = await getProps(sport.api_id, league.api_id, event.id);
+
+               for (const prop of props) {
+                  if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-${prop.mktId}-${prop.athleteId}`)) {
+                     const athleteName = await getCachedAthleteName(prop.athleteId, prop.athleteRef);
+                     if (athleteName) {
+                        const propName = playerPropStatName(prop.mktId);
+                        addMarket({
+                           id: prop.mktId,
+                           event_id: dbEvent.id,
+                           league_id: league.id,
+                           sport_id: sport.id,
+                           player_id: prop.athleteId,
+                           player_name: athleteName,
+                           last_odds: safeJSONStringify([0,0]),
+                           last_update,
+                           mkt_string: prop.line != null && Number.isFinite(prop.line)
+                              ? `${propName} ${prop.line}`
+                              : propName,
+                           period_id: sport.id === 1 ? 1 : 0,
+                           line_value: prop.line,
+                           operator: DEFAULT_MARKET_OPERATOR,
+                        });
+                     }
+                  }
                }
             }
          }
+      }
+       else {
+         console.log(`sport id ${sport.id} is not on espn`);
       }
    }
    console.log("Set upcoming events");
@@ -246,14 +304,14 @@ async function setFinishedEvents() {
       const sport = sports.get(league.sport_id)!;
       const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${twoDaysAgo}-${today}`);
       for (const event of scoreboard) {
-         console.log("scoreboard event:", event.id);
+         // console.log("scoreboard event:", event.id);
          if (!events.has(`${sport.id}:${league.id}:${event.id}`)) {
             console.log("event does not exist");
             continue;
          }
          const score = getScoreFromEvent(event);
-         console.log(event)
-         console.log("score:", score);
+         // console.log(event)
+         // console.log("score:", score);
          if (score && score.isCompleted) {
             updateEventScore(Number(event.id), league.id, sport.id, score.homeScore, score.awayScore);
          }
@@ -265,7 +323,10 @@ async function setFinishedEvents() {
 async function cacheOdds() {
    console.log("Caching odds");
    const markets = fetchUpcomingMarkets();
-   const clients = createRpcClients();
+   const clients = createRpcClients({
+      httpUrl: process.env.SOLANA_RPC_URL,
+      wsUrl: process.env.SOLANA_WS_URL,
+   });
    const marketMakers = await getMmListData(clients.rpc);
    const mmPrograms = marketMakers.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY);
    const fakeSigner = ADMIN_SIGNER;
@@ -288,13 +349,14 @@ async function cacheOdds() {
       const wireMarketId: MarketId = {
          mkt: market.id,
          period: market.period_id,
-         player: 0n,
+         player: BigInt(market.player_id),
          eventId: {
             sport: market.sport_id,
             league: market.league_id,
             event: BigInt(market.event_id),
          },
          isPregame: true,
+         operator: address(market.operator),
       };
 
       const mmProgramsForMarket = mmPrograms.slice(
@@ -302,43 +364,50 @@ async function cacheOdds() {
          Math.min(MAX_NUMBER_OF_MMS_PROXY, maxProxyMmsForMarketQuotes(numSides)),
       );
 
-      let odds = Array.from({ length: numSides }, () => 0);
       try {
-         const quoteIx = await getGetMarketQuotesProxyIx(
-            {
-               betId: QUOTE_PROBE_BET_ID,
-               marketId: wireMarketId,
-               side: 0,
-               amount: 1n,
-               minOddsScaled,
-               eventGameState,
-               eventStateSequence: 1,
-            },
-            fakeSigner.address,
-            mmProgramsForMarket,
-         );
-         const returnData = await simulateTransaction(clients.rpc, [quoteIx], [fakeSigner], true);
-         if (returnData) {
-            const quotes = decodeMarketQuotesProxyReturnData(returnDataToBytes(returnData), numSides);
-            odds = bestOddsPerSideFromMarketQuotes(quotes, numSides);
+         const quoteIx = await getGetMarketQuotesProxyIx({
+            betId: QUOTE_PROBE_BET_ID,
+            marketId: wireMarketId,
+            side: 0,
+            amount: MIN_BET_AMOUNT,
+            minOddsScaled,
+            eventGameState,
+            eventStateSequence: 1,
+         }, fakeSigner.address, mmProgramsForMarket);
+         const returnData = await simulateTransaction(clients.rpc, [quoteIx], [fakeSigner]);
+         if (!returnData) {
+            continue;
          }
+         const quotes = decodeMarketQuotesProxyReturnData(returnDataToBytes(returnData), numSides);
+         const odds = bestOddsPerSideFromMarketQuotes(quotes, numSides);
+         updateMarket(
+            market.id,
+            market.event_id,
+            market.league_id,
+            market.sport_id,
+            market.period_id,
+            market.player_id,
+            safeJSONStringify(odds),
+            new Date().getTime(),
+         );
       } catch (error: unknown) {
          console.error(
             `Error simulating market quotes proxy for market ${market.id} event ${market.event_id}`,
          );
          console.error(error instanceof Error ? error.message : String(error));
       }
-      await sleep(500);
-      updateMarket(
-         market.id,
-         market.event_id,
-         market.league_id,
-         market.sport_id,
-         safeJSONStringify(odds),
-         new Date().getTime(),
-      );
    }
    console.log("Cached odds");
+}
+
+const cachedAthletes = new Map<number, string>();
+async function getCachedAthleteName(athleteId: number, athleteRef: string): Promise<string> {
+   if (cachedAthletes.has(athleteId)) {
+      return cachedAthletes.get(athleteId)!;
+   }
+   const athleteName = await getAthleteName(athleteRef);
+   cachedAthletes.set(athleteId, athleteName);
+   return athleteName;
 }
 
 async function main() {

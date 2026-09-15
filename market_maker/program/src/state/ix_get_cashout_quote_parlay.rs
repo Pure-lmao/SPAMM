@@ -6,8 +6,12 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
 pub struct GetCashoutQuoteParlayIxHeaderPayload {
+   /// Stake slice being cashed out.
    pub amount: u64,
+   /// Proportional payout removed from the ticket: the slice's face payout at the fill
+   /// odds. Fair value = `payout × ODDS_SCALE / current_combined_odds`.
    pub payout: u64,
+   /// Floor on the payment; return 0 if it cannot be met.
    pub min_payout: u64,
    pub num_legs: u8,
 }

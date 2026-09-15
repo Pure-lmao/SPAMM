@@ -4,6 +4,7 @@ use pinocchio::{account::AccountView, error::ProgramError, hint::unlikely, Addre
 use pinocchio_log::log;
 use spamm_aggregator::{
    QuoteResult,
+   constants::ODDS_SCALE,
    state::{
       ix_common::{validate_event_state_sequence, validate_side_for_mkt},
       CASHOUT_QUOTE_RETURN_LEN, MarketId, ParlayLegQuoted, ParlayLegSel,
@@ -12,9 +13,7 @@ use spamm_aggregator::{
 
 use crate::mm_helpers::{mm_market_data_pda_ok, verify_event_state};
 
-pub use spamm_aggregator::parlay_helpers::{
-   product_parlay_odds, validate_parlay_same_event_odds,
-};
+pub use spamm_aggregator::parlay_helpers::product_parlay_odds;
 
 #[inline(always)]
 pub fn set_cashout_return(max_payment: u64) -> QuoteResult {
@@ -115,25 +114,28 @@ pub fn read_parlay_leg_market_odds(
    odds_from_market_data_body(market_id, &market_data[6..], leg.side)
 }
 
-/// Assign per-leg odds for quote buffer: first leg per `EventId` keeps market odds; companions get `0`.
+/// Fold same-event odds in place: each leg beyond the first of its `EventId` group has
+/// its odds multiplied into that group's first (representative) leg (checked,
+/// `ODDS_SCALE`-normalized) and is then zeroed, so every group ends with exactly one
+/// positive-odds leg.
 #[inline(always)]
-pub fn assign_same_event_companion_odds(
+pub fn fold_same_event_odds(
    num_legs: usize,
-   sels: &[ParlayLegSel],
-   market_odds: &[u32],
-   out: &mut [ParlayLegQuoted],
+   legs: &mut [ParlayLegQuoted],
 ) -> Result<(), ProgramError> {
-   if unlikely(sels.len() < num_legs || market_odds.len() < num_legs || out.len() < num_legs) {
+   if unlikely(legs.len() < num_legs) {
       return Err(ProgramError::InvalidInstructionData);
    }
    for i in 0..num_legs {
-      out[i] = sels[i].with_odds(market_odds[i]);
-   }
-   for i in 0..num_legs {
-      let event_i = out[i].market_id.event_id;
+      let event_i = legs[i].market_id.event_id;
       for j in (i + 1)..num_legs {
-         if out[j].market_id.event_id.eq(&event_i) {
-            out[j].odds_scaled = 0;
+         if legs[j].market_id.event_id.eq(&event_i) {
+            let folded = (legs[i].odds_scaled as u128)
+               .checked_mul(legs[j].odds_scaled as u128)
+               .and_then(|x| x.checked_div(ODDS_SCALE))
+               .ok_or(ProgramError::ArithmeticOverflow)?;
+            legs[i].odds_scaled = folded.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
+            legs[j].odds_scaled = 0;
          }
       }
    }

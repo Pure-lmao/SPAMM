@@ -1,19 +1,34 @@
 {
    "compilerOptions": {
-      "target": "ES2022",
-      "module": "ESNext",
-      "moduleResolution": "bundler",
-      "strict": true,
-      "skipLibCheck": true,
-      "noEmit": true,
-      "declaration": true,
-      "verbatimModuleSyntax": false,
-      "isolatedModules": true,
-      "noUnusedLocals": true,
-      "noUnusedParameters": true,
-      "noFallthroughCasesInSwitch": true,
-      "rootDir": "src",
-      "outDir": "dist"
+     "paths": {
+       "spamm-aggregator-sdk": ["../../../aggregator/sdk/ts/src/index.ts"]
+     },
+ 
+     // Environment setup & latest features
+     "lib": ["ESNext", "DOM"],
+     "target": "ESNext",
+     "module": "Preserve",
+     "moduleDetection": "force",
+     "jsx": "react-jsx",
+     "allowJs": true,
+ 
+     // Bundler mode
+     "moduleResolution": "bundler",
+     "allowImportingTsExtensions": true,
+     "verbatimModuleSyntax": true,
+     "noEmit": true,
+ 
+     // Best practices
+     "strict": true,
+     "skipLibCheck": true,
+     "noFallthroughCasesInSwitch": true,
+     "noUncheckedIndexedAccess": true,
+     "noImplicitOverride": true,
+ 
+     // Some stricter flags (disabled by default)
+     "noUnusedLocals": false,
+     "noUnusedParameters": false,
+     "noPropertyAccessFromIndexSignature": false
    },
-   "include": ["src/**/*.ts"]
-}
+   "include": ["./**/*.ts", "./**/*.tsx"]
+ }

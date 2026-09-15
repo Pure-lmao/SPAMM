@@ -92,6 +92,9 @@ pub fn get_rent(rent_sysvar: &AccountView, space: u64) -> Result<u64, ProgramErr
    }
    let lamports_per_byte = unsafe { read_u64_le_unchecked(rent_sysvar.data_ptr(), 0) };
    // (overhead + space) * lamports_per_byte
-   let rent = (128 + space) * lamports_per_byte;
+   let rent = (128u64).checked_add(space).and_then(|s| s.checked_mul(lamports_per_byte)).ok_or_else(|| {
+      log!("get_rent: arithmetic overflow");
+      ProgramError::ArithmeticOverflow
+   })?;
    Ok(rent)
 }

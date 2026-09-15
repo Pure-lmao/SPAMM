@@ -1,26 +1,34 @@
-/** Fields needed to resolve display line (DB `line_value` or `mkt_string` tail). */
+import { decodeMarketLine, resolveMarketDisplay } from "spamm-aggregator-sdk";
 import { formatMarketLineDisplay } from "./oddsFormat";
 
+/** Fields needed to resolve display line (DB `line_value` or wire `mkt`). */
 export type MarketLineSource = {
+   id?: number;
    mkt_string: string;
    line_value: number | null;
 };
 
-/**
- * Spread / total line string for `formatMarketLineDisplay` — prefers `line_value` from the DB
- * (signed spread, unsigned total).
- */
-export function lineRawForSpreadOrTotal(m: MarketLineSource, kind: "spread" | "total"): string {
+function wireLine(m: MarketLineSource): number | null {
    if (m.line_value !== null && Number.isFinite(m.line_value)) {
-      const v = m.line_value;
+      return m.line_value;
+   }
+   if (m.id != null) {
+      return decodeMarketLine(m.id);
+   }
+   return null;
+}
+
+export function lineRawForSpreadOrTotal(m: MarketLineSource, kind: "spread" | "total"): string {
+   const n = wireLine(m);
+   if (n !== null && Number.isFinite(n)) {
       if (kind === "total") {
-         return String(v);
+         return String(n);
       }
-      if (v > 0) {
-         return `+${v}`;
+      if (n > 0) {
+         return `+${n}`;
       }
-      if (v < 0) {
-         return String(v);
+      if (n < 0) {
+         return String(n);
       }
       return "0";
    }
@@ -33,31 +41,31 @@ export function lineRawForSpreadOrTotal(m: MarketLineSource, kind: "spread" | "t
    return "";
 }
 
-/** Numeric handicap for spread labels (home side line). */
 export function spreadHandicapNumber(m: MarketLineSource): number {
-   if (m.line_value !== null && Number.isFinite(m.line_value)) {
-      return m.line_value;
+   const n = wireLine(m);
+   if (n !== null && Number.isFinite(n)) {
+      return n;
    }
    const tail = m.mkt_string.replace(/^AH\s+/, "").trim();
    return Number(tail);
 }
 
-/** Total line for over/under labels. */
 export function totalLineNumber(m: MarketLineSource): number {
-   if (m.line_value !== null && Number.isFinite(m.line_value)) {
-      return m.line_value;
+   const n = wireLine(m);
+   if (n !== null && Number.isFinite(n)) {
+      return n;
    }
    const tail = m.mkt_string.replace(/^OU\s+/, "").trim();
    return Number(tail);
 }
 
-/** Display handicap for home (`0`) or away (`1`) from the home-centric wire line. */
 export function spreadLineDisplayForOutcome(m: MarketLineSource, outcomeIndex: 0 | 1): string {
    let h = spreadHandicapNumber(m);
-   if (!Number.isFinite(h)) {
-      const raw = lineRawForSpreadOrTotal(m, "spread");
-      const t = raw.trim().replace(/^\+/, "");
-      h = Number(t);
+   if (!Number.isFinite(h) && m.id != null) {
+      const family = resolveMarketDisplay(m.id).family;
+      if (family !== "spread" && family !== "asian") {
+         return "—";
+      }
    }
    if (!Number.isFinite(h)) {
       return "—";

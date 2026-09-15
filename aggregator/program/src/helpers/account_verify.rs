@@ -65,6 +65,24 @@ pub fn verify_bet_pda(
    Ok(())
 }
 
+/// Parlay ticket PDA seeds, verified against a raw account address.
+///
+/// Only reads the address, so it can be called while the account's data is
+/// (mutably) borrowed — unlike the `&AccountView` variants, since
+/// `AccountView::try_borrow_mut` holds the `AccountView` for the guard's lifetime.
+#[inline(always)]
+pub fn verify_parlay_pda_address(
+   address: &Address,
+   owner: &Address,
+   bet_id: u64,
+   bump: u8,
+) -> ProgramResult {
+   if unlikely(!address_eq(address, &derive_parlay_pda(owner, bet_id, bump))) {
+      return Err(ProgramError::InvalidSeeds);
+   }
+   Ok(())
+}
+
 /// Existing parlay ticket PDA: one `derive_parlay_pda` with the stored bump.
 #[inline(always)]
 pub fn verify_parlay_pda(
@@ -73,10 +91,7 @@ pub fn verify_parlay_pda(
    bet_id: u64,
    bump: u8,
 ) -> ProgramResult {
-   if unlikely(!address_eq(pda.address(), &derive_parlay_pda(owner, bet_id, bump))) {
-      return Err(ProgramError::InvalidSeeds);
-   }
-   Ok(())
+   verify_parlay_pda_address(pda.address(), owner, bet_id, bump)
 }
 
 /// Existing cashout ticket PDA: one `derive_cashout_pda` with the stored bump.
@@ -93,6 +108,24 @@ pub fn verify_cashout_pda(
    Ok(())
 }
 
+/// Cashout-parlay ticket PDA seeds, verified against a raw account address.
+///
+/// Only reads the address, so it can be called while the account's data is
+/// (mutably) borrowed — unlike the `&AccountView` variants, since
+/// `AccountView::try_borrow_mut` holds the `AccountView` for the guard's lifetime.
+#[inline(always)]
+pub fn verify_cashout_parlay_pda_address(
+   address: &Address,
+   mm: &Address,
+   cashout_id: u64,
+   bump: u8,
+) -> ProgramResult {
+   if unlikely(!address_eq(address, &derive_cashout_parlay_pda(mm, cashout_id, bump))) {
+      return Err(ProgramError::InvalidSeeds);
+   }
+   Ok(())
+}
+
 /// Existing cashout-parlay ticket PDA: one `derive_cashout_parlay_pda` with the stored bump.
 #[inline(always)]
 pub fn verify_cashout_parlay_pda(
@@ -101,10 +134,7 @@ pub fn verify_cashout_parlay_pda(
    cashout_id: u64,
    bump: u8,
 ) -> ProgramResult {
-   if unlikely(!address_eq(pda.address(), &derive_cashout_parlay_pda(mm, cashout_id, bump))) {
-      return Err(ProgramError::InvalidSeeds);
-   }
-   Ok(())
+   verify_cashout_parlay_pda_address(pda.address(), mm, cashout_id, bump)
 }
 
 pub fn verify_token_program(token_program: &AccountView) -> ProgramResult {

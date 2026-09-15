@@ -4,17 +4,18 @@ import { address, createSolanaRpc, type Rpc, type SolanaRpcApi } from '@solana/k
 import {
    useCluster,
    useConnectWallet,
-   useKitTransactionSigner,
    useWallet,
    useWalletConnectors,
 } from '@solana/connector/react';
+import { useAppTransactionSigner } from '../wallet/useAppTransactionSigner';
+import { signErrorMessageForUi } from '../wallet/walletStandardV1Signer';
 import {
    encodePrediction,
    getPredictionData,
    isScorePredictProgramDeployed,
    type PredictionKind,
 } from 'spamm-score-predict-sdk';
-import { resolveHttpRpcUrl } from '../betting/txPipeline';
+import { resolveAppHttpRpcUrl } from '../betting/txPipeline';
 import { formatFilledBetOdds } from '../betting/filledOdds';
 import { formatUsdcBaseUnitsForUi } from '../betting/usdc';
 import { fetchTodayContest } from '../scorePredict/fetchContest';
@@ -34,6 +35,7 @@ import { verifyTweetMatchesExpected } from '../scorePredict/verifyTweet';
 import { submitCreatePrediction } from '../scorePredict/createPredictionTx';
 import { parseEventTitleTeams } from '../scorePredict/parseEventTitleTeams';
 import type { ApiPredictionContest } from '../scorePredict/types';
+import '../scorePredict/scorePredict.css';
 
 function msUntil(deadline: number): string {
    const d = deadline - Date.now();
@@ -56,7 +58,7 @@ function scoreLabel(kind: PredictionKind, home: number, away: number, total: num
 export function ScorePredictPage(): ReactElement {
    const { isConnected, account } = useWallet();
    const { cluster } = useCluster();
-   const { signer, ready: signerReady } = useKitTransactionSigner();
+   const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
    const { connect, isConnecting: connectBusy, resetError } = useConnectWallet();
    const connectors = useWalletConnectors();
 
@@ -76,9 +78,7 @@ export function ScorePredictPage(): ReactElement {
    const [copyTweetLabel, setCopyTweetLabel] = useState<'Copy' | 'Copied'>('Copy');
 
    const rpc = useMemo((): Rpc<SolanaRpcApi> => {
-      // MAINNET: VITE_SOLANA_RPC_URL — see ui/.env.production
-      const url = resolveHttpRpcUrl(import.meta.env.VITE_SOLANA_RPC_URL ?? cluster?.url);
-      return createSolanaRpc(url);
+      return createSolanaRpc(resolveAppHttpRpcUrl(cluster?.url));
    }, [cluster?.url]);
 
    const kind = (contest?.kind ?? 'match_score') as PredictionKind;
@@ -206,7 +206,7 @@ export function ScorePredictPage(): ReactElement {
                setAlreadyEntered(false);
                return;
             }
-            const existing = await getPredictionData(rpc, address(account), contest.id);
+            const existing = await getPredictionData(rpc as never, address(account), contest.id);
             if (cancelled) {
                return;
             }
@@ -259,7 +259,7 @@ export function ScorePredictPage(): ReactElement {
          clearEntryDraft();
          setAlreadyEntered(true);
       } catch (e) {
-         setSubmitErr(e instanceof Error ? e.message : String(e));
+         setSubmitErr(signErrorMessageForUi(e, { walletName }));
       } finally {
          setSubmitting(false);
       }
@@ -274,6 +274,7 @@ export function ScorePredictPage(): ReactElement {
       rpc,
       predictionBytes,
       tweetUrl,
+      walletName,
    ]);
 
    const onCopyTweet = useCallback(async () => {

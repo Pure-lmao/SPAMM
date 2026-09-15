@@ -24,8 +24,6 @@ pub struct CashoutAccountHeader {
    pub bump: u8,
    pub mm: Address,
    pub feepayer: Address,
-   /// Original ticket owner (user). Escrow PDA seeds stay `(user, orig_bet_id)`
-   /// after the original bet PDA may have been closed.
    pub orig_owner: Address,
    pub orig_bet_id: u64,
    pub cashout_id: u64,

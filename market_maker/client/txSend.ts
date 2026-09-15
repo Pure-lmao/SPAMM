@@ -78,7 +78,15 @@ export function isRpcRateLimited(error: unknown): boolean {
    return false;
 }
 
-/** Retry RPC calls when the provider returns HTTP 429. */
+let rpcRateLimitCooldownUntilMs = 0;
+let rpcRateLimitStreak = 0;
+
+function rateLimitDelayMs(baseDelayMs: number, maxAttempts: number): number {
+   const exponent = Math.min(Math.max(rpcRateLimitStreak - 1, 0), maxAttempts - 2);
+   return baseDelayMs * 2 ** exponent;
+}
+
+/** Retry RPC calls when the provider returns HTTP 429. Backoff is process-wide across calls. */
 export async function withRpcRetry<T>(
    fn: () => Promise<T>,
    options?: Readonly<{ maxAttempts?: number; baseDelayMs?: number }>,
@@ -86,16 +94,35 @@ export async function withRpcRetry<T>(
    const maxAttempts = options?.maxAttempts ?? 6;
    const baseDelayMs = options?.baseDelayMs ?? 1000;
    let lastError: unknown;
+   let sawRateLimit = false;
    for (let attempt = 0; attempt < maxAttempts; attempt++) {
+      const cooldownMs = rpcRateLimitCooldownUntilMs - Date.now();
+      if (cooldownMs > 0) {
+         await new Promise((resolve) => setTimeout(resolve, cooldownMs));
+      }
       try {
-         return await fn();
+         const result = await fn();
+         if (sawRateLimit) {
+            rpcRateLimitCooldownUntilMs = Math.max(
+               rpcRateLimitCooldownUntilMs,
+               Date.now() + rateLimitDelayMs(baseDelayMs, maxAttempts),
+            );
+         } else {
+            rpcRateLimitStreak = 0;
+         }
+         return result;
       } catch (error) {
          lastError = error;
          if (!isRpcRateLimited(error) || attempt === maxAttempts - 1) {
             throw error;
          }
-         const delayMs = baseDelayMs * 2 ** attempt;
-         console.warn(`RPC rate limited, retrying in ${delayMs}ms (${attempt + 1}/${maxAttempts})`);
+         sawRateLimit = true;
+         rpcRateLimitStreak++;
+         const delayMs = rateLimitDelayMs(baseDelayMs, maxAttempts);
+         rpcRateLimitCooldownUntilMs = Math.max(rpcRateLimitCooldownUntilMs, Date.now() + delayMs);
+         console.warn(
+            `RPC rate limited, retrying in ${delayMs}ms (${attempt + 1}/${maxAttempts}, streak ${rpcRateLimitStreak})`,
+         );
          await new Promise((resolve) => setTimeout(resolve, delayMs));
       }
    }
@@ -188,6 +215,5 @@ export async function simulateTransaction(
    });
    const encodedTransaction = getBase64EncodedWireTransaction(transaction)
    const simulation = await rpc.simulateTransaction(encodedTransaction, {encoding: 'base64', sigVerify: false}).send();
-   console.log(simulation.value);
    return simulation.value.returnData?.data;
 }

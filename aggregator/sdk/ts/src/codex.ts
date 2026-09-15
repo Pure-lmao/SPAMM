@@ -43,11 +43,11 @@ import {
    type BetAccountData,
    type BetFiller,
    type CashoutAccountData,
-   type CashoutEscrow,
+   type CashoutEscrowAccountData,
    type CashoutParlayAccountData,
    type CashoutParlayLeg,
    type CashoutSnapshot,
-   type ConfigPdaData,
+   type ConfigAccountData,
    type EventGameState,
    type EventId,
    type EventStateData,
@@ -75,10 +75,10 @@ import {
    type GetCashoutQuoteParlayIxData,
    type GetQuoteParlayIxData,
    type MarketId,
-   type MmAccountConfig,
-   type MmEncumbrancePdaData,
-   type MmListPdaData,
-   type MmMarketDataPdaData,
+   type MMConfigAccountData,
+   type MmEncumbranceAccountData,
+   type MmListAccountData,
+   type MmMarketDataAccountData,
    type MmParlayQuoteBuffer,
    type MmQuoteBuffer,
    type MmReturnData,
@@ -94,8 +94,8 @@ import {
    proxyParlayQuoteDataLen,
    PROXY_QUOTE_DATA_LEN,
    type NettingLine,
-   type NettingPdaAccountData,
-   type NettingPdaDataHeader,
+   type NettingAccountData,
+   type NettingAccountDataHeader,
    type ParlayBetAccountData,
    type ParlayLegQuoted,
    type ParlayLegSel,
@@ -178,7 +178,7 @@ import {
    ISSUE_FREEBET_IX_HEADER_LEN,
    FreebetState,
    type FreebetAccountData,
-   type FreebetIssuer,
+   type FreebetIssuerAccountData,
    type IssueFreebetIxData,
    freebetAccountLen,
    issueFreebetIxDataLen,
@@ -186,6 +186,7 @@ import {
    parlayQuoteReturnWireLen,
    rfqCashoutParlayMessageLen,
    rfqParlayMessageLen,
+   DecodedAccountData,
 } from './types.js';
 
 import {
@@ -314,6 +315,12 @@ function sportFromWire(b: number): Sport {
          return Sport.IceHockey;
       case Sport.Tennis:
          return Sport.Tennis;
+      case Sport.Golf:
+         return Sport.Golf;
+      case Sport.Motorsports:
+         return Sport.Motorsports;
+      case Sport.Cricket:
+         return Sport.Cricket;
       case Sport.Cs2:
          return Sport.Cs2;
       case Sport.Dota:
@@ -571,7 +578,7 @@ export const getNettingLineDecoder = (): Decoder<NettingLine> =>
       ['open1', getI64Decoder()],
    ]);
 
-export const getNettingPdaHeaderEncoder = (): Encoder<NettingPdaDataHeader> =>
+export const getNettingPdaHeaderEncoder = (): Encoder<NettingAccountDataHeader> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
@@ -582,7 +589,7 @@ export const getNettingPdaHeaderEncoder = (): Encoder<NettingPdaDataHeader> =>
       ['numberOfLines', getU8Encoder()],
    ]);
 
-export const getNettingPdaHeaderDecoder = (): Decoder<NettingPdaDataHeader> =>
+export const getNettingPdaHeaderDecoder = (): Decoder<NettingAccountDataHeader> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
@@ -593,14 +600,14 @@ export const getNettingPdaHeaderDecoder = (): Decoder<NettingPdaDataHeader> =>
       ['numberOfLines', getU8Decoder()],
    ]);
 
-export const decodeNettingPdaAccountData = (data: ReadonlyUint8Array): NettingPdaAccountData => {
+export const decodeNettingAccountData = (data: ReadonlyUint8Array): NettingAccountData => {
    if (data.length < NETTING_HEADER_LEN) {
       throw new RangeError(`netting account data length ${data.length} < header ${NETTING_HEADER_LEN}`);
    }
    return getNettingPdaAccountDataDecoder().decode(new Uint8Array(data));
 };
 
-export const encodeNettingPdaAccountData = (account: NettingPdaAccountData): Uint8Array => {
+export const encodeNettingAccountData = (account: NettingAccountData): Uint8Array => {
    const { lines, ...header } = account;
    if (lines.length !== header.numberOfLines) {
       throw new RangeError('lines.length must match header.numberOfLines');
@@ -610,11 +617,11 @@ export const encodeNettingPdaAccountData = (account: NettingPdaAccountData): Uin
    }
    const occupied = NETTING_HEADER_LEN + lines.length * NETTING_LINE_LEN;
    const out = new Uint8Array(Math.max(NETTING_ACCOUNT_ALLOC_LEN, occupied));
-   out.set(getNettingPdaAccountDataEncoder().encode(account), 0);
+   out.set(getNettingAccountDataEncoder().encode(account), 0);
    return out;
 };
 
-const getNettingPdaAccountDataEncoder = (): Encoder<NettingPdaAccountData> =>
+const getNettingAccountDataEncoder = (): Encoder<NettingAccountData> =>
    transformEncoder(
       getStructEncoder([
          ['header', getNettingPdaHeaderEncoder()],
@@ -631,7 +638,7 @@ const getNettingPdaAccountDataEncoder = (): Encoder<NettingPdaAccountData> =>
       },
    );
 
-const getNettingPdaAccountDataDecoder = (): Decoder<NettingPdaAccountData> =>
+const getNettingPdaAccountDataDecoder = (): Decoder<NettingAccountData> =>
    transformDecoder(
       getStructDecoder([
          ['header', getNettingPdaHeaderDecoder()],
@@ -684,14 +691,14 @@ export const getMmQuoteBufferDecoder = (): Decoder<MmQuoteBuffer> =>
       ['eventStateSequence', getU16Decoder()],
    ]);
 
-export const getConfigPdaDataEncoder = (): Encoder<ConfigPdaData> =>
+export const getConfigAccountDataEncoder = (): Encoder<ConfigAccountData> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['status', getU8Encoder()],
       ['authority', getAddressEncoder()],
    ]);
 
-export const getConfigPdaDataDecoder = (): Decoder<ConfigPdaData> =>
+export const getConfigAccountDataDecoder = (): Decoder<ConfigAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['status', getU8Decoder()],
@@ -716,33 +723,33 @@ export const getEventStateDataDecoder = (): Decoder<EventStateData> =>
       ['gameState', getEventGameStateDecoder()],
    ]);
 
-export const getMmEncumbrancePdaDataEncoder = (): Encoder<MmEncumbrancePdaData> =>
+export const getMmEncumbranceAccountDataEncoder = (): Encoder<MmEncumbranceAccountData> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
       ['encumbrance', getI64Encoder()],
    ]);
 
-export const getMmEncumbrancePdaDataDecoder = (): Decoder<MmEncumbrancePdaData> =>
+export const getMmEncumbranceAccountDataDecoder = (): Decoder<MmEncumbranceAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
       ['encumbrance', getI64Decoder()],
    ]);
 
-export const getMmMarketDataPdaDataEncoder = (): Encoder<MmMarketDataPdaData> =>
+export const getMmMarketDataAccountDataEncoder = (): Encoder<MmMarketDataAccountData> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
    ]);
 
-export const getMmMarketDataPdaDataDecoder = (): Decoder<MmMarketDataPdaData> =>
+export const getMmMarketDataAccountDataDecoder = (): Decoder<MmMarketDataAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
    ]);
 
-export const getMmAccountConfigEncoder = (): Encoder<MmAccountConfig> =>
+export const getMmAccountConfigEncoder = (): Encoder<MMConfigAccountData> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
@@ -750,7 +757,7 @@ export const getMmAccountConfigEncoder = (): Encoder<MmAccountConfig> =>
       ['rfqSigner', getAddressEncoder()],
    ]);
 
-export const getMmAccountConfigDecoder = (): Decoder<MmAccountConfig> =>
+export const getMmAccountConfigDecoder = (): Decoder<MMConfigAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
@@ -758,25 +765,25 @@ export const getMmAccountConfigDecoder = (): Decoder<MmAccountConfig> =>
       ['rfqSigner', getAddressDecoder()],
    ]);
 
-const getMmListPdaDataEncoder = (): Encoder<MmListPdaData> =>
+const getMmListAccountDataEncoder = (): Encoder<MmListAccountData> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['numberOfMms', getU16Encoder()],
       ['mmProgramAddresses', getArrayEncoder(addrEncoder, { size: 'remainder' })],
    ]);
 
-const getMmListPdaDataDecoder = (): Decoder<MmListPdaData> =>
+const getMmListAccountDataDecoder = (): Decoder<MmListAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['numberOfMms', getU16Decoder()],
       ['mmProgramAddresses', getArrayDecoder(addrDecoder, { size: 'remainder' })],
    ]);
 
-export const decodeMmListPdaData = (data: ReadonlyUint8Array): MmListPdaData => {
+export const decodeMmListAccountData = (data: ReadonlyUint8Array): MmListAccountData => {
    if (data.length < MM_LIST_HEADER_LEN) {
       throw new RangeError(`mm_list data too short: ${data.length}`);
    }
-   const decoded = getMmListPdaDataDecoder().decode(new Uint8Array(data));
+   const decoded = getMmListAccountDataDecoder().decode(new Uint8Array(data));
    const expectLen = MM_LIST_HEADER_LEN + decoded.numberOfMms * ADDRESS_LEN;
    if (data.length !== expectLen) {
       throw new RangeError(`mm_list data length ${data.length} !== expected ${expectLen}`);
@@ -784,8 +791,8 @@ export const decodeMmListPdaData = (data: ReadonlyUint8Array): MmListPdaData => 
    return decoded;
 };
 
-export const encodeMmListPdaData = (list: MmListPdaData): Uint8Array => {
-   return new Uint8Array(getMmListPdaDataEncoder().encode(list));
+export const encodeMmListAccountData = (list: MmListAccountData): Uint8Array => {
+   return new Uint8Array(getMmListAccountDataEncoder().encode(list));
 };
 
 export const getMmReturnDataDecoder = (): Decoder<MmReturnData> =>
@@ -1656,7 +1663,7 @@ export function decodeFillRfqParlayCashoutIxData(data: ReadonlyUint8Array): Fill
    return getFillRfqParlayCashoutIxDataDecoder().decode(new Uint8Array(data));
 }
 
-export const getCashoutEscrowEncoder = (): Encoder<CashoutEscrow> =>
+export const getCashoutEscrowEncoder = (): Encoder<CashoutEscrowAccountData> =>
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
@@ -1672,7 +1679,7 @@ export const getCashoutEscrowEncoder = (): Encoder<CashoutEscrow> =>
       ['isParlay', getBoolU8Encoder()],
    ]);
 
-export const getCashoutEscrowDecoder = (): Decoder<CashoutEscrow> =>
+export const getCashoutEscrowDecoder = (): Decoder<CashoutEscrowAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
@@ -1688,7 +1695,7 @@ export const getCashoutEscrowDecoder = (): Decoder<CashoutEscrow> =>
       ['isParlay', getBoolU8Decoder()],
    ]);
 
-export const decodeCashoutEscrow = (data: ReadonlyUint8Array): CashoutEscrow => {
+export const decodeCashoutEscrowAccountData = (data: ReadonlyUint8Array): CashoutEscrowAccountData => {
    if (data.length !== CASHOUT_ESCROW_LEN) {
       throw new RangeError(`cashout escrow len ${data.length}; expected ${CASHOUT_ESCROW_LEN}`);
    }
@@ -2223,7 +2230,7 @@ export const getIssueFreebetIxDataDecoder = (): { decode: (data: ReadonlyUint8Ar
    decode: decodeIssueFreebetIxData,
 });
 
-export const getFreebetIssuerDecoder = (): Decoder<FreebetIssuer> =>
+export const getFreebetIssuerDecoder = (): Decoder<FreebetIssuerAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
@@ -2231,7 +2238,7 @@ export const getFreebetIssuerDecoder = (): Decoder<FreebetIssuer> =>
       ['openCount', getU32Decoder()],
    ]);
 
-export const decodeFreebetIssuer = (data: ReadonlyUint8Array): FreebetIssuer => {
+export const decodeFreebetIssuerAccountData = (data: ReadonlyUint8Array): FreebetIssuerAccountData => {
    if (data.length !== FREEBET_ISSUER_LEN) {
       throw new RangeError(`freebet issuer len ${data.length}; expected ${FREEBET_ISSUER_LEN}`);
    }
@@ -2503,11 +2510,11 @@ export const decodeMmQuoteBuffer = (data: ReadonlyUint8Array): MmQuoteBuffer => 
    return getMmQuoteBufferDecoder().decode(new Uint8Array(data));
 };
 
-export const decodeConfigPdaData = (data: ReadonlyUint8Array): ConfigPdaData => {
+export const decodeConfigAccountData = (data: ReadonlyUint8Array): ConfigAccountData => {
    if (data.length !== CONFIG_PDA_LEN) {
       throw new RangeError(`config pda len ${data.length}`);
    }
-   const decoded = getConfigPdaDataDecoder().decode(new Uint8Array(data));
+   const decoded = getConfigAccountDataDecoder().decode(new Uint8Array(data));
    if (decoded.discriminator !== CONFIG_PDA_DISCRIMINATOR) {
       throw new RangeError(
          `config discriminator ${decoded.discriminator}; expected ${CONFIG_PDA_DISCRIMINATOR}`,
@@ -2526,21 +2533,21 @@ export const decodeEventStateData = (data: ReadonlyUint8Array): EventStateData =
    return getEventStateDataDecoder().decode(new Uint8Array(data.subarray(0, EVENT_STATE_HEADER_LEN)));
 };
 
-export const decodeMmEncumbrancePdaData = (data: ReadonlyUint8Array): MmEncumbrancePdaData => {
+export const decodeMmEncumbranceAccountData = (data: ReadonlyUint8Array): MmEncumbranceAccountData => {
    if (data.length !== MM_ENCUMBRANCE_PDA_LEN) {
       throw new RangeError(`mm encumbrance len ${data.length}`);
    }
-   return getMmEncumbrancePdaDataDecoder().decode(new Uint8Array(data));
+   return getMmEncumbranceAccountDataDecoder().decode(new Uint8Array(data));
 };
 
-export const decodeMmMarketDataPdaData = (data: ReadonlyUint8Array): MmMarketDataPdaData => {
+export const decodeMmMarketDataAccountData = (data: ReadonlyUint8Array): MmMarketDataAccountData => {
    if (data.length < MM_MARKET_DATA_PDA_MIN_LEN) {
       throw new RangeError(`mm market data len ${data.length}`);
    }
-   return getMmMarketDataPdaDataDecoder().decode(new Uint8Array(data.subarray(0, MM_MARKET_DATA_PDA_MIN_LEN)));
+   return getMmMarketDataAccountDataDecoder().decode(new Uint8Array(data.subarray(0, MM_MARKET_DATA_PDA_MIN_LEN)));
 };
 
-export const decodeMmAccountConfig = (data: ReadonlyUint8Array): MmAccountConfig => {
+export const decodeMmAccountConfig = (data: ReadonlyUint8Array): MMConfigAccountData => {
    if (data.length < MM_CONFIG_PDA_HEADER_LEN) {
       throw new RangeError(`mm account config len ${data.length}`);
    }
@@ -2593,4 +2600,35 @@ export const decodeParlayBetAccountDataStrict = (data: ReadonlyUint8Array): Parl
    }
    const legs = decodeLiveParlayLegsBytes(data.subarray(PARLAY_BET_HEADER_LEN), header.numLegs);
    return { ...header, legs };
+};
+
+
+export const decodeAccountData = (data: ReadonlyUint8Array): DecodedAccountData => {
+   const disc = data[0];
+   switch (disc) {
+      case 1:
+         return { kind: 'betAccount', data: decodeBetAccountDataStrict(data) };
+      case 2:
+         return { kind: 'parlayBetAccount', data: decodeParlayBetAccountDataStrict(data) };
+      case 3:
+         return { kind: 'mmListAccount', data: decodeMmListAccountData(data) };
+      case 4:
+         return { kind: 'configAccount', data: decodeConfigAccountData(data) };
+      case 5:
+         return { kind: 'mmEncumbranceAccount', data: decodeMmEncumbranceAccountData(data) };
+      case 6:
+         return { kind: 'nettingAccount', data: decodeNettingAccountData(data) };
+      case 7:
+         return { kind: 'cashoutEscrowAccount', data: decodeCashoutEscrowAccountData(data) };
+      case 8:
+         return { kind: 'cashoutAccount', data: decodeCashoutAccountDataStrict(data) };
+      case 9:
+         return { kind: 'cashoutParlayAccount', data: decodeCashoutParlayAccountDataStrict(data) };
+      case 10:
+         return { kind: 'freebetIssuerAccount', data: decodeFreebetIssuerAccountData(data) };
+      case 11:
+         return { kind: 'freebetAccount', data: decodeFreebetAccountData(data) };
+      default:
+         throw new Error(`Unknown account discriminator: ${disc}`);
+   }
 };

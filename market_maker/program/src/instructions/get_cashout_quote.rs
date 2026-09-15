@@ -96,18 +96,16 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       }
    };
 
-   // Fair cash ≈ stake * ODDS_SCALE / current_odds (implied stake at live odds).
-   // Cap at P'-1 so MM keeps at least 1 unit of edge vs remaining payout.
-   let fair = ((parsed.amount as u128)
-      .checked_mul(ODDS_SCALE).and_then(|x| 
+   // Fair value of the cashed slice: its face payout at the fill odds (`payout` =
+   // proportional payout removed from the ticket) re-priced at the live odds.
+   // Unchanged odds => the stake slice back; shortened odds => profit; drifted => loss.
+   let fair = ((parsed.payout as u128)
+      .checked_mul(ODDS_SCALE).and_then(|x|
          x.checked_div(current_odds as u128))
       .unwrap_or(0)) as u64;
-   let cap = parsed.payout.saturating_sub(1);
-   let mut max_payment = core::cmp::min(fair, cap);
-   if max_payment < parsed.min_payout {
-      max_payment = 0;
-   }
-   if max_payment == 0 {
+   // `min_payout` is a floor on payment: soft-fail with 0 rather than quote below it.
+   // The aggregator enforces the same floor via `accept_cashout_payment`.
+   if fair == 0 || fair < parsed.min_payout {
       set_cashout_return(0)?;
       return Ok(());
    }
@@ -119,7 +117,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       user_address: *user.address(),
       market_id: parsed.market_id,
       side: parsed.side,
-      max_amount: max_payment,
+      max_amount: fair,
       odds_scaled: 0,
       event_game_state: parsed.event_game_state,
       event_state_sequence: parsed.event_state_sequence,
@@ -139,6 +137,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Ok(());
    }
 
-   set_cashout_return(max_payment)?;
+   set_cashout_return(fair)?;
    Ok(())
 }

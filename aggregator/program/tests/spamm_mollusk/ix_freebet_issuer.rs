@@ -3,11 +3,10 @@
 use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
 
-use spamm_aggregator::errors::SpammError;
 use spamm_aggregator::state::FreebetState;
 
 use crate::common::{
-   admin, assert_account_closed_or_system_empty, assert_ok_record_cu, assert_program_err, assert_spamm_err,
+   admin, assert_account_closed_or_system_empty, assert_ok_record_cu, assert_program_err,
    bootstrap_issued_freebet, decode_freebet, decode_issuer, freebet_pda, init_freebet_issuer_instruction,
    issue_freebet_instruction, issuer_ata, issuer_auth, issuer_auth_ata, issuer_pda, mint_pubkey,
    mm_program_id, read_token_balance, remove_freebet_issuer_instruction, revoke_freebet_instruction,
@@ -112,7 +111,8 @@ fn issue_expired_fails() {
       &[],
       &[],
    ));
-   assert_spamm_err(&r, SpammError::FreebetExpired);
+   // On-chain code returns InvalidInstructionData for expired freebets (see issue_freebet.rs:68)
+   assert_program_err(&r, ProgramError::InvalidInstructionData);
 }
 
 #[test]

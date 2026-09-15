@@ -9,6 +9,9 @@
 4 - Basketball
 5 - Ice Hockey
 6 - Tennis
+7 - Golf
+8 - Motorsports
+9 - Cricket
 101 - Counter-Strike 2
 102 - Dota 2
 103 - League of Legends
@@ -18,6 +21,7 @@
 
 ## League (u16 - max 65535)
 
+For most sports, the league id will be as follows:
 Digit 1 is the tier of the competition within it's `type` (e.g. Premier League = 1, Championship = 2)
 Digit 2 is the type of competition:
 
@@ -48,6 +52,12 @@ Digits 3-6 are the country code from ISO 3166-1 numeric with additions for non-I
 | Olympic Games | 930 |
 | International Friendly | 950 |
 | Club Friendly | 951 |
+
+For tennis, the league id will be as follows:
+[from the api provider?]
+
+For esports, the league id will be as follows:
+[from the api provider?]
 
 ## Event (u64 - max 18,446,744,073,709,551,615)
 
@@ -94,10 +104,66 @@ mkt start | mkt end | market | sides count | logic | sides meaning (in index ord
 | 4000 | 4999 | btts+ou | 4 | 4000+2*L | y-o, y-u, n-o, n-u
 | 5000 | 5999 | ft+ou | 6 | 5000+2*L | h-o, a-o, d-o, h-u, a-u, d-u
 | 10000 | 10909 | cs | 1 | [10][home score][0][away score] - scores max at 9	|
-| 11000 | 65535 | player props | 2 | 10000+player_prop_id+2*L | over, under |
+| 11000 | 65535 | player props | 2 | player_prop_id+2*L | over, under |
 
+Over/Under markets multiply the line by 2 to avoid x0.5 lines.
 player prop id | line type | notes
 |-------|-------|---------|
+| 11000+X (max X = 100) | Top X place | Player will finish in the top X places (golf, F1, etc.) (sides = yes/no) |
+| 11100+N | Nth Scorer | Player will be the Nth scorer (soccer, NFL, etc.) (Last Scorer market is N=99) (sides = yes/no) |
+| 11200 | Goals Scored | Player will score N goals. Anytime scorer is 11201, side 0 (over 0.5 goals) (soccer, ice hockey) |
+| 11300 | Shots On Target | Player will have N shots on target (soccer, ice hockey) |
+| 11400 | Shots | Player will have N shots (soccer, ice hockey) |
+| 11500 | To Be Fouled | Player will be fouled N times (soccer) |
+| 11600 | Fouls Committed | Player will commit N fouls (soccer) |
+| 11700 | Tackles Made | Player will make N tackles (soccer, american football) |
+| 11800 | Yellow Cards | Player will get N yellow cards (soccer) |
+| 11900 | Red Cards | Player will get N red cards (soccer) |
+| 12000 | Saves | Goalkeeper will make N saves (soccer, ice hockey) |
+| 12100 | Assists | Player will make N assists (soccer, ice hockey, basketball, american football) |
+| 13000 | Touchdowns | Player will score N touchdowns (american football) |
+| 13100 | Passing Touchdowns | Player will score N passing touchdowns (american football) |
+| 13200 | Interceptions Thrown | Player will throw N interceptions (american football) |
+| 13300 | Rush Attempts | RB will have N rush attempts (american football) |
+| 13400 | Receptions | RB will have N receptions (american football) |
+| 13500 | Sacks | Defensive player will make N sacks (american football) |
+| 13600 | Kicking Points | Kicker will score N kicking points (american football) |
+| 13700 | Interceptions Made | Defensive player will make N interceptions (american football) |
+| 13800 | Field Goals Made | Kicker will make N field goals (american football) |
+| 13900 | Extra Points Made | Kicker will make N extra points (american football) |
+| 14000 | Pitcher Strikeouts | Pitcher will make N strikeouts (baseball) |
+| 14100 | Pitcher Earned Runs | Pitcher will get N earned runs against (baseball) |
+| 14200 | Pitcher Outs | Pitcher will get N outs (baseball) |
+| 14300 | Pitcher Hits Allowed | Pitcher will allow N hits (baseball) |
+| 14400 | Pitcher Walks Issued | Pitcher will walk N batters (baseball) |
+| 14500..14900 | placeholder | Pitcher placeholder (baseball) |
+| 15000 | Home Runs | Batter will hit N home runs (baseball) |
+| 15100 | Runs | Batter will get N runs (baseball) |
+| 15200 | Hits | Batter will get N hits (baseball) |
+| 15300 | Total Bases | Batter will get N total bases (baseball) |
+| 15400 | Runs Batted In | Batter will get N runs batted in (baseball) |
+| 15500 | Strikeouts | Batter will get N strikeouts (baseball) |
+| 15600 | Stolen Bases | Batter will get N stolen bases (baseball) |
+| 15700 | Strikeouts | Batter will get N strikeouts (baseball) |
+| 15800 | Singles | Batter will get N singles (baseball) |
+| 15900 | Doubles | Batter will get N doubles (baseball) |
+| 16000 | Triples | Batter will get N triples (baseball) |
+| 16100 | Total Hits + Runs + RBIs | Batter will get N total hits + runs + RBIs (baseball) |
+| 16200..19900 | placeholder | placeholder, low scoring (basketball, ice hockey) |
+| 20000 | Passing Yards | Player will get N passing yards (american football) |
+| 21000 | Passing + Rushing Yards | Player will get N passing + rushing yards (american football) |
+| 22000 | Pass Attempts | Player will have N pass attempts (american football) |
+| 22500 | Pass Completions | Player will have N pass completions (american football) |
+| 23000 | Longest Pass Completion | Player's longest pass completion distance will be over/under N yards (american football) |
+| 23500 | Rushing Yards | Player will get N rushing yards (american football) |
+| 24000 | Rushing + Receiving Yards | Player will get N rushing + receiving yards (american football) |
+| 24500 | Longest Rush | Player's longest rush distance will be over/under N yards (american football) |
+| 25000 | Receiving Yards | Player will get N receiving yards (american football) |
+| 25500 | Longest Reception | Player's longest reception distance will be over/under N yards (american football) |
+| 26000..28500 | placeholder | placeholder (american football) |
+| 29000 | Fantasy Points | Player will get N fantasy points (american football) |
+
+
 
 ## Player (u64 - max 18,446,744,073,709,551,615)
 

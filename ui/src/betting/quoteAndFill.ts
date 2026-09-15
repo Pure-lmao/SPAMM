@@ -1,20 +1,28 @@
 import type { Address, Rpc, SolanaRpcApi, TransactionSigner } from "@solana/kit";
 import {
+   decodeProxyParlayQuoteReturnData,
    decodeProxyQuoteReturnData,
    getFillBetIx,
    getFillParlayIx,
+   getFillRfqIxFromData,
+   getFreebetFillBetIx,
+   getFreebetFillParlayIx,
+   getFreebetFillRfqBetIx,
+   getFreebetFillRfqParlayIx,
    getGetParlayQuoteProxyIx,
    getGetQuoteProxyIx,
+   MAX_NUMBER_OF_MMS,
    MAX_NUMBER_OF_MMS_PROXY,
    ODDS_SCALE,
    type FillParlayIxData,
    type MarketId,
    type ParlayLegSel,
    type ProxyQuoteData,
+   type RfqFillIxFromQuote,
 } from "spamm-aggregator-sdk";
 import { DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG } from "./chainIds";
 import { getMmListCached } from "./mmCache";
-import { buildSignV0Transaction, simulateInstructionReturnData } from "./txPipeline";
+import { buildSignV1Transaction, simulateInstructionReturnData } from "./txPipeline";
 
 const QUOTE_PROBE_MIN_ODDS = ODDS_SCALE + 100n;
 /** Unused on-chain for quote-proxy instructions; must be > 0 for SDK validation. */
@@ -45,6 +53,22 @@ export type QuoteFlowResult = Readonly<{
    errors: string[];
 }>;
 
+function intersectAllowedMms(
+   registered: readonly Address[],
+   allowed: readonly Address[] | undefined,
+): Address[] {
+   if (allowed == null || allowed.length === 0) {
+      return [...registered];
+   }
+   const set = new Set(allowed);
+   return registered.filter((m) => set.has(m));
+}
+
+export type FreebetFillRef = Readonly<{
+   issuerAuth: Address;
+   freebetId: number;
+}>;
+
 export async function runMmQuoteFlow(params: {
    rpc: Rpc<SolanaRpcApi>;
    userAddress: Address;
@@ -52,10 +76,14 @@ export async function runMmQuoteFlow(params: {
    side: number;
    /** Stake in USDC base units (6 decimals: multiply whole USDC by 10^6). */
    amount: bigint;
+   allowedMms?: readonly Address[];
 }): Promise<QuoteFlowResult> {
    const errors: string[] = [];
    const mmList = await getMmListCached(params.rpc);
-   const mmPrograms = mmList.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY);
+   const mmPrograms = intersectAllowedMms(
+      mmList.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY),
+      params.allowedMms,
+   );
 
    if (mmPrograms.length === 0) {
       return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors };
@@ -75,7 +103,7 @@ export async function runMmQuoteFlow(params: {
          params.userAddress,
          mmPrograms,
       );
-      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress, true);
+      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress);
       if (!returnData || returnData.length === 0) {
          return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors };
       }
@@ -107,23 +135,37 @@ export async function buildAndSignFillBetTx(params: {
    };
    mmPrograms: readonly Address[];
    hasActiveNetting?: boolean;
-}): Promise<ReturnType<typeof buildSignV0Transaction>> {
-   const ix = await getFillBetIx(
-      {
-         betId: params.fill.betId,
-         marketId: params.fill.marketId,
-         side: params.fill.side,
-         amount: params.fill.amount,
-         minOddsScaled: params.fill.minOddsScaled,
-         eventStateSequence: DEFAULT_EVENT_STATE_SEQUENCE,
-         eventGameState: EVENT_GAME_STATE_PG,
-      },
-      params.userAddress,
-      params.userAddress,
-      params.mmPrograms,
-      params.hasActiveNetting ?? false,
-   );
-   return buildSignV0Transaction(params.rpc, {
+   freebet?: FreebetFillRef;
+}): Promise<ReturnType<typeof buildSignV1Transaction>> {
+   const fillBody = {
+      betId: params.fill.betId,
+      marketId: params.fill.marketId,
+      side: params.fill.side,
+      amount: params.fill.amount,
+      minOddsScaled: params.fill.minOddsScaled,
+      eventStateSequence: DEFAULT_EVENT_STATE_SEQUENCE,
+      eventGameState: EVENT_GAME_STATE_PG,
+   };
+   const mmPrograms = params.mmPrograms.slice(0, MAX_NUMBER_OF_MMS);
+   const ix =
+      params.freebet == null
+         ? await getFillBetIx(
+              fillBody,
+              params.userAddress,
+              params.userAddress,
+              mmPrograms,
+              params.hasActiveNetting ?? false,
+           )
+         : await getFreebetFillBetIx(
+              fillBody,
+              params.userAddress,
+              params.userAddress,
+              params.freebet.issuerAuth,
+              params.freebet.freebetId,
+              mmPrograms,
+              params.hasActiveNetting ?? false,
+           );
+   return buildSignV1Transaction(params.rpc, {
       feePayer: params.walletSigner,
       instructions: [ix],
       signers: [params.walletSigner],
@@ -135,10 +177,14 @@ export async function runMmParlayQuoteFlow(params: {
    userAddress: Address;
    legs: readonly ParlayLegSel[];
    amount: bigint;
+   allowedMms?: readonly Address[];
 }): Promise<QuoteFlowResult & { bestMm: MmQuoteRow | null }> {
    const errors: string[] = [];
    const mmList = await getMmListCached(params.rpc);
-   const mmPrograms = mmList.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY);
+   const mmPrograms = intersectAllowedMms(
+      mmList.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY),
+      params.allowedMms,
+   );
 
    if (mmPrograms.length === 0) {
       return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors, bestMm: null };
@@ -151,16 +197,16 @@ export async function runMmParlayQuoteFlow(params: {
             amount: params.amount,
             minOddsScaled: QUOTE_PROBE_MIN_ODDS,
             numLegs: params.legs.length,
-            legs: params.legs,
+            legs: [...params.legs],
          },
          params.userAddress,
          mmPrograms,
       );
-      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress, false);
+      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress);
       if (!returnData || returnData.length === 0) {
          return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors, bestMm: null };
       }
-      const sorted = proxyQuotesToRows(decodeProxyQuoteReturnData(returnData), params.amount);
+      const sorted = proxyQuotesToRows(decodeProxyParlayQuoteReturnData(returnData), params.amount);
       const best = sorted[0] ?? null;
       const conservativeMinOddsScaled =
          best === null
@@ -185,9 +231,57 @@ export async function buildAndSignFillParlayTx(params: {
    userAddress: Address;
    fill: FillParlayIxData;
    mmProgram: Address;
-}): Promise<ReturnType<typeof buildSignV0Transaction>> {
-   const ix = await getFillParlayIx(params.fill, params.userAddress, params.userAddress, params.mmProgram);
-   return buildSignV0Transaction(params.rpc, {
+   freebet?: FreebetFillRef;
+}): Promise<ReturnType<typeof buildSignV1Transaction>> {
+   const ix =
+      params.freebet == null
+         ? await getFillParlayIx(params.fill, params.userAddress, params.userAddress, params.mmProgram)
+         : await getFreebetFillParlayIx(
+              params.fill,
+              params.userAddress,
+              params.userAddress,
+              params.freebet.issuerAuth,
+              params.freebet.freebetId,
+              params.mmProgram,
+           );
+   return buildSignV1Transaction(params.rpc, {
+      feePayer: params.walletSigner,
+      instructions: [ix],
+      signers: [params.walletSigner],
+   });
+}
+
+export async function buildAndSignFillRfqTx(params: {
+   rpc: Rpc<SolanaRpcApi>;
+   walletSigner: TransactionSigner;
+   userAddress: Address;
+   fill: RfqFillIxFromQuote;
+   freebet?: FreebetFillRef;
+}): Promise<ReturnType<typeof buildSignV1Transaction>> {
+   let ix;
+   if (params.freebet == null) {
+      ix = await getFillRfqIxFromData(params.fill, params.userAddress, params.userAddress, false);
+   } else if (params.fill.kind === "fillRfqBet") {
+      ix = await getFreebetFillRfqBetIx(
+         params.fill.data,
+         params.userAddress,
+         params.userAddress,
+         params.freebet.issuerAuth,
+         params.freebet.freebetId,
+         params.fill.mmProgram,
+         false,
+      );
+   } else {
+      ix = await getFreebetFillRfqParlayIx(
+         params.fill.data,
+         params.userAddress,
+         params.userAddress,
+         params.freebet.issuerAuth,
+         params.freebet.freebetId,
+         params.fill.mmProgram,
+      );
+   }
+   return buildSignV1Transaction(params.rpc, {
       feePayer: params.walletSigner,
       instructions: [ix],
       signers: [params.walletSigner],

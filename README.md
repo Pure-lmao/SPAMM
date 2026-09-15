@@ -15,7 +15,7 @@ In addition to the competitive, onchain `get_quote` / `fill_quote` auction, a SP
 
 The aggregator also supports **cashout** for bets and parlays. For single bets, an onchain auction takes place between the 5 best offchain quotes and the bet is purchased by the highest bidding SPAMM. For parlays, the frontend gets the best quote and the cashout is purchased by that SPAMM. An RFQ path is also available for cashout.
 
-Freebets can be issued by any Frontend Issuer to any user. The freebets are PDA that allow for a user to place a bet without any risk to themselves. Funds are transferred from the Issuer to the bet at placement time. If the user wins, they get the profit from the market maker and the freebet funds are returned to the Issuers. If the user loses, the market maker gets the stake. For this reason, the Issuer can limit the use of the freebet to specific `Market Operators` (to ensure it is used with a trusted source) and market makers to allow for using it at an affiliated SPAMM(s) so the funds come back to the Issuer.
+Freebets can be issued by any Freebet Issuer to any user. The freebets are PDA that allow for a user to place a bet without any risk to themselves. Funds are transferred from the Issuer to the bet at placement time. If the user wins, they get the profit from the market maker and the freebet funds are returned to the Issuers. If the user loses, the market maker gets the stake. For this reason, the Issuer can limit the use of the freebet to specific `Market Operators` (to ensure it is used with a trusted source) and market makers to allow for using it at an affiliated SPAMM(s) so the funds come back to the Issuer.
 
 There are many ways SPAMMs could work:
 
@@ -42,7 +42,7 @@ There are many ways SPAMMs could work:
 | SPAMM | A Solana program that does onchain pricing of markets based on onchain data updated by the offchain backend. |
 | User | A wallet that places bets - usually via a `Frontend` but could be via pulling the API and building the transaction themselves. |
 | Frontend | A way to display markets, fetch quotes, and construct Solana transactions for placing bets. Frontends might act as a `Feepayer` for users, and call `settle_bet` on behalf of the user for a better experience. |
-| Feepayer | A key that pays the fees for transactions. They rent is returned to the Feepayer upon the bet being settled. |
+| Feepayer | A key that pays the fees for transactions. The rent is returned to the Feepayer upon the bet being settled. |
 | Freebet Issuer | A key that issues and funds freebet to users (usually a `Frontend`). Since all bets are filled by a `SPAMM`, the funds for a freebet must be collateralised at fill time, meaning the Issuer must have funds to transfer. The freebet data can limit the use to specific `Market Operators` (to ensure it is used with a trusted source) and `SPAMM`s (to allow for using at affiliated SPAMMs so the funds are more circular if desired). |
 
 ## Deployment
@@ -194,7 +194,7 @@ struct GetQuoteParlayIxData {
    instruction_discriminator: u8, // 122
    amount: u64,
    odds_scaled: u32, // minimum acceptable combined parlay odds (scaled);
-   num_legs: u8,     // L, 2..=MAX_PARLAY_LEGS
+   num_legs: u8,     // 2..=MAX_PARLAY_LEGS
    legs: [ParlayLegSel; num_legs],
 }
 struct ParlayLegSel {
@@ -227,7 +227,7 @@ The function **MUST** return the following data for a valid quote:
 struct GetQuoteParlayReturnData {
    max_amount: u64, // the maximum amount the user can bet at the given combined odds
    odds_scaled: u32, // the combined decimal odds scaled by ODDS_SCALE from the perspective of the taking user. Must be = Π(leg_odds_scaled)
-   num_legs: u8, // L, 2..=MAX_PARLAY_LEGS (max 20)
+   num_legs: u8, // 2..=MAX_PARLAY_LEGS (max 20)
    leg_odds_scaled: [u32; num_legs], // per-leg decimal odds scaled by ODDS_SCALE
 }
 ```
@@ -505,7 +505,7 @@ struct GetCashoutQuoteParlayIxData {
    amount: u64,                   // stake slice being cashed
    payout: u64,                   // proportional payout removed from the ticket
    min_payout: u64,               // floor on payment
-   num_legs: u8,                  // L, 2..=MAX_PARLAY_LEGS
+   num_legs: u8,                  // 2..=MAX_PARLAY_LEGS
    legs: [ParlayLegSel; num_legs],
 }
 ```

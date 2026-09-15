@@ -1,12 +1,12 @@
 
 
-export type Sport = {
+export type DbSport = {
    id: number;
    name: string;
    api_id: string;
 };
 
-export type League = {
+export type DbLeague = {
    id: number;
    sport_id: number;
    name: string;
@@ -18,7 +18,7 @@ export type League = {
    api_id: string;
 };
 
-export type Event = {
+export type DbEvent = {
    id: number;
    league_id: number;
    sport_id: number;
@@ -31,16 +31,19 @@ export type Event = {
    away_score: number | null;
 };
 
-export type Market = {
+export type DbMarket = {
    id: number;
    event_id: number;
    league_id: number;
    sport_id: number;
    period_id: number;
+   player_id: number;
+   player_name: string;
    line_value: number | null;
    last_odds: string;
    last_update: number;
    mkt_string: string;
+   operator: string;
 };
 
 export type PromotionalMarketStatus = 'open' | 'settled';
@@ -74,7 +77,7 @@ export type PromotionalMarket = {
 };
 
 /** One event inside `GroupedLeague.events`; `markets` set when fetched with `withMarkets`. */
-export type GroupedEvent = Event & { markets?: Market[] };
+export type GroupedEvent = DbEvent & { markets?: DbMarket[] };
 
 export type GroupedLeague = {
    id: number;
@@ -229,6 +232,108 @@ export type ESPNOdds = {
       close: ESPNOddsSet;
       current: ESPNOddsSet;
    }[]
+}
+
+export type ESPNPropsResponse = {
+   error?: {message: string, code: number};
+   count: number;
+   pageIndex: number;
+   pageSize: number;
+   pageCount: number;
+   items: ESPNProps[];
+}
+
+export type ESPNProps = ESPNPropsWithOdds | ESPNPropsWithCurrentWithOdds | ESPNPropsWithCurrentLine;
+
+export type ESPNPropsBase = {
+   competition: {
+      "$ref": string;
+   };
+   athlete: {
+      "$ref": string;
+   };
+   provider: {
+      "$ref": string;
+   };
+   type: {
+      id: string;
+      name: string;
+   };
+   lastUpdated: string;
+}
+export type ESPNPropsWithOdds = ESPNPropsBase & {
+   odds: {
+      american: {
+         value: string;
+         open: string;
+      },
+      decimal: {
+         value: string;
+         open: string;
+      },
+      fraction: {
+         value: string;
+         open: string;
+      },
+      total: {
+         value: string;
+         open: string;
+      }
+   },
+   current: {
+      target: {
+         value: number;
+         displayValue: string;
+      }
+   },
+   open: {
+      target: {
+         value: number;
+         displayValue: string;
+      }
+   }
+}
+
+export type ESPNPropsWithCurrentWithOdds = ESPNPropsBase & {
+   current: {
+      over: {
+         value: number;
+         displayValue: string;
+         alternateDisplayValue: string;
+         decimal: string;
+         fraction: string;
+         american: string;
+      }
+   },
+   target: {
+      value: number;
+      displayValue: string;
+   },
+   open: {
+      over: {
+         value: number;
+         displayValue: string;
+         alternateDisplayValue: string;
+         decimal: number;
+         fraction: string;
+         american: string;
+      }
+   }
+}
+
+export type ESPNPropsWithCurrentLine = ESPNPropsBase & {
+   current: {
+      target: {
+         value: number;
+         displayValue: string;
+      }
+   },
+   open: {
+      target: {
+         value: number;
+         displayValue: string;
+      }
+   }
 }
 
 type ESPNTeamOdds = {

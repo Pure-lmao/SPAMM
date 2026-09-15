@@ -1,10 +1,10 @@
 
 import { Database } from "bun:sqlite";
 import type {
-   Sport,
-   League,
-   Event,
-   Market,
+   DbSport,
+   DbLeague,
+   DbEvent,
+   DbMarket,
    GroupedSport,
    GroupedLeague,
    GroupedEvent,
@@ -19,6 +19,7 @@ import type {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sportsTodayDateString } from './sportsDay';
+import { DEFAULT_MARKET_OPERATOR } from "./utils";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const DB_PATH = path.join(__dirname, "data.db");
@@ -95,14 +96,17 @@ function initMarketTable(): void {
          league_id INTEGER NOT NULL,
          sport_id INTEGER NOT NULL,
          period_id INTEGER NOT NULL,
+         player_id INTEGER NOT NULL,
+         player_name TEXT NOT NULL,
          line_value DECIMAL(5, 2),
          last_odds TEXT NOT NULL,
          last_update INTEGER NOT NULL,
          mkt_string TEXT NOT NULL,
+         operator TEXT NOT NULL,
          FOREIGN KEY (event_id) REFERENCES events (event_id),
          FOREIGN KEY (league_id) REFERENCES leagues (id),
          FOREIGN KEY (sport_id) REFERENCES sports (id),
-         PRIMARY KEY (id, event_id, league_id, sport_id)
+         PRIMARY KEY (id, event_id, league_id, sport_id, period_id, player_id)
       );
    `);
 }
@@ -128,12 +132,12 @@ export function initTables(): void {
 
 // ---- Fetch (whole table) ----
 
-export function fetchSports(ids: number[] = []): Map<number, Sport> {
+export function fetchSports(ids: number[] = []): Map<number, DbSport> {
    const database = getDb();
-   const rows = database.query<Sport, string[]>(
+   const rows = database.query<DbSport, string[]>(
       `SELECT * FROM sports ${ids.length > 0 ? `WHERE id IN (${ids.map(() => `?`).join(",")})` : ""}`
    ).all(...ids.map((id) => id.toString()));
-   const map = new Map<number, Sport>();
+   const map = new Map<number, DbSport>();
    for (const r of rows) {
       map.set(r.id, r);
    }
@@ -141,24 +145,24 @@ export function fetchSports(ids: number[] = []): Map<number, Sport> {
 }
 
 // console.log(fetchLeagues())
-export function fetchLeagues(ids: number[] = []): Map<string, League> {
+export function fetchLeagues(ids: number[] = []): Map<string, DbLeague> {
    const database = getDb();
-   const rows = database.query<League, string[]>(
+   const rows = database.query<DbLeague, string[]>(
       `SELECT * FROM leagues ${ids.length > 0 ? `WHERE id IN (${ids.map(() => `?`).join(",")})` : ""}`
    ).all(...ids.map((id) => id.toString()));
-   const map = new Map<string, League>();
+   const map = new Map<string, DbLeague>();
    for (const r of rows) {
       map.set(`${r.sport_id}:${r.id}`, r);
    }
    return map;
 }
 
-export function fetchLeaguesBySport(sportId: number): Map<number, League> {
+export function fetchLeaguesBySport(sportId: number): Map<number, DbLeague> {
    const database = getDb();
-   const rows = database.query<League, string[]>(
+   const rows = database.query<DbLeague, string[]>(
       `SELECT * FROM leagues WHERE sport_id = ?`
    ).all(sportId.toString());
-   const map = new Map<number, League>();
+   const map = new Map<number, DbLeague>();
    for (const r of rows) {
       map.set(r.sport_id, r);
    }
@@ -176,10 +180,13 @@ const MARKETS_AGG_JOIN = `
                'league_id', league_id,
                'sport_id', sport_id,
                'period_id', period_id,
+               'player_id', player_id,
+               'player_name', player_name,
                'line_value', line_value,
                'last_odds', last_odds,
                'last_update', last_update,
-               'mkt_string', mkt_string
+               'mkt_string', mkt_string,
+               'operator', operator
             )
          ) AS markets_json
       FROM markets
@@ -187,25 +194,25 @@ const MARKETS_AGG_JOIN = `
    ) m ON m.event_id = e.id
 `;
 
-type EventMarketsRow = Event & { markets_json: string };
+type EventMarketsRow = DbEvent & { markets_json: string };
 
-function rowsToEventsWithMarketsMap(rows: EventMarketsRow[]): Map<string, Event & { markets: Market[] }> {
-   const map = new Map<string, Event & { markets: Market[] }>();
+function rowsToEventsWithMarketsMap(rows: EventMarketsRow[]): Map<string, DbEvent & { markets: DbMarket[] }> {
+   const map = new Map<string, DbEvent & { markets: DbMarket[] }>();
    for (const r of rows) {
       const { markets_json, ...event } = r;
-      const markets = JSON.parse(markets_json) as Market[];
+      const markets = JSON.parse(markets_json) as DbMarket[];
       map.set(`${event.sport_id}:${event.league_id}:${event.id}`, { ...event, markets });
    }
    return map;
 }
 
-export function fetchEvents(ids: number[] = [], withMarkets: boolean = false): Map<string, Event> | Map<string, Event & { markets: Market[] }> {
+export function fetchEvents(ids: number[] = [], withMarkets: boolean = false): Map<string, DbEvent> | Map<string, DbEvent & { markets: DbMarket[] }> {
    const database = getDb();
    const idFilter = ids.length > 0 ? `WHERE id IN (${ids.map(() => "?").join(",")})` : "";
    const idParams = ids.map((id) => id.toString());
    if (!withMarkets) {
-      const rows = database.query<Event, string[]>(`SELECT * FROM events ${idFilter}`).all(...idParams);
-      const map = new Map<string, Event>();
+      const rows = database.query<DbEvent, string[]>(`SELECT * FROM events ${idFilter}`).all(...idParams);
+      const map = new Map<string, DbEvent>();
       for (const r of rows) {
          map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
       }
@@ -219,20 +226,20 @@ export function fetchEvents(ids: number[] = [], withMarkets: boolean = false): M
    }
 }
 
-export function fetchUngradedStartedEvents(): Map<string, Event> {
+export function fetchUngradedStartedEvents(): Map<string, DbEvent> {
    const database = getDb();
-   const rows = database.query<Event, string[]>(`SELECT * FROM events WHERE start_time < ? AND home_score IS NULL AND away_score IS NULL`).all(Date.now().toString());
-   const map = new Map<string, Event>();
+   const rows = database.query<DbEvent, string[]>(`SELECT * FROM events WHERE start_time < ? AND home_score IS NULL AND away_score IS NULL`).all(Date.now().toString());
+   const map = new Map<string, DbEvent>();
    for (const r of rows) {
       map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
    }
    return map;
 }
 
-export function fetchGradedStartedEvents(): Map<string, Event> {
+export function fetchGradedStartedEvents(): Map<string, DbEvent> {
    const database = getDb();
-   const rows = database.query<Event, string[]>(`SELECT * FROM events WHERE start_time < ? AND home_score IS NOT NULL AND away_score IS NOT NULL`).all(Date.now().toString());
-   const map = new Map<string, Event>();
+   const rows = database.query<DbEvent, string[]>(`SELECT * FROM events WHERE start_time < ? AND home_score IS NOT NULL AND away_score IS NOT NULL`).all(Date.now().toString());
+   const map = new Map<string, DbEvent>();
    for (const r of rows) {
       map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
    }
@@ -257,24 +264,24 @@ function uniqueSportLeaguePairs(rows: { sport_id: number; league_id: number }[])
 export function fetchEventsGrouped(withMarkets: boolean = false): GroupedSport[] {
    const database = getDb();
    type EvRow = { sport_id: number; league_id: number; start_time: number };
-   let rawRows: (Event | EventMarketsRow)[];
+   let rawRows: (DbEvent | EventMarketsRow)[];
    if (withMarkets) {
       rawRows = database.query<EventMarketsRow, string[]>(
          `SELECT e.*, COALESCE(m.markets_json, '[]') AS markets_json FROM events e ${MARKETS_AGG_JOIN} WHERE e.start_time > ? ORDER BY e.sport_id, e.league_id, e.start_time`
       ).all(Date.now().toString());
    } else {
-      rawRows = database.query<Event, []>(
+      rawRows = database.query<DbEvent, []>(
          "SELECT * FROM events ORDER BY sport_id, league_id, start_time"
       ).all();
    }
 
-   const toGroupedEvent = (row: Event | EventMarketsRow): GroupedEvent => {
+   const toGroupedEvent = (row: DbEvent | EventMarketsRow): GroupedEvent => {
       if (!withMarkets) {
-         return row as Event;
+         return row as DbEvent;
       }
       const r = row as EventMarketsRow;
       const { markets_json, ...event } = r;
-      return { ...event, markets: JSON.parse(markets_json) as Market[] };
+      return { ...event, markets: JSON.parse(markets_json) as DbMarket[] };
    };
 
    const eventsBySportLeague = new Map<string, GroupedEvent[]>();
@@ -301,21 +308,21 @@ export function fetchEventsGrouped(withMarkets: boolean = false): GroupedSport[]
    const leagueRows =
       pairs.length === 0
          ? []
-         : database.query<League, string[]>(
+         : database.query<DbLeague, string[]>(
               `SELECT * FROM leagues WHERE (sport_id, id) IN (VALUES ${leaguePlaceholders})`
            ).all(...leagueParams);
 
-   const leagueByKey = new Map<string, League>();
+   const leagueByKey = new Map<string, DbLeague>();
    for (const L of leagueRows) {
       leagueByKey.set(`${L.sport_id}:${L.id}`, L);
    }
 
    const sportPlaceholders = sportIds.map(() => "?").join(",");
-   const sportRows = database.query<Sport, string[]>(
+   const sportRows = database.query<DbSport, string[]>(
       `SELECT * FROM sports WHERE id IN (${sportPlaceholders}) ORDER BY id`
    ).all(...sportIds.map((id) => id.toString()));
 
-   const sportById = new Map<number, Sport>();
+   const sportById = new Map<number, DbSport>();
    for (const s of sportRows) {
       sportById.set(s.id, s);
    }
@@ -358,13 +365,13 @@ export function fetchEventsGrouped(withMarkets: boolean = false): GroupedSport[]
 }
 
 
-export function fetchEventsBySport(sportIds: number[] = [], withMarkets: boolean = false): Map<string, Event> | Map<string, Event & { markets: Market[] }> {
+export function fetchEventsBySport(sportIds: number[] = [], withMarkets: boolean = false): Map<string, DbEvent> | Map<string, DbEvent & { markets: DbMarket[] }> {
    const database = getDb();
    if (!withMarkets) {
-      const rows = database.query<Event, string[]>(
+      const rows = database.query<DbEvent, string[]>(
          `SELECT * FROM events WHERE sport_id IN (${sportIds.map(() => `?`).join(",")})`
       ).all(...sportIds.map((id) => id.toString()));
-      const map = new Map<string, Event>();
+      const map = new Map<string, DbEvent>();
       for (const r of rows) {
          map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
       }
@@ -377,13 +384,13 @@ export function fetchEventsBySport(sportIds: number[] = [], withMarkets: boolean
    }
 }
 
-export function fetchEventsByLeague(sportId: number, leagueIds: number[] = [], withMarkets: boolean = false): Map<string, Event> | Map<string, Event & { markets: Market[] }> {
+export function fetchEventsByLeague(sportId: number, leagueIds: number[] = [], withMarkets: boolean = false): Map<string, DbEvent> | Map<string, DbEvent & { markets: DbMarket[] }> {
    const database = getDb();
    if (!withMarkets) {
-      const rows = database.query<Event, string[]>(
+      const rows = database.query<DbEvent, string[]>(
          `SELECT * FROM events WHERE sport_id = ? AND league_id IN (${leagueIds.map(() => `?`).join(",")})`
       ).all(sportId.toString(), ...leagueIds.map((id) => id.toString()));
-      const map = new Map<string, Event>();
+      const map = new Map<string, DbEvent>();
       for (const r of rows) {
          map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
       }
@@ -396,58 +403,72 @@ export function fetchEventsByLeague(sportId: number, leagueIds: number[] = [], w
    }
 }
 
-export function fetchMarkets(): Map<string, Market> {
+export function fetchMarkets(): Map<string, DbMarket> {
    const database = getDb();
-   const rows = database.query<Market, []>("SELECT * FROM markets").all();
-   const map = new Map<string, Market>();
+   const rows = database.query<DbMarket, []>("SELECT * FROM markets").all();
+   const map = new Map<string, DbMarket>();
    for (const r of rows) {
-      map.set(`${r.sport_id}:${r.league_id}:${r.event_id}:${r.period_id}:${r.mkt_string}`, r);
+      map.set(`${r.sport_id}:${r.league_id}:${r.event_id}:${r.period_id}:${r.id}:${r.player_id}`, r);
    }
    return map;
 }
 
-export function fetchUpcomingEvents(): Event[] {
+export function fetchUpcomingEvents(): DbEvent[] {
    const database = getDb();
-   return database.query<Event, string[]>(
+   return database.query<DbEvent, string[]>(
       "SELECT * FROM events WHERE start_time > ? ORDER BY start_time ASC"
    ).all(Date.now().toString());
 }
 
-export function fetchEventsByEventId(eventId: number): Event[] {
+export function fetchEventsByEventId(eventId: number): DbEvent[] {
    const database = getDb();
-   return database.query<Event, string[]>("SELECT * FROM events WHERE id = ?").all(eventId.toString());
+   return database.query<DbEvent, string[]>("SELECT * FROM events WHERE id = ?").all(eventId.toString());
 }
 
-export function fetchUpcomingMarkets(): Map<string, Market> {
+export function fetchUpcomingMarkets(): Map<string, DbMarket> {
    const database = getDb();
-   const events = database.query<Event, [string]>("SELECT DISTINCT id FROM events WHERE start_time > ?").all(Date.now().toString());
+   const events = database.query<DbEvent, [string]>("SELECT DISTINCT id FROM events WHERE start_time > ?").all(Date.now().toString());
    const evenIds = events.map((e) => e.id);
-   const markets = database.query<Market, string[]>(`SELECT * FROM markets WHERE event_id IN (${evenIds.map(() => `?`).join(",")})`).all(...evenIds.map((id) => id.toString()));
-   const map = new Map<string, Market>();
+   const markets = database.query<DbMarket, string[]>(`SELECT * FROM markets WHERE event_id IN (${evenIds.map(() => `?`).join(",")})`).all(...evenIds.map((id) => id.toString()));
+   const map = new Map<string, DbMarket>();
    for (const r of markets) {
-      map.set(`${r.sport_id}:${r.league_id}:${r.event_id}:${r.period_id}:${r.mkt_string}`, r);
+      map.set(`${r.sport_id}:${r.league_id}:${r.event_id}:${r.period_id}:${r.id}:${r.player_id}`, r);
    }
    return map;
 }
 
-export function fetchMarket(marketId: number, eventId: number, leagueId: number, sportId: number): Market | null {
+export function fetchMarket(
+   marketId: number,
+   eventId: number,
+   leagueId: number,
+   sportId: number,
+   periodId: number,
+   playerId: number,
+): DbMarket | null {
    const database = getDb();
-   const row = database.query<Market, string[]>(
-      "SELECT * FROM markets WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ?"
-   ).get(marketId.toString(), eventId.toString(), leagueId.toString(), sportId.toString());
+   const row = database.query<DbMarket, string[]>(
+      "SELECT * FROM markets WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ? AND period_id = ? AND player_id = ?"
+   ).get(
+      marketId.toString(),
+      eventId.toString(),
+      leagueId.toString(),
+      sportId.toString(),
+      periodId.toString(),
+      playerId.toString(),
+   );
    return row;
 }
 
 // ---- Add / upsert ----
 
-export function addSport(sportId: number, meta: Sport): void {
+export function addSport(sportId: number, meta: DbSport): void {
    const database = getDb();
    database.query(
       "INSERT OR REPLACE INTO sports (id, name, api_id) VALUES (?, ?, ?)"
    ).run(sportId, meta.name, meta.api_id);
 }
 
-export function addLeague(leagueId: number, meta: League): void {
+export function addLeague(leagueId: number, meta: DbLeague): void {
    const database = getDb();
    database.query(
       "INSERT OR REPLACE INTO leagues (id, sport_id, name, abbr, country_code, country_name, country_rank, api_id) VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
@@ -463,7 +484,7 @@ export function addLeague(leagueId: number, meta: League): void {
    );
 }
 
-export function addEvent(eventId: number, meta: Event): void {
+export function addEvent(eventId: number, meta: DbEvent): void {
    const database = getDb();
    database.query(
       "INSERT OR REPLACE INTO events (id, league_id, sport_id, home_name, away_name, event_name, start_time, api_id, home_score, away_score) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -477,20 +498,23 @@ export function updateEventScore(eventId: number, leagueId: number, sportId: num
    ).run(home_score, away_score, eventId, leagueId, sportId);
 }
 
-export function addMarket(meta: Market): void {
+export function addMarket(meta: DbMarket): void {
    const database = getDb();
    database.query(
-      "INSERT OR REPLACE INTO markets (id, event_id, league_id, sport_id, period_id, line_value, last_odds, last_update, mkt_string) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO markets (id, event_id, league_id, sport_id, period_id, player_id, player_name, line_value, last_odds, last_update, mkt_string, operator) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
    ).run(
       meta.id,
       meta.event_id,
       meta.league_id,
       meta.sport_id,
       meta.period_id,
+      meta.player_id,
+      meta.player_name,
       meta.line_value,
       meta.last_odds,
       meta.last_update,
-      meta.mkt_string
+      meta.mkt_string,
+      meta.operator
    );
 }
 // addMarket({
@@ -527,17 +551,25 @@ export function addMarket(meta: Market): void {
 //    mkt_string: "AH -1.0",
 // });
 
-export function updateMarket(marketId: number, eventId: number, leagueId: number, sportId: number, odds: string, timestamp: number): void {
+export function updateMarket(
+   marketId: number,
+   eventId: number,
+   leagueId: number,
+   sportId: number,
+   periodId: number,
+   playerId: number,
+   odds: string,
+   timestamp: number,
+): void {
    const database = getDb();
    database.query(
-      "UPDATE markets SET last_odds = ?, last_update = ? WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ?"
-   ).run(odds, timestamp, marketId, eventId, leagueId, sportId);
+      "UPDATE markets SET last_odds = ?, last_update = ? WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ? AND period_id = ? AND player_id = ?"
+   ).run(odds, timestamp, marketId, eventId, leagueId, sportId, periodId, playerId);
    if (marketId === PROMO_MKT_ID) {
-      initPromotionalMarketsTable();
       database.query(
          `UPDATE promotional_markets SET last_odds = ?, last_update = ?
-          WHERE sport_id = ? AND league_id = ? AND event_id = ? AND status = 'open'`,
-      ).run(odds, timestamp, sportId, leagueId, eventId);
+          WHERE sport_id = ? AND league_id = ? AND event_id = ? AND player_id = ? AND status = 'open'`,
+      ).run(odds, timestamp, sportId, leagueId, eventId, playerId);
    }
 }
 
@@ -549,10 +581,10 @@ export function getLeagues(): { api_id: string; sport_id: number; id: number }[]
    return rows.map((r) => ({ api_id: r.api_id, sport_id: r.sport_id, id: r.id }));
 }
 
-export function getEventsByApiId(): Map<string, Event> {
+export function getEventsByApiId(): Map<string, DbEvent> {
    const database = getDb();
-   const rows = database.query<Event, []>("SELECT * FROM events WHERE api_id IS NOT NULL").all();
-   const map = new Map<string, Event>();
+   const rows = database.query<DbEvent, []>("SELECT * FROM events WHERE api_id IS NOT NULL").all();
+   const map = new Map<string, DbEvent>();
    for (const row of rows) {
       map.set(row.api_id, row);
    }
@@ -612,18 +644,8 @@ export function initPredictionContestsTable(): void {
          graded_at INTEGER
       )
    `);
-   migratePredictionContestsTable();
 }
 
-function migratePredictionContestsTable(): void {
-   const database = getDb();
-   const cols = database
-      .query<{ name: string }, []>('PRAGMA table_info(prediction_contests)')
-      .all();
-   if (!cols.some((c) => c.name === 'reply_to_tweet_id')) {
-      database.run('ALTER TABLE prediction_contests ADD COLUMN reply_to_tweet_id TEXT');
-   }
-}
 
 /** Numeric status id or extract from `https://x.com/.../status/123`. */
 export function normalizeReplyToTweetId(raw: string | null | undefined): string | null {
@@ -989,7 +1011,6 @@ export type AddPromotionalMarketInput = Omit<
 >;
 
 export function addPromotionalMarket(input: AddPromotionalMarketInput): PromotionalMarket {
-   initPromotionalMarketsTable();
    const database = getDb();
    const now = Date.now();
    database
@@ -1018,7 +1039,6 @@ export function addPromotionalMarket(input: AddPromotionalMarketInput): Promotio
 }
 
 export function fetchPromotionalMarket(id: number): PromotionalMarket | null {
-   initPromotionalMarketsTable();
    const database = getDb();
    const row = database
       .query<PromotionalMarketRow, [string]>(`SELECT * FROM promotional_markets WHERE id = ?`)
@@ -1027,7 +1047,6 @@ export function fetchPromotionalMarket(id: number): PromotionalMarket | null {
 }
 
 export function listPromotionalMarkets(): PromotionalMarket[] {
-   initPromotionalMarketsTable();
    const database = getDb();
    return database
       .query<PromotionalMarketRow, []>(`SELECT * FROM promotional_markets ORDER BY id DESC`)
@@ -1036,7 +1055,6 @@ export function listPromotionalMarkets(): PromotionalMarket[] {
 }
 
 export function fetchActivePromotionalMarkets(nowMs: number = Date.now()): PromotionalMarket[] {
-   initPromotionalMarketsTable();
    const database = getDb();
    return database
       .query<PromotionalMarketRow, [string]>(
@@ -1053,7 +1071,6 @@ export function fetchPromotionalMarketsForEvent(
    leagueId: number,
    eventId: number,
 ): PromotionalMarket[] {
-   initPromotionalMarketsTable();
    const database = getDb();
    return database
       .query<PromotionalMarketRow, string[]>(
@@ -1090,7 +1107,6 @@ export function fetchPromotionalMarketsForEventLookup(
    leagueId: number,
    eventId: number,
 ): PromotionalMarket[] {
-   initPromotionalMarketsTable();
    const database = getDb();
    return database
       .query<PromotionalMarketRow, string[]>(
@@ -1125,7 +1141,6 @@ export function settlePromotionalMarket(
    winningSide: number,
    notes: string | null,
 ): PromotionalMarket | null {
-   initPromotionalMarketsTable();
    const database = getDb();
    const now = Date.now();
    const settledOdds =
@@ -1148,10 +1163,13 @@ export function settlePromotionalMarket(
       league_id: promo.league_id,
       sport_id: promo.sport_id,
       period_id: promo.period_id,
+      player_id: 0,
+      player_name: "",
       line_value: null,
       last_odds: settledOdds,
       last_update: now,
       mkt_string: PROMO_MKT_STRING,
+      operator: DEFAULT_MARKET_OPERATOR,
    });
    return promo;
 }
@@ -1165,4 +1183,11 @@ function deletePromotionalMarket(title: string, eventId: number): void {
    const database = getDb();
    database.query("DELETE FROM markets WHERE id = ? AND event_id = ?").run(PROMO_MKT_ID, eventId);
    // database.query("DELETE FROM promotional_markets WHERE title = ?").run(title);
+}
+
+// read();
+function read() {
+   const database = getDb();
+   const rows = database.query("Delete FROM markets where id > 11000;").all();
+   console.log(rows);
 }

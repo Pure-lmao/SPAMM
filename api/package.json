@@ -10,7 +10,8 @@
   },
   "dependencies": {
     "discord.js": "^14.18.0",
-    "spamm-aggregator-sdk": "file:../aggregator/sdk/ts"
+    "spamm-aggregator-sdk": "file:../aggregator/sdk/ts",
+    "@solana/kit": "^8.2.0"
   },
   "devDependencies": {
     "@types/bun": "latest"

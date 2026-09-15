@@ -495,12 +495,12 @@ export function validateGradeBetResults(bytes: Uint8Array, label = 'betResults')
 }
 
 export function validateGradeParlayMask(mask: Uint8Array, label = 'legGradeMask'): void {
-   for (let b = 0; b < mask.length; b++) {
-      if (b === GRADE_PARLAY_LEG_SKIP) {
-         return;
+   for (let byte of mask) {
+      if (byte === GRADE_PARLAY_LEG_SKIP) {
+         continue;
       }
-      if (b === 0 || b > BetResult.RolledBack) {
-         throw new RangeError(`${label}, ${b} must be ${GRADE_PARLAY_LEG_SKIP} (skip) or in [1, ${BetResult.RolledBack}]`);
+      if (byte === 0 || byte > BetResult.RolledBack) {
+         throw new RangeError(`${label}, ${byte} must be ${GRADE_PARLAY_LEG_SKIP} (skip) or in [1, ${BetResult.RolledBack}]`);
       }
    }
 }

@@ -309,6 +309,12 @@ pub fn cashout_payment_dest<'a>(
    if delay { escrow_ata } else { user_ata }
 }
 
+/// Payout (stake + profit at the fill odds) attributable to the cashed stake slice:
+/// `orig_payout × cashout_amount / orig_amount`. Known as `payout_removed` downstream:
+/// it is the MM quote's `payout` numerator (fair = `payout × ODDS_SCALE / live odds`),
+/// the cap on the accepted payment, the cashout slice's recorded `payout`, and the
+/// amount subtracted from the ticket payout on novation. NOT a running total of prior
+/// cashouts.
 #[inline(always)]
 pub fn proportional_payout(orig_amount: u64, orig_payout: u64, cashout_amount: u64) -> Result<u64, ProgramError> {
    if unlikely(orig_amount == 0) {
@@ -334,6 +340,10 @@ pub fn validate_cashout_size(
 
 /// Original parlay ticket state validated for cashout (auction or RFQ).
 pub struct ParlayCashoutOrigTicket {
+   /// Face payout at the fill odds of the slice being cashed out (`proportional_payout`
+   /// of the ticket): the MM quote's `payout` numerator, the cap on the accepted
+   /// payment, the cashout/escrow slice's recorded `payout`, and the ticket payout
+   /// delta on novation. NOT a running total of prior cashouts.
    pub payout_removed: u64,
    pub delay: bool,
    pub orig_amount: u64,

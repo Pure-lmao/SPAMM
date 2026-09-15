@@ -24,7 +24,7 @@ pub use ix_fill_cashout_quote_parlay::{
 };
 pub use ix_fill_rfq::{FillRfqIxPayload, FILL_RFQ_IX_PAYLOAD_LEN};
 pub use ix_get_quote::{GetQuoteIxPayload, GET_QUOTE_IX_PAYLOAD_LEN};
-pub use ix_get_quote_parlay::{GetQuoteParlayIxPayload, GET_QUOTE_PARLAY_IX_PAYLOAD_LEN};
+pub use ix_get_quote_parlay::{GetQuoteParlayIxHeader, GET_QUOTE_PARLAY_IX_PAYLOAD_HEADER_LEN};
 pub use ix_get_cashout_quote::{GetCashoutQuoteIxPayload, GET_CASHOUT_QUOTE_IX_PAYLOAD_LEN};
 pub use ix_get_cashout_quote_parlay::{
    GetCashoutQuoteParlayIxHeaderPayload, GET_CASHOUT_QUOTE_PARLAY_IX_PAYLOAD_HEADER_LEN,

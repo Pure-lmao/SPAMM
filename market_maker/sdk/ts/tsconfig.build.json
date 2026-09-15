@@ -6,5 +6,8 @@
       "declarationMap": true,
       "sourceMap": true
    },
+   "paths": {
+      "spamm-aggregator-sdk": ["../../../../aggregator/sdk/ts/src/index.ts"]
+   },
    "include": ["src/**/*.ts"]
 }

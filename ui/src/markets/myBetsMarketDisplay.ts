@@ -1,16 +1,6 @@
-import type { MarketId } from "spamm-aggregator-sdk";
-import { buildMarketLabel } from "../betting/marketLabel";
-import type { MarketRow } from "../betting/types";
+import { betSlipLabel, groupTitle, periodCaption, type MarketId } from "spamm-aggregator-sdk";
 import { displayEventTitle } from "./eventDisplay";
-import {
-   handicapTableKind,
-   marketPrimaryLabel,
-   periodCaption,
-   PROMO_MKT_ID,
-   shouldShowPeriodBadge,
-   totalsSectionTitle,
-} from "./eventMarketsDisplay";
-import { inferBetColumn } from "./selectors";
+import { isPromoMarket, shouldShowPeriodBadge, uiMarketDisplayCtx } from "./eventMarketsDisplay";
 import type { UiGroupedEvent, UiMarket, UiPromotionalMarket } from "./types";
 
 export function eventLookupKey(chain: MarketId): string {
@@ -19,7 +9,7 @@ export function eventLookupKey(chain: MarketId): string {
 }
 
 export function isPromoMarketChain(chain: MarketId): boolean {
-   return Number(chain.mkt) === PROMO_MKT_ID;
+   return Number(chain.mkt) === 9;
 }
 
 export function promoMarketLookupKey(chain: MarketId): string {
@@ -49,39 +39,12 @@ function findUiMarket(ev: UiGroupedEvent, chain: MarketId): UiMarket | undefined
    const mkts = ev.markets ?? [];
    const id = Number(chain.mkt);
    const pid = chain.period;
-   const exact = mkts.find((m) => m.id === id && m.period_id === pid);
+   const player = Number(chain.player);
+   const exact = mkts.find((m) => m.id === id && m.period_id === pid && (m.player_id ?? 0) === player);
    if (exact !== undefined) {
       return exact;
    }
-   return mkts.find((m) => m.id === id);
-}
-
-function toMarketRow(m: UiMarket): MarketRow {
-   return { id: m.id, mkt_string: m.mkt_string, period_id: m.period_id, line_value: m.line_value };
-}
-
-/** Section-style label for My Bets (no raw `AH …` / `OU …` strings). */
-function marketCategoryTitle(ev: UiGroupedEvent, m: UiMarket): string {
-   if (m.mkt_string.startsWith("AH ")) {
-      return handicapTableKind(m) === "asian" ? "Asian Handicap" : "Spread";
-   }
-   if (m.mkt_string.startsWith("OU ")) {
-      return totalsSectionTitle([m]);
-   }
-   return marketPrimaryLabel(ev.sport_id, m);
-}
-
-function formatPickLabel(
-   side: number,
-   column: ReturnType<typeof inferBetColumn>,
-   m: MarketRow,
-   teams: { homeName: string; awayName: string },
-): string {
-   const raw = buildMarketLabel(column, m, side, teams);
-   return raw
-      .replace(/\s*\(1X2\)\s*$/, "")
-      .replace(/\s*\(ML\)\s*$/, "")
-      .replace(/\s*\(To qualify\)\s*$/, "");
+   return mkts.find((m) => m.id === id && m.period_id === pid) ?? mkts.find((m) => m.id === id);
 }
 
 export type BetMarketDisplayLines = Readonly<{
@@ -94,7 +57,6 @@ export type BetMarketDisplayLines = Readonly<{
    promoDescription: string | null;
 }>;
 
-/** Human-readable event title, LIVE marker, and period / market / pick for a bet row. */
 export function betMarketDisplayLines(
    ev: UiGroupedEvent | undefined,
    chain: MarketId,
@@ -136,26 +98,27 @@ export function betMarketDisplayLines(
    }
 
    const m = findUiMarket(ev, chain);
-   if (m == null) {
-      const fb = `Market #${chain.mkt.toString()}`;
-      const pick = `side ${side}`;
-      return {
-         eventTitle,
-         liveSuffix,
-         periodMarket: fb,
-         pick,
-         detailLine: `${fb} · ${pick}`,
-         promoTitle: null,
-         promoDescription: null,
+   const ctx = m
+      ? uiMarketDisplayCtx(m, { homeName: ev.home_name, awayName: ev.away_name })
+      : {
+         sport: ev.sport_id,
+         homeName: ev.home_name,
+         awayName: ev.away_name,
+         playerId: Number(chain.player),
       };
-   }
-
-   const teams = { homeName: ev.home_name, awayName: ev.away_name };
-   const column = inferBetColumn(m.mkt_string);
-   const pick = formatPickLabel(side, column, toMarketRow(m), teams);
-   const periodMarket = shouldShowPeriodBadge(ev.sport_id, m)
-      ? `${periodCaption(m.period_id)} · ${marketCategoryTitle(ev, m)}`
-      : marketCategoryTitle(ev, m);
+   const mkt = m?.id ?? Number(chain.mkt);
+   const pick = betSlipLabel(mkt, side, ctx)
+      .replace(/\s*\(1X2\)\s*$/, "")
+      .replace(/\s*\(ML\)\s*$/, "")
+      .replace(/\s*\(To qualify\)\s*$/, "");
+   const category =
+      m != null && isPromoMarket(m)
+         ? "Promo"
+         : m?.player_name?.trim() || groupTitle(mkt, ctx);
+   const periodId = m?.period_id ?? chain.period;
+   const periodMarket = shouldShowPeriodBadge(ev.sport_id, { period_id: periodId } as UiMarket)
+      ? `${periodCaption(periodId)} · ${category}`
+      : category;
    const detailLine = `${periodMarket} · ${pick}`;
    return {
       eventTitle,

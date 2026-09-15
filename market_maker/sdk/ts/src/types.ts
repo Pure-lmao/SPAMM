@@ -2,7 +2,7 @@ import type { Address } from '@solana/kit';
 
 import { ADDRESS_LEN, MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS, U32_LEN, U64_LEN } from './constants.js';
 
-export { MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS };
+export { MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS};
 
 /** Wire sizes from `spamm_aggregator` / MM program packed layouts (no padding). */
 export const EVENT_ID_WIRE_SIZE = 11;
@@ -73,6 +73,9 @@ export enum Sport {
    Basketball = 4,
    IceHockey = 5,
    Tennis = 6,
+   Golf = 7,
+   Motorsports = 8,
+   Cricket = 9,
    Cs2 = 101,
    Dota = 102,
    Lol = 103,

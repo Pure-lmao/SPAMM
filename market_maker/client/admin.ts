@@ -1,5 +1,5 @@
-import { getAta, getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getEventGameState, getMmConfigData, getMmConfigPda, getMmMarketData, getMmQuoteBufferData, getMmReturnDataDecoder, getSetRfqSignerIx, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, ODDS_SCALE, type EventId, type MarketId, type Sport, getMmQuoteBufferPda, getMmParlayQuoteBufferPda, getWithdrawFromTokenAccountIx } from 'spamm-market-maker-sdk';
-import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda } from 'spamm-aggregator-sdk';
+import { getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmMarketData, getMmReturnDataDecoder, getSetRfqSignerIx, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, type EventId, type MarketId, type Sport, getWithdrawFromTokenAccountIx, ODDS_SCALE, getMmGetQuoteParlayIx } from 'spamm-market-maker-sdk';
+import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda, getEventGameState, decodeGetParlayQuoteReturnWire, getGetParlayQuoteReturnWireDecoder, type RfqBetMessageInput, signRfqBetQuote, signRfqParlayQuote, type RfqParlayMessageInput } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from './utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
@@ -47,6 +47,7 @@ const eventId = {
    league,
    event,
 } as EventId;
+const operator = "3z6QBMEUjJubCwbKUsMKFnKnf1twyc5bZ9gaWHNAn1nP" as Address;
 async function initEvent() {
    const eventStateIx = await getInitEventIx(ADMIN_SIGNER.address, eventId, MARKET_MAKER_PROGRAM_ID);
    const nettingPdaIx = await getCreateNettingAccountIx(eventId, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
@@ -92,17 +93,17 @@ async function closeNettingAccount() {
 async function updateEventState( 
    eventId: EventId, sequence: number, 
    timePeriod: string, gameInfo: {
-   homeScore?: number,
-   awayScore?: number,
-   homeReds?: number,
-   awayReds?: number,
+   homePrimary?: number,
+   awayPrimary?: number,
+   homeSecondary?: number,
+   awaySecondary?: number,
 }) {
    const gameState = getEventGameState(
       timePeriod,
-      gameInfo.homeScore ?? 0,
-      gameInfo.awayScore ?? 0,
-      gameInfo.homeReds ?? 0,
-      gameInfo.awayReds ?? 0,
+      gameInfo.homePrimary ?? 0,
+      gameInfo.awayPrimary?? 0,
+      gameInfo.homeSecondary ?? 0,
+      gameInfo.awaySecondary ?? 0,
    );
    const eventStateIx = await getUpdateEventStateIx(
       ADMIN_SIGNER.address,
@@ -115,7 +116,7 @@ async function updateEventState(
    console.log(txResult);
 }
 // updateEventState(
-//    eventId, 1, "PG", { homeScore: 0, awayScore: 0, homeReds: 0, awayReds: 0 }
+//    eventId, 1, "PG", { homePrimary: 0, awayPrimary: 0, homeSecondary: 0, awaySecondary: 0 }
 // ).catch(console.error);
 
 async function closeEvent() {
@@ -130,15 +131,23 @@ async function closeEvent() {
 // closeEvent().catch(console.error);
 
 const period = 1;
-const mkt = 1;
+const mkt = 60;
 const player = 0n;
 const marketId = {
    eventId,
    player,
-   mkt,
+   mkt: 1,
    period,
    isPregame: true,
-   operator: "BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW" as Address,
+   operator,
+} as MarketId;
+const marketIdSame = {
+   eventId,
+   player,
+   mkt: 60,
+   period,
+   isPregame: true,
+   operator,
 } as MarketId;
 const oracleBody = new Uint8Array([
    ...getU32Encoder().encode(20n*ODDS_SCALE/10n), //odds0 = 2.0
@@ -156,7 +165,7 @@ async function updateOracle() {
    const sequence = 2n;
    const odds0 = 20n*ODDS_SCALE/10n;
    const odds1 = 20n*ODDS_SCALE/10n;
-   const odds2 = 20n*ODDS_SCALE/10n;
+   const odds2 = 0n*ODDS_SCALE/10n;
    const marketDataIx = await getUpdateOracleIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
       marketId, sequence, odds0, odds1, odds2
    );
@@ -164,7 +173,7 @@ async function updateOracle() {
    console.log(txResult);
 }
 // updateOracle().catch(console.error);
-// getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId).then(console.log).catch(console.error);
+// getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketIdSame).then(console.log).catch(console.error);
 
 const returnDataDecoder = getMmReturnDataDecoder();
 async function getQuote() {
@@ -195,6 +204,37 @@ async function getQuote() {
 }
 // getQuote().catch(console.error);
 
+const parlayReturnDataDecoder = getGetParlayQuoteReturnWireDecoder();
+async function getParlayQuote() {
+   const quote = await getMmGetQuoteParlayIx({
+      amount: 5n * 10n * 6n,
+      minOddsScaled: 20n*ODDS_SCALE/10n,
+      legs: [{
+         marketId,
+         side: 0,
+         eventStateSequence: 1,
+         eventGameState: getEventGameState("PG", 0, 0, 0, 0),
+      }, {
+         marketId: marketIdSame,
+         side: 0,
+         eventStateSequence: 1,
+         eventGameState: getEventGameState("PG", 0, 0, 0, 0),
+      }],
+   }, MARKET_MAKER_PROGRAM_ID, ADMIN_SIGNER.address);
+   const returnData = await simulateTransaction(clients.rpc, [quote], [ADMIN_SIGNER]);
+   if (!returnData) {
+      throw new Error("No return data");
+   }
+   const [b64] = returnData;
+   const bin = atob(b64);
+   const bytes = new Uint8Array(bin.length);
+   for (let i = 0; i < bin.length; i++) {
+      bytes[i] = bin.charCodeAt(i);
+   }
+   const parsedReturnData = parlayReturnDataDecoder.decode(bytes);
+   return parsedReturnData;
+}
+// getParlayQuote().then(console.log).catch(console.error);
 // getMmQuoteBufferData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
 async function withdrawFreeBalance() {
@@ -225,7 +265,15 @@ async function setRfqSigner(rfqSigner: Address) {
    console.log('config after set_rfq_signer:', updated);
    return txResult;
 }
+// setRfqSigner(ADMIN_SIGNER.address).catch(console.error);
 
-const RFQ_SIGNER = '95Zg5Wp4RWgUWghjkrGNReXVuNWU6tU9y26tkqnsPBgF' as Address;
-// setRfqSigner(RFQ_SIGNER).catch(console.error);
+export async function signRfqBet(rfqBet: RfqBetMessageInput) {
+   const signedRfq = await signRfqBetQuote(ADMIN_SIGNER, rfqBet);
+   return signedRfq;
+}
+
+export async function signRfqParlayBet(rfqParlay: RfqParlayMessageInput) {
+   const signedRfq = await signRfqParlayQuote(ADMIN_SIGNER, rfqParlay);
+   return signedRfq;
+}
 

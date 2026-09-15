@@ -9,7 +9,8 @@ import {
 } from '@solana/kit';
 import { getCreatePredictionIx } from 'spamm-score-predict-sdk';
 
-import { buildSignV0Transaction, httpToWsRpcUrl, resolveHttpRpcUrl } from '../betting/txPipeline';
+import { buildSignV1Transaction, httpToWsRpcUrl, resolveAppHttpRpcUrl } from '../betting/txPipeline';
+import { requestWalletBalanceRefresh } from '../wallet/walletBalanceRefresh';
 
 export async function submitCreatePrediction(params: {
    rpc: Rpc<SolanaRpcApi>;
@@ -30,18 +31,18 @@ export async function submitCreatePrediction(params: {
       openBet: address(params.openBetAddress),
       tweetLink: params.tweetLink,
    });
-   const signed = await buildSignV0Transaction(params.rpc, {
+   const signed = await buildSignV1Transaction(params.rpc, {
       feePayer: params.walletSigner,
       instructions: [ix],
       signers: [params.walletSigner],
    });
-   // MAINNET: VITE_SOLANA_RPC_URL — see ui/.env.production
-   const httpUrl = resolveHttpRpcUrl(import.meta.env.VITE_SOLANA_RPC_URL);
+   const httpUrl = resolveAppHttpRpcUrl();
    const subs = createSolanaRpcSubscriptions(httpToWsRpcUrl(httpUrl));
    const sendAndConfirm = sendAndConfirmTransactionFactory({
       rpc: params.rpc,
       rpcSubscriptions: subs,
    } as never);
    await sendAndConfirm(signed as never, { commitment: 'confirmed' });
+   requestWalletBalanceRefresh();
    return getSignatureFromTransaction(signed);
 }

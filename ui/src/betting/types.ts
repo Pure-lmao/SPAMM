@@ -6,6 +6,10 @@ export type MarketRow = {
    mkt_string: string;
    period_id: number;
    line_value: number | null;
+   player_id?: number;
+   player_name?: string;
+   operator?: string;
+   sport_id?: number;
 };
 
 /** Input when toggling a selection from an odds cell. */
@@ -18,6 +22,9 @@ export type BetSlipSelectionInput = {
    sportApiId: number;
    marketWireId: number;
    periodId: number;
+   playerId: number;
+   playerName: string;
+   operator: string;
    column: BetColumn;
    outcomeIndex: number;
    mktString: string;
@@ -27,6 +34,3 @@ export type BetSlipSelectionInput = {
 export type BetSlipSelection = BetSlipSelectionInput & {
    id: string;
 };
-
-/** @deprecated Use {@link BetSlipSelectionInput}. */
-export type BetModalOpenContext = BetSlipSelectionInput;

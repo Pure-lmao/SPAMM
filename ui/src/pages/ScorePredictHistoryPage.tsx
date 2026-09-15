@@ -9,16 +9,20 @@ import {
    type Rpc,
    type SolanaRpcApi,
 } from '@solana/kit';
-import { useCluster, useKitTransactionSigner, useWallet } from '@solana/connector/react';
+import { useCluster, useWallet } from '@solana/connector/react';
+import { useAppTransactionSigner } from '../wallet/useAppTransactionSigner';
+import { signErrorMessageForUi } from '../wallet/walletStandardV1Signer';
+import { requestWalletBalanceRefresh } from '../wallet/walletBalanceRefresh';
 import {
    formatPredictionForTweet,
    getClosePredictionIx,
    getPredictionsByUser,
    type PredictionKind,
 } from 'spamm-score-predict-sdk';
-import { resolveHttpRpcUrl, buildSignV0Transaction, httpToWsRpcUrl } from '../betting/txPipeline';
+import { resolveAppHttpRpcUrl, buildSignV1Transaction, httpToWsRpcUrl } from '../betting/txPipeline';
 import { fetchContestById, fetchContestHistory } from '../scorePredict/fetchContest';
 import type { ApiPredictionContest } from '../scorePredict/types';
+import '../scorePredict/scorePredict.css';
 
 type EntryRow = {
    pda: string;
@@ -33,7 +37,7 @@ type EntryRow = {
 export function ScorePredictHistoryPage(): ReactElement {
    const { isConnected, account } = useWallet();
    const { cluster } = useCluster();
-   const { signer, ready: signerReady } = useKitTransactionSigner();
+   const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
    const [rows, setRows] = useState<EntryRow[]>([]);
    const [err, setErr] = useState<string | null>(null);
    const [selectedContestIds, setSelectedContestIds] = useState<ReadonlySet<number>>(() => new Set());
@@ -41,9 +45,7 @@ export function ScorePredictHistoryPage(): ReactElement {
    const [loading, setLoading] = useState(false);
 
    const rpc = useMemo((): Rpc<SolanaRpcApi> => {
-      // MAINNET: VITE_SOLANA_RPC_URL — see ui/.env.production
-      const url = resolveHttpRpcUrl(import.meta.env.VITE_SOLANA_RPC_URL ?? cluster?.url);
-      return createSolanaRpc(url);
+      return createSolanaRpc(resolveAppHttpRpcUrl(cluster?.url));
    }, [cluster?.url]);
 
    const load = useCallback(async () => {
@@ -55,7 +57,7 @@ export function ScorePredictHistoryPage(): ReactElement {
       setLoading(true);
       setErr(null);
       try {
-         const onChain = await getPredictionsByUser(rpc, address(account));
+         const onChain = await getPredictionsByUser(rpc as never, address(account));
          const history = await fetchContestHistory(50);
          const byId = new Map(history.map((c) => [c.id, c]));
          const merged: EntryRow[] = [];
@@ -120,24 +122,24 @@ export function ScorePredictHistoryPage(): ReactElement {
          const instructions = await Promise.all(
             contestIds.map((contestId) => getClosePredictionIx(owner, owner, contestId)),
          );
-         const signed = await buildSignV0Transaction(rpc, {
+         const signed = await buildSignV1Transaction(rpc, {
             feePayer: signer,
             instructions,
             signers: [signer],
          });
-         // MAINNET: VITE_SOLANA_RPC_URL — see ui/.env.production
-         const httpUrl = resolveHttpRpcUrl(import.meta.env.VITE_SOLANA_RPC_URL);
+         const httpUrl = resolveAppHttpRpcUrl();
          const subs = createSolanaRpcSubscriptions(httpToWsRpcUrl(httpUrl));
          const sendAndConfirm = sendAndConfirmTransactionFactory({
             rpc,
             rpcSubscriptions: subs,
          } as never);
          await sendAndConfirm(signed as never, { commitment: 'confirmed' });
+         requestWalletBalanceRefresh();
          getSignatureFromTransaction(signed);
          setSelectedContestIds(new Set());
          await load();
       } catch (e) {
-         setErr(e instanceof Error ? e.message : String(e));
+         setErr(signErrorMessageForUi(e, { walletName }));
       } finally {
          setClosing(false);
       }

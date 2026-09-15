@@ -288,7 +288,8 @@ fn fill_parlay_same_event_companion_ok() {
    let enc_before = read_encumbrance(&env, &encumbrance_pda());
    let r = env.run_ix(ix);
    assert!(r.program_result.is_ok(), "{:?}", r);
-   // Companion leg odds are 0; product is the first positive market quote only.
+   // Same-event legs fold into one representative: 20_000 × 20_000 / 10_000 = 40_000;
+   // the companion leg is stored with odds 0.
    assert_parlay_after_fill(
       &env,
       &bet,
@@ -296,7 +297,7 @@ fn fill_parlay_same_event_companion_ok() {
       enc_before,
       2_000_000,
       2,
-      20_000,
+      uniform_parlay_combined_odds(20_000, 2),
    );
 }
 

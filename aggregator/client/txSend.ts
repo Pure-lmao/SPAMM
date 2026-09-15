@@ -25,7 +25,6 @@ import {
    type Rpc,
    type SolanaRpcApi,
    getBase64EncodedWireTransaction,
-   getTransactionSize,
    type Base64EncodedDataResponse,
 } from '@solana/kit';
 
@@ -110,11 +109,6 @@ export async function sendAndConfirmSignedTransaction(
    return getSignatureFromTransaction(signedTransaction);
 }
 
-/** Base58 signature string for logging. */
-export function signatureBase58(signedTransaction: Awaited<ReturnType<typeof buildSignV0Transaction>>): string {
-   return getSignatureFromTransaction(signedTransaction);
-}
-
 
 /**
  * Build, sign, send, and confirm a v0 transaction with the testing keypair as fee payer.
@@ -134,7 +128,7 @@ export async function sendAndConfirmInstructions(
 }
 
 export async function simulateTransaction(
-   rpc: RpcClients['rpc'],
+   rpc: Rpc<SolanaRpcApi>,
    instructions: readonly Instruction[],
    signers: readonly KeyPairSigner[],
 ): Promise<Base64EncodedDataResponse | undefined> {

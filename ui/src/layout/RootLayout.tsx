@@ -4,7 +4,7 @@ import { AppBrand } from "./AppBrand";
 import { AppTopNav } from "./AppTopNav";
 import { AppFooter } from "./AppFooter";
 import { InviteFriendsControls } from "../invite/InviteFriendsModal";
-import { UsdcBalancePanel } from "../wallet/UsdcBalancePanel";
+import UsdcBalancePanel from "../wallet/UsdcBalancePanel";
 import { WalletBar } from "../wallet/WalletBar";
 
 /** Keep in sync with `max-width` in `index.css` for `.app-header` wallet menu rules. */

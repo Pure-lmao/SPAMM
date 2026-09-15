@@ -8,7 +8,7 @@ import {
    type ReactElement,
    type ReactNode,
 } from "react";
-import { MAX_PARLAY_LEGS } from "spamm-aggregator-sdk";
+import { MAX_RFQ_PARLAY_LEGS } from "spamm-aggregator-sdk";
 import { marketKey, selectionId, selectionMatches } from "./betSlipUtils";
 import { BetSlipTray } from "./BetSlipTray";
 import type { BetSlipSelection, BetSlipSelectionInput } from "./types";
@@ -23,8 +23,9 @@ type BetSlipCtx = {
    removeSelection: (id: string) => void;
    clearSlip: () => void;
    setExpanded: (expanded: boolean) => void;
-   isSelected: (input: Pick<BetSlipSelectionInput, "eventId" | "marketWireId" | "periodId" | "column" | "outcomeIndex">) => boolean;
+   isSelected: (input: Pick<BetSlipSelectionInput, "eventId" | "marketWireId" | "periodId" | "playerId" | "column" | "outcomeIndex">) => boolean;
    slipActive: boolean;
+   slipCapNotice: string | null;
 };
 
 const BetSlipContext = createContext<BetSlipCtx | null>(null);
@@ -33,11 +34,13 @@ export function BetSlipProvider({ children }: { children: ReactNode }): ReactEle
    const [selections, setSelections] = useState<BetSlipSelection[]>([]);
    const [expanded, setExpanded] = useState(true);
    const [slipLocked, setSlipLocked] = useState(false);
+   const [slipCapNotice, setSlipCapNotice] = useState<string | null>(null);
 
    const clearSlip = useCallback(() => {
       setSlipLocked(false);
       setSelections([]);
       setExpanded(true);
+      setSlipCapNotice(null);
    }, []);
 
    const toggleSelection = useCallback((input: BetSlipSelectionInput) => {
@@ -73,9 +76,11 @@ export function BetSlipProvider({ children }: { children: ReactNode }): ReactEle
 
          const mk = marketKey(input);
          const withoutMarket = prev.filter((s) => marketKey(s) !== mk);
-         if (withoutMarket.length >= MAX_PARLAY_LEGS) {
+         if (withoutMarket.length >= MAX_RFQ_PARLAY_LEGS) {
+            setSlipCapNotice(`Maximum ${MAX_RFQ_PARLAY_LEGS} selections`);
             return prev;
          }
+         setSlipCapNotice(null);
 
          const next: BetSlipSelection[] = [...withoutMarket, { ...input, id }];
          if (prev.length === 1 && next.length === 2) {
@@ -99,7 +104,7 @@ export function BetSlipProvider({ children }: { children: ReactNode }): ReactEle
    }, [slipLocked]);
 
    const isSelected = useCallback(
-      (input: Pick<BetSlipSelectionInput, "eventId" | "marketWireId" | "periodId" | "column" | "outcomeIndex">) => {
+      (input: Pick<BetSlipSelectionInput, "eventId" | "marketWireId" | "periodId" | "playerId" | "column" | "outcomeIndex">) => {
          return selections.some((s) => selectionMatches(s, input));
       },
       [selections],
@@ -128,8 +133,9 @@ export function BetSlipProvider({ children }: { children: ReactNode }): ReactEle
          setExpanded,
          isSelected,
          slipActive,
+         slipCapNotice,
       }),
-      [selections, expanded, slipLocked, toggleSelection, removeSelection, clearSlip, isSelected, slipActive],
+      [selections, expanded, slipLocked, setSlipLocked, toggleSelection, removeSelection, clearSlip, isSelected, slipActive, slipCapNotice],
    );
 
    return (
@@ -140,19 +146,10 @@ export function BetSlipProvider({ children }: { children: ReactNode }): ReactEle
    );
 }
 
-/** @deprecated Use {@link BetSlipProvider}. */
-export const BetModalProvider = BetSlipProvider;
-
 export function useBetSlip(): BetSlipCtx {
    const v = useContext(BetSlipContext);
    if (!v) {
       throw new Error("useBetSlip must be used within BetSlipProvider");
    }
    return v;
-}
-
-/** @deprecated Use {@link useBetSlip}. */
-export function useBetModal(): BetSlipCtx & { openBet: BetSlipCtx["toggleSelection"]; closeBet: BetSlipCtx["clearSlip"] } {
-   const slip = useBetSlip();
-   return { ...slip, openBet: slip.toggleSelection, closeBet: slip.clearSlip };
 }

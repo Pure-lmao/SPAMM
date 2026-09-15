@@ -6,6 +6,7 @@ import {
    useWallet,
    useWalletConnectors,
 } from "@solana/connector/react";
+import { EPHEMERAL_DEVNET_WALLET_NAME } from "./ephemeralDevnetWallet";
 
 export function WalletBar(): ReactElement {
    const { isConnected, isConnecting } = useWallet();
@@ -57,21 +58,40 @@ export function WalletBar(): ReactElement {
                      {connectors.length === 0 && (
                         <li className="wallet-bar__menu-empty">No wallets detected (install a Wallet Standard wallet).</li>
                      )}
-                     {connectors.map((c) => (
-                        <li key={c.id}>
-                           <button
-                              type="button"
-                              className="wallet-bar__menu-item"
-                              disabled={busy || !c.ready}
-                              onClick={async () => {
-                                 await connect(c.id);
-                                 setMenuOpen(false);
-                              }}
-                           >
-                              {c.name}
-                           </button>
-                        </li>
-                     ))}
+                     {connectors.map((c) => {
+                        const isEphemeral = c.name === EPHEMERAL_DEVNET_WALLET_NAME;
+                        const disabled = busy || !c.ready;
+                        return (
+                           <li key={c.id}>
+                              {isEphemeral ? (
+                                 <button
+                                    type="button"
+                                    className="wallet-bar__menu-item wallet-bar__menu-item--ephemeral"
+                                    disabled={disabled}
+                                    onClick={async () => {
+                                       await connect(c.id);
+                                       setMenuOpen(false);
+                                    }}
+                                 >
+                                    <span className="wallet-bar__menu-item__title">{c.name}</span>
+                                    <span className="wallet-bar__menu-subtitle">Stored in this browser only.</span>
+                                 </button>
+                              ) : (
+                                 <button
+                                    type="button"
+                                    className="wallet-bar__menu-item"
+                                    disabled={disabled}
+                                    onClick={async () => {
+                                       await connect(c.id);
+                                       setMenuOpen(false);
+                                    }}
+                                 >
+                                    {c.name}
+                                 </button>
+                              )}
+                           </li>
+                        );
+                     })}
                   </ul>
                )}
             </div>

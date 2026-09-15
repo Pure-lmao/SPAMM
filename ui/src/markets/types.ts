@@ -5,10 +5,13 @@ export type UiMarket = {
    league_id: number;
    sport_id: number;
    period_id: number;
+   player_id: number;
+   player_name: string;
    line_value: number | null;
    last_odds: string;
    last_update: number;
    mkt_string: string;
+   operator: string;
 };
 
 export type UiGroupedEvent = {

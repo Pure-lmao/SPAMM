@@ -1,7 +1,13 @@
 import { join } from "node:path";
 import { AccountRole, type Instruction } from "@solana/instructions";
 import { address, getU32Encoder, getU64Encoder, sol, solToLamports, type Address } from "@solana/kit";
-import { buildSignV0Transaction, createRpcClients, sendAndConfirmInstructions, sendAndConfirmSignedTransaction, simulateTransaction } from "../aggregator/client/txSend";
+import {
+   buildSignV1Transaction,
+   createRpcClients,
+   sendAndConfirmInstructions,
+   sendAndConfirmSignedTransaction,
+   simulateTransaction,
+} from "../aggregator/client/txSendV1";
 import { loadKeypairSignerFromJsonFile } from "../aggregator/client/utils";
 import { fetchGradedStartedEvents } from "./localDb";
 import { BetResult, GRADE_PARLAY_LEG_SKIP, getBetsData, getGradeBetsIx, getGradeParlayIx, getParlaysData, type BetAccountData } from "spamm-aggregator-sdk";
@@ -9,7 +15,7 @@ import { round } from "./utils";
 import { ADMIN_SIGNER } from "../aggregator/client/admin";
 
 const SYSTEM_PROGRAM_ID: Address = address("11111111111111111111111111111111");
-const clients = createRpcClients({ httpUrl: "https://mainnet.helius-rpc.com/?api-key=3a454590-f45d-441e-9a62-833890f31eb2" });
+const clients = createRpcClients({ });
 
 /** System program: `Transfer` (instruction index 2) + `lamports` u64 LE. */
 function buildSystemTransferSolInstruction(from: Address, to: Address, lamports: bigint): Instruction {
@@ -36,7 +42,7 @@ export async function airdropUser(user: string): Promise<{ success: boolean; err
       const donorAddress = SOL_DONOR_SIGNER.address;
       const ix = buildSystemTransferSolInstruction(donorAddress, userAddress, SOL_AMOUNT);
 
-      const signed = await buildSignV0Transaction(clients.rpc, {
+      const signed = await buildSignV1Transaction(clients.rpc, {
          feePayer: SOL_DONOR_SIGNER,
          instructions: [ix],
          signers: [SOL_DONOR_SIGNER],
@@ -107,7 +113,7 @@ export async function gradeParlays() {
    const allEvents = fetchGradedStartedEvents();
    console.log("Events fetched", allEvents.size);
 
-   const gradeJobs: { mask: Uint8Array; address: Address; numLegs: number }[] = [];
+   const gradeJobs: { mask: Uint8Array; address: Address }[] = [];
    for (const bet of parlayBets) {
       const mask = new Uint8Array(bet.data.numLegs).fill(GRADE_PARLAY_LEG_SKIP);
       let anyGrade = false;
@@ -147,7 +153,7 @@ export async function gradeParlays() {
          }
       }
       if (anyGrade) {
-         gradeJobs.push({ mask, address: bet.address, numLegs: bet.data.numLegs });
+         gradeJobs.push({ mask, address: bet.address });
       }
    }
 
@@ -157,7 +163,7 @@ export async function gradeParlays() {
          const batch = gradeJobs.slice(i, i + MAX_PARLAYS_PER_TX);
          const instructions = await Promise.all(
             batch.map((job) =>
-               getGradeParlayIx(ADMIN_SIGNER.address, job.mask, job.address, job.numLegs),
+               getGradeParlayIx(ADMIN_SIGNER.address, job.mask, job.address),
             ),
          );
          const sig = await sendAndConfirmInstructions(instructions, [ADMIN_SIGNER]);

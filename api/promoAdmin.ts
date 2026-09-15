@@ -9,15 +9,15 @@ import {
    settlePromotionalMarket,
 } from "./localDb";
 import type { Address } from "@solana/kit";
-import type { Event, PromoRelatedEvent, PromotionalMarket } from "./types";
-import { safeJSONStringify } from "./utils";
+import type { DbEvent, PromoRelatedEvent, PromotionalMarket } from "./types";
+import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "../aggregator/client/txSend";
 import { ADMIN_SIGNER } from "../aggregator/client/admin";
 import { BetResult, getBetsData, getGradeBetsIx} from "spamm-aggregator-sdk";
 
 const clients = createRpcClients({ httpUrl: "https://" + (process.env.CHAINSTACK_URL ?? "") });
 
-function resolveEvent(eventId: number): Event {
+function resolveEvent(eventId: number): DbEvent {
    const matches = fetchEventsByEventId(eventId);
    if (matches.length === 0) {
       throw new Error(`Event ${eventId} not found`);
@@ -99,7 +99,7 @@ export function createPromotionalMarket(input: CreatePromotionalMarketInput): Pr
       }
    }
 
-   const existing = fetchMarket(PROMO_MKT_ID, event_id, league_id, sport_id);
+   const existing = fetchMarket(PROMO_MKT_ID, event_id, league_id, sport_id, period_id, 0);
    if (existing) {
       throw new Error(`Promo market (mkt ${PROMO_MKT_ID}) already exists on ${sport_id}:${league_id}:${event_id}`);
    }
@@ -124,10 +124,13 @@ export function createPromotionalMarket(input: CreatePromotionalMarketInput): Pr
       league_id,
       sport_id,
       period_id,
+      player_id: 0,
+      player_name: "",
       line_value: null,
       last_odds: lastOdds,
       last_update: now,
       mkt_string: PROMO_MKT_STRING,
+      operator: DEFAULT_MARKET_OPERATOR,
    });
 
    return promo;
@@ -173,6 +176,7 @@ export async function gradePromoBets(promoId: number): Promise<number> {
          mkt: PROMO_MKT_ID,
          period: promo.period_id,
          isPregame: true,
+         operator: ADMIN_SIGNER.address
       },
    });
    const resultAddresses: [BetResult, Address][] = [];
@@ -190,8 +194,8 @@ export async function gradePromoBets(promoId: number): Promise<number> {
          new Uint8Array(batch.map(([r]) => r)),
          batch.map(([, addr]) => addr),
       );
-      await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER], true);
-      await sendAndConfirmInstructions([ix], [ADMIN_SIGNER], true);
+      await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
+      await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    }
 
    return resultAddresses.length;

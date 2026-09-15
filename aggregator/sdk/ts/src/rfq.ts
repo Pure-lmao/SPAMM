@@ -443,7 +443,7 @@ export async function getFillRfqCashoutIxFromData(
       fill.data,
       feepayer,
       ticket as ParlayBetAccountData,
-      fill.origLegs,
+      fill.marketIds,
       fill.mmProgram,
    );
 }

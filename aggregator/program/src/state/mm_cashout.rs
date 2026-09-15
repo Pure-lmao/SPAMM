@@ -36,8 +36,13 @@ impl CashoutQuoteReturn {
 #[repr(C)]
 pub struct GetCashoutQuoteIxData {
    pub instruction_discriminator: u8,
+   /// Stake slice being cashed out.
    pub amount: u64,
+   /// Proportional payout removed from the ticket: the cashed slice's face payout at the
+   /// fill odds (`orig_payout × amount / orig_amount`). Numerator of the MM's fair-value
+   /// price `payout × ODDS_SCALE / current_odds`; also the cap on the accepted payment.
    pub payout: u64,
+   /// Floor on the payment; the MM returns 0 if it cannot meet it.
    pub min_payout: u64,
    pub market_id: MarketId,
    pub side: u8,
@@ -173,8 +178,13 @@ impl FillCashoutQuoteIxData {
 #[repr(C)]
 pub struct GetCashoutQuoteParlayIxHeader {
    pub instruction_discriminator: u8,
+   /// Stake slice being cashed out.
    pub amount: u64,
+   /// Proportional payout removed from the ticket: the cashed slice's face payout at the
+   /// fill odds (`orig_payout × amount / orig_amount`). Numerator of the MM's fair-value
+   /// price `payout × ODDS_SCALE / current_combined_odds`; also the cap on the payment.
    pub payout: u64,
+   /// Floor on the payment; the MM returns 0 if it cannot meet it.
    pub min_payout: u64,
    pub num_legs: u8,
 }

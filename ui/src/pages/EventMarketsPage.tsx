@@ -2,17 +2,20 @@ import { useEffect, useMemo, useState, Fragment, type ReactElement } from "react
 import { createSolanaRpc, type Rpc, type SolanaRpcApi } from "@solana/kit";
 import { useCluster } from "@solana/connector/react";
 import { Link, useLocation, useParams } from "react-router-dom";
+import { fullMarketName, sideLabel, sideLabels } from "spamm-aggregator-sdk";
 import { buildMarketLabel } from "../betting/marketLabel";
 import { refreshEventOddsFromProxy } from "../betting/marketQuotesProxy";
 import { pickBetSide } from "../betting/outcomeSide";
 import type { MarketRow } from "../betting/types";
 import { useBetSlip } from "../betting/BetSlipContext";
-import { resolveHttpRpcUrl } from "../betting/txPipeline";
+import { resolveAppHttpRpcUrl } from "../betting/txPipeline";
+import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
 import { fetchOneEvent } from "../markets/fetchEvent";
 import { fetchPromosForEvent } from "../markets/fetchPromos";
 import { PromoMarketsSection } from "../markets/PromoMarketsSection";
-import { marketPrimaryLabel, periodCaption, shouldShowPeriodBadge } from "../markets/eventMarketsDisplay";
+import { PlayerOverUnderTable, PlayerYesNoTable } from "../markets/PlayerPropsTable";
+import { marketDomKey, periodCaption, shouldShowPeriodBadge, uiMarketDisplayCtx } from "../markets/eventMarketsDisplay";
 import { oddsTableLabels } from "../markets/oddsTableLabels";
 import {
    decimalOddsFromDb,
@@ -32,7 +35,16 @@ type NavState = {
 };
 
 function toMarketRow(m: UiMarket): MarketRow {
-   return { id: m.id, mkt_string: m.mkt_string, period_id: m.period_id, line_value: m.line_value };
+   return {
+      id: m.id,
+      mkt_string: m.mkt_string,
+      period_id: m.period_id,
+      line_value: m.line_value,
+      player_id: m.player_id,
+      player_name: m.player_name,
+      operator: m.operator,
+      sport_id: m.sport_id,
+   };
 }
 
 function PeriodMeta({ sportId, m }: { sportId: number; m: UiMarket }): ReactElement | null {
@@ -52,12 +64,7 @@ export function EventMarketsPage(): ReactElement {
    const [promos, setPromos] = useState<UiPromotionalMarket[]>([]);
    const [err, setErr] = useState<string | null>(null);
 
-   const clusterRpcUrl = useMemo(() => {
-      const env = typeof import.meta.env.VITE_SOLANA_RPC_URL === "string" ? import.meta.env.VITE_SOLANA_RPC_URL.trim() : "";
-      const fromCluster = cluster?.url?.trim() ?? "";
-      const raw = fromCluster !== "" ? fromCluster : env;
-      return resolveHttpRpcUrl(raw !== "" ? raw : null);
-   }, [cluster?.url]);
+   const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
 
    const rpc = useMemo(() => createSolanaRpc(clusterRpcUrl) as Rpc<SolanaRpcApi>, [clusterRpcUrl]);
 
@@ -73,18 +80,25 @@ export function EventMarketsPage(): ReactElement {
       (async () => {
          try {
             const row = await fetchOneEvent(s, l, e);
-            if (cancelled) {
-               return;
-            }
-            setEv(row);
-            setErr(null);
-            const [withLiveOdds, eventPromos] = await Promise.all([
-               refreshEventOddsFromProxy(rpc, row),
-               fetchPromosForEvent(s, l, e).catch(() => [] as UiPromotionalMarket[]),
-            ]);
             if (!cancelled) {
-               setEv(withLiveOdds);
+               setEv(row);
+               setErr(null);
+            }
+            const eventPromos = await fetchPromosForEvent(s, l, e).catch(() => [] as UiPromotionalMarket[]);
+            if (!cancelled) {
                setPromos(eventPromos);
+            }
+            try {
+               const withLiveOdds = await refreshEventOddsFromProxy(rpc, row, (partial) => {
+                  if (!cancelled) {
+                     setEv(partial);
+                  }
+               });
+               if (!cancelled) {
+                  setEv(withLiveOdds);
+               }
+            } catch (quoteErr: unknown) {
+               console.warn("Live odds refresh failed", quoteErr);
             }
          } catch (x: unknown) {
             if (!cancelled) {
@@ -118,25 +132,27 @@ export function EventMarketsPage(): ReactElement {
    }
 
    const mkts = ev.markets ?? [];
-   const groups = groupMarketsForEventPage(mkts).filter((g) => g.kind !== "promo");
+   const teams = { homeName: ev.home_name, awayName: ev.away_name };
+   const groups = groupMarketsForEventPage(mkts, teams).filter((g) => g.kind !== "promo");
    const sid = ev.sport_id;
    const homeHead = ev.home_name.trim() !== "" ? ev.home_name.trim() : oddsTableLabels.home;
    const awayHead = ev.away_name.trim() !== "" ? ev.away_name.trim() : oddsTableLabels.away;
 
    const toggleSheet = (m: UiMarket, column: ReturnType<typeof inferBetColumn>, outcomeIndex: number, dbOdds: number) => {
       const dec = decimalOddsFromDb(dbOdds);
+      const chainSide = pickBetSide(column, m.mkt_string, outcomeIndex, m.id);
       toggleSelection({
          eventTitle: displayEventTitle(ev),
-         marketLabel: buildMarketLabel(column, toMarketRow(m), pickBetSide(column, m.mkt_string, outcomeIndex), {
-            homeName: ev.home_name,
-            awayName: ev.away_name,
-         }),
+         marketLabel: buildMarketLabel(column, toMarketRow(m), chainSide, teams),
          displayedDecimalOdds: dec > 0 ? dec : null,
          eventId: ev.id,
          leagueId: ev.league_id,
          sportApiId: ev.sport_id,
          marketWireId: m.id,
          periodId: m.period_id,
+         playerId: m.player_id ?? 0,
+         playerName: m.player_name ?? "",
+         operator: m.operator || DEFAULT_MARKET_OPERATOR,
          column,
          outcomeIndex,
          mktString: m.mkt_string,
@@ -153,11 +169,26 @@ export function EventMarketsPage(): ReactElement {
          eventId: ev.id,
          marketWireId: m.id,
          periodId: m.period_id,
+         playerId: m.player_id ?? 0,
          column,
          outcomeIndex,
       });
       return ["odd-btn", picked ? "odd-btn--selected" : "", extra].filter(Boolean).join(" ");
    };
+
+   const oddCell = (m: UiMarket, column: ReturnType<typeof inferBetColumn>, i: number, v: number) => (
+      <td key={i} className="event-markets-td-odds">
+         {v === 0 ? (
+            <button type="button" className="odd-btn odd-btn--empty" disabled>
+               —
+            </button>
+         ) : (
+            <button type="button" className={oddBtnClass(m, column, i)} onClick={() => toggleSheet(m, column, i, v)}>
+               <span className="odds-value">{fmtOdd(v)}</span>
+            </button>
+         )}
+      </td>
+   );
 
    return (
       <div className="event-page">
@@ -179,322 +210,265 @@ export function EventMarketsPage(): ReactElement {
             <div className="event-page-sections">
                {groups.map((g, gi) => (
                   <section key={`${g.kind}-${g.title}-${gi}`} className="event-market-section">
-                     {(g.kind === "money" || g.kind === "tq") && (
-                     <div className="event-money-blocks">
-                        {g.rows.map((m, mi) => {
-                           const raw = parseOdds(m.last_odds);
-                           const values = m.mkt_string === "1X2" ? orderOneX2WireToDisplay(raw) : raw;
-                           const column = inferBetColumn(m.mkt_string);
-                           const n = m.mkt_string === "1X2" ? 3 : 2;
-                           return (
-                              <table key={`${m.id}-${m.mkt_string}`} className="event-markets-table event-markets-table--money">
-                                 {mi === 0 ? (
-                                    <caption className="event-market-section-caption">{g.title}</caption>
-                                 ) : null}
-                                 <thead>
-                                    <tr>
-                                       {m.mkt_string === "1X2" ? (
-                                          <>
-                                             <th>{homeHead}</th>
-                                             <th>{oddsTableLabels.draw}</th>
-                                             <th>{awayHead}</th>
-                                          </>
-                                       ) : (
-                                          <>
-                                             <th>{homeHead}</th>
-                                             <th>{awayHead}</th>
-                                          </>
-                                       )}
-                                    </tr>
-                                 </thead>
-                                 <tbody>
-                                    <tr>
-                                       {values.length > 0 ? (
-                                          values.map((v, i) => (
-                                             <td key={i} className="event-markets-td-odds">
-                                                {v === 0 ? (
-                                                   <button type="button" className="odd-btn odd-btn--empty" disabled>
-                                                      —
-                                                   </button>
-                                                ) : (
-                                                   <button
-                                                      type="button"
-                                                      className={oddBtnClass(m, column, i)}
-                                                      onClick={() => toggleSheet(m, column, i, v)}
-                                                   >
-                                                      <span className="odds-value">{fmtOdd(v)}</span>
-                                                   </button>
-                                                )}
-                                             </td>
-                                          ))
-                                       ) : (
-                                          Array.from({ length: n }, (_, i) => (
-                                             <td key={i} className="event-markets-td-odds">
-                                                <button type="button" className="odd-btn odd-btn--empty" disabled>
-                                                   —
-                                                </button>
-                                             </td>
-                                          ))
-                                       )}
-                                    </tr>
-                                    {shouldShowPeriodBadge(sid, m) && g.kind !== "tq" && (
-                                       <tr className="event-markets-handicap-period">
-                                          <td colSpan={n}>
-                                             <PeriodMeta sportId={sid} m={m} />
-                                          </td>
-                                       </tr>
-                                    )}
-                                 </tbody>
-                              </table>
-                           );
-                        })}
-                     </div>
-                     )}
-
-                     {(g.kind === "spread" || g.kind === "asian") && (
-                        <table className="event-markets-table event-markets-table--handicap-pair">
-                        <caption className="event-market-section-caption">{g.title}</caption>
-                        <thead>
-                           <tr>
-                              <th>{homeHead}</th>
-                              <th>{awayHead}</th>
-                           </tr>
-                        </thead>
-                        <tbody>
-                           {g.rows
-                              .map((m) => {
-                                 const values = parseOdds(m.last_odds);
-                                 if (values.length < 2) {
-                                    return null;
-                                 }
-                              const home = values[0]!;
-                              const away = values[1]!;
-                              const homeLine = spreadLineDisplayForOutcome(m, 0);
-                              const awayLine = spreadLineDisplayForOutcome(m, 1);
-                              const homeDead = home === 0 || homeLine === "—";
-                              const awayDead = away === 0 || awayLine === "—";
-                              const column = inferBetColumn(m.mkt_string);
-                              const showPeriod = shouldShowPeriodBadge(sid, m);
-                              return (
-                                 <Fragment key={`${m.id}-${m.mkt_string}`}>
-                                    <tr>
-                                       <td className="event-markets-td-odds">
-                                          <button
-                                             type="button"
-                                             className={oddBtnClass(m, column, 0)}
-                                             disabled={homeDead}
-                                             onClick={() => toggleSheet(m, column, 0, home)}
-                                          >
-                                             <span className={homeLine === "—" ? "odd-btn__line odd-btn__line--na" : "odd-btn__line"}>
-                                                {homeLine}
-                                             </span>
-                                             <span className={`odd-btn__odds odds-value${home === 0 ? " odds-value--na" : ""}`}>
-                                                {fmtOdd(home)}
-                                             </span>
-                                          </button>
-                                       </td>
-                                       <td className="event-markets-td-odds">
-                                          <button
-                                             type="button"
-                                             className={oddBtnClass(m, column, 1)}
-                                             disabled={awayDead}
-                                             onClick={() => toggleSheet(m, column, 1, away)}
-                                          >
-                                             <span className={awayLine === "—" ? "odd-btn__line odd-btn__line--na" : "odd-btn__line"}>
-                                                {awayLine}
-                                             </span>
-                                             <span className={`odd-btn__odds odds-value${away === 0 ? " odds-value--na" : ""}`}>
-                                                {fmtOdd(away)}
-                                             </span>
-                                          </button>
-                                       </td>
-                                    </tr>
-                                    {showPeriod && (
-                                       <tr className="event-markets-handicap-period">
-                                          <td colSpan={2}>
-                                             <PeriodMeta sportId={sid} m={m} />
-                                          </td>
-                                       </tr>
-                                    )}
-                                 </Fragment>
-                              );
-                           })}
-                        </tbody>
-                        </table>
-                     )}
-
-                     {g.kind === "total" && (
-                        <table className="event-markets-table">
-                        <caption className="event-market-section-caption">{g.title}</caption>
-                        <thead>
-                           <tr>
-                              <th className="event-markets-th-line">{oddsTableLabels.line}</th>
-                              <th>{oddsTableLabels.over}</th>
-                              <th>{oddsTableLabels.under}</th>
-                           </tr>
-                        </thead>
-                        <tbody>
-                           {g.rows
-                              .map((m) => {
-                                 const values = parseOdds(m.last_odds);
-                                 if (values.length < 2) {
-                                    return null;
-                                 }
-                              const lineRaw = lineRawForSpreadOrTotal(m, "total");
-                              const lineShown = formatMarketLineDisplay(lineRaw, "total");
-                              const lineMuted = lineShown.trim() === "—" || lineShown.trim() === "";
-                              const o0 = values[0]!;
-                              const o1 = values[1]!;
-                              const column = inferBetColumn(m.mkt_string);
-                              return (
-                                 <tr key={`${m.id}-${m.mkt_string}`}>
-                                    <td className="event-markets-td-line">
-                                       <div className="event-markets-line-cell">
-                                          <span
-                                             className={`event-markets-line-value${lineMuted ? " event-markets-line-value--na" : ""}`}
-                                          >
-                                             {lineShown}
-                                          </span>
-                                          <PeriodMeta sportId={sid} m={m} />
-                                       </div>
-                                    </td>
-                                    <td className="event-markets-td-odds">
-                                       {o0 === 0 ? (
-                                          <button type="button" className="odd-btn odd-btn--empty" disabled>
-                                             —
-                                          </button>
-                                       ) : (
-                                          <button
-                                             type="button"
-                                             className={oddBtnClass(m, column, 0)}
-                                             onClick={() => toggleSheet(m, column, 0, o0)}
-                                          >
-                                             <span className="odds-value">{fmtOdd(o0)}</span>
-                                          </button>
-                                       )}
-                                    </td>
-                                    <td className="event-markets-td-odds">
-                                       {o1 === 0 ? (
-                                          <button type="button" className="odd-btn odd-btn--empty" disabled>
-                                             —
-                                          </button>
-                                       ) : (
-                                          <button
-                                             type="button"
-                                             className={oddBtnClass(m, column, 1)}
-                                             onClick={() => toggleSheet(m, column, 1, o1)}
-                                          >
-                                             <span className="odds-value">{fmtOdd(o1)}</span>
-                                          </button>
-                                       )}
-                                    </td>
-                                 </tr>
-                              );
-                           })}
-                        </tbody>
-                        </table>
-                     )}
-
-                     {g.kind === "btts" && (
-                        <table className="event-markets-table">
-                        <caption className="event-market-section-caption">{g.title}</caption>
-                        <thead>
-                           <tr>
-                              <th>{oddsTableLabels.yes}</th>
-                              <th>{oddsTableLabels.no}</th>
-                           </tr>
-                        </thead>
-                        <tbody>
-                           {g.rows.map((m) => {
-                              const values = parseOdds(m.last_odds);
-                              const column = inferBetColumn(m.mkt_string);
-                              return (
-                                 <tr key={`${m.id}-${m.mkt_string}`}>
-                                    {[0, 1].map((i) => {
-                                       const v = values[i] ?? 0;
-                                       return (
-                                          <td key={i} className="event-markets-td-odds">
-                                             {v === 0 ? (
-                                                <button type="button" className="odd-btn odd-btn--empty" disabled>
-                                                   —
-                                                </button>
-                                             ) : (
-                                                <button
-                                                   type="button"
-                                                   className={oddBtnClass(m, column, i)}
-                                                   onClick={() => toggleSheet(m, column, i, v)}
-                                                >
-                                                   <span className="odds-value">{fmtOdd(v)}</span>
-                                                </button>
-                                             )}
-                                          </td>
-                                       );
-                                    })}
-                                 </tr>
-                              );
-                           })}
-                        </tbody>
-                        </table>
-                     )}
-
-                     {g.kind === "extra" && (
+                     {(g.layout === "threeWay1x2" || g.layout === "twoWayTeams") && (
                         <div className="event-money-blocks">
                            {g.rows.map((m, mi) => {
-                              const values = parseOdds(m.last_odds);
-                              const column = inferBetColumn(m.mkt_string);
+                              const raw = parseOdds(m.last_odds);
+                              const is1x2 = g.layout === "threeWay1x2";
+                              const values = is1x2 ? orderOneX2WireToDisplay(raw) : raw;
+                              const column = inferBetColumn(m.mkt_string, m.id);
+                              const n = is1x2 ? 3 : 2;
                               return (
-                                 <table key={`${m.id}-${m.mkt_string}`} className="event-markets-table event-markets-table--money">
+                                 <table key={marketDomKey(m)} className="event-markets-table event-markets-table--money">
                                     {mi === 0 ? (
-                                       <caption className="event-market-section-caption">{g.title}</caption>
+                                       <caption className="event-market-section-caption" title={g.tooltip}>
+                                          {g.title}
+                                       </caption>
                                     ) : null}
                                     <thead>
                                        <tr>
-                                          <th className="event-markets-th-meta" />
-                                          {values.length <= 1 ? (
-                                             <th>—</th>
-                                          ) : values.length === 2 ? (
+                                          {is1x2 ? (
                                              <>
-                                                <th>{oddsTableLabels.side1}</th>
-                                                <th>{oddsTableLabels.side2}</th>
+                                                <th>{homeHead}</th>
+                                                <th>{oddsTableLabels.draw}</th>
+                                                <th>{awayHead}</th>
                                              </>
                                           ) : (
-                                             values.map((_, i) => (
-                                                <th key={i}>{i + 1}</th>
-                                             ))
+                                             <>
+                                                <th>{homeHead}</th>
+                                                <th>{awayHead}</th>
+                                             </>
                                           )}
                                        </tr>
                                     </thead>
                                     <tbody>
                                        <tr>
+                                          {values.length > 0
+                                             ? values.map((v, i) => oddCell(m, column, i, v))
+                                             : Array.from({ length: n }, (_, i) => (
+                                                  <td key={i} className="event-markets-td-odds">
+                                                     <button type="button" className="odd-btn odd-btn--empty" disabled>
+                                                        —
+                                                     </button>
+                                                  </td>
+                                               ))}
+                                       </tr>
+                                       {shouldShowPeriodBadge(sid, m) && g.kind !== "tq" && (
+                                          <tr className="event-markets-handicap-period">
+                                             <td colSpan={n}>
+                                                <PeriodMeta sportId={sid} m={m} />
+                                             </td>
+                                          </tr>
+                                       )}
+                                    </tbody>
+                                 </table>
+                              );
+                           })}
+                        </div>
+                     )}
+
+                     {(g.layout === "handicapPair") && (
+                        <table className="event-markets-table event-markets-table--handicap-pair">
+                           <caption className="event-market-section-caption" title={g.tooltip}>
+                              {g.title}
+                           </caption>
+                           <thead>
+                              <tr>
+                                 <th>{homeHead}</th>
+                                 <th>{awayHead}</th>
+                              </tr>
+                           </thead>
+                           <tbody>
+                              {g.rows.map((m) => {
+                                 const values = parseOdds(m.last_odds);
+                                 if (values.length < 2) {
+                                    return null;
+                                 }
+                                 const home = values[0]!;
+                                 const away = values[1]!;
+                                 const homeLine = spreadLineDisplayForOutcome({ ...m, id: m.id }, 0);
+                                 const awayLine = spreadLineDisplayForOutcome({ ...m, id: m.id }, 1);
+                                 const homeDead = home === 0 || homeLine === "—";
+                                 const awayDead = away === 0 || awayLine === "—";
+                                 const column = inferBetColumn(m.mkt_string, m.id);
+                                 const showPeriod = shouldShowPeriodBadge(sid, m);
+                                 return (
+                                    <Fragment key={marketDomKey(m)}>
+                                       <tr>
+                                          <td className="event-markets-td-odds">
+                                             <button
+                                                type="button"
+                                                className={oddBtnClass(m, column, 0)}
+                                                disabled={homeDead}
+                                                onClick={() => toggleSheet(m, column, 0, home)}
+                                             >
+                                                <span className={homeLine === "—" ? "odd-btn__line odd-btn__line--na" : "odd-btn__line"}>
+                                                   {homeLine}
+                                                </span>
+                                                <span className={`odd-btn__odds odds-value${home === 0 ? " odds-value--na" : ""}`}>
+                                                   {fmtOdd(home)}
+                                                </span>
+                                             </button>
+                                          </td>
+                                          <td className="event-markets-td-odds">
+                                             <button
+                                                type="button"
+                                                className={oddBtnClass(m, column, 1)}
+                                                disabled={awayDead}
+                                                onClick={() => toggleSheet(m, column, 1, away)}
+                                             >
+                                                <span className={awayLine === "—" ? "odd-btn__line odd-btn__line--na" : "odd-btn__line"}>
+                                                   {awayLine}
+                                                </span>
+                                                <span className={`odd-btn__odds odds-value${away === 0 ? " odds-value--na" : ""}`}>
+                                                   {fmtOdd(away)}
+                                                </span>
+                                             </button>
+                                          </td>
+                                       </tr>
+                                       {showPeriod && (
+                                          <tr className="event-markets-handicap-period">
+                                             <td colSpan={2}>
+                                                <PeriodMeta sportId={sid} m={m} />
+                                             </td>
+                                          </tr>
+                                       )}
+                                    </Fragment>
+                                 );
+                              })}
+                           </tbody>
+                        </table>
+                     )}
+
+                     {(g.layout === "overUnder") && (
+                        <table className="event-markets-table">
+                           <caption className="event-market-section-caption" title={g.tooltip}>
+                              {g.title}
+                           </caption>
+                           <thead>
+                              <tr>
+                                 <th className="event-markets-th-line">{oddsTableLabels.line}</th>
+                                 <th>{oddsTableLabels.over}</th>
+                                 <th>{oddsTableLabels.under}</th>
+                              </tr>
+                           </thead>
+                           <tbody>
+                              {g.rows.map((m) => {
+                                 const values = parseOdds(m.last_odds);
+                                 if (values.length < 2) {
+                                    return null;
+                                 }
+                                 const lineRaw = lineRawForSpreadOrTotal({ ...m, id: m.id }, "total");
+                                 const lineShown = formatMarketLineDisplay(lineRaw, "total");
+                                 const lineMuted = lineShown.trim() === "—" || lineShown.trim() === "";
+                                 const o0 = values[0]!;
+                                 const o1 = values[1]!;
+                                 const column = inferBetColumn(m.mkt_string, m.id);
+                                 return (
+                                    <tr key={marketDomKey(m)}>
+                                       <td className="event-markets-td-line">
+                                          <div className="event-markets-line-cell">
+                                             <span
+                                                className={`event-markets-line-value${lineMuted ? " event-markets-line-value--na" : ""}`}
+                                             >
+                                                {lineShown}
+                                             </span>
+                                             <PeriodMeta sportId={sid} m={m} />
+                                          </div>
+                                       </td>
+                                       {oddCell(m, column, 0, o0)}
+                                       {oddCell(m, column, 1, o1)}
+                                    </tr>
+                                 );
+                              })}
+                           </tbody>
+                        </table>
+                     )}
+
+                     {g.layout === "playerOverUnder" && (
+                        <PlayerOverUnderTable
+                           title={g.title}
+                           tooltip={g.tooltip}
+                           rows={g.rows}
+                           handlers={{
+                              sportId: sid,
+                              teams,
+                              oddCell,
+                           }}
+                        />
+                     )}
+
+                     {g.layout === "playerYesNo" && (
+                        <PlayerYesNoTable
+                           title={g.title}
+                           tooltip={g.tooltip}
+                           rows={g.rows}
+                           handlers={{
+                              sportId: sid,
+                              teams,
+                              oddCell,
+                           }}
+                        />
+                     )}
+
+                     {(g.layout === "yesNo") && (
+                        <table className="event-markets-table">
+                           <caption className="event-market-section-caption" title={g.tooltip}>
+                              {g.title}
+                           </caption>
+                           <thead>
+                              <tr>
+                                 <th>{oddsTableLabels.yes}</th>
+                                 <th>{oddsTableLabels.no}</th>
+                              </tr>
+                           </thead>
+                           <tbody>
+                              {g.rows.map((m) => {
+                                 const values = parseOdds(m.last_odds);
+                                 const column = inferBetColumn(m.mkt_string, m.id);
+                                 return (
+                                    <tr key={marketDomKey(m)}>
+                                       {[0, 1].map((i) => oddCell(m, column, i, values[i] ?? 0))}
+                                    </tr>
+                                 );
+                              })}
+                           </tbody>
+                        </table>
+                     )}
+
+                     {(g.layout === "multiWay" || g.layout === "moneyOdds" || g.layout === "correctScore") && (
+                        <div className="event-money-blocks">
+                           {g.rows.map((m, mi) => {
+                              const values = parseOdds(m.last_odds);
+                              const column = inferBetColumn(m.mkt_string, m.id);
+                              const ctx = uiMarketDisplayCtx(m, teams);
+                              const headers =
+                                 g.layout === "correctScore"
+                                    ? [sideLabel(m.id, 0, ctx)]
+                                    : sideLabels(m.id, ctx);
+                              const n = Math.max(headers.length, values.length, 1);
+                              return (
+                                 <table key={marketDomKey(m)} className="event-markets-table event-markets-table--money">
+                                    {mi === 0 ? (
+                                       <caption className="event-market-section-caption" title={g.tooltip}>
+                                          {g.title}
+                                       </caption>
+                                    ) : null}
+                                    <thead>
+                                       <tr>
+                                          <th className="event-markets-th-meta" />
+                                          {headers.slice(0, n).map((h, i) => (
+                                             <th key={i}>{h}</th>
+                                          ))}
+                                       </tr>
+                                    </thead>
+                                    <tbody>
+                                       <tr>
                                           <td className="event-markets-td-meta">
-                                             <div className="event-market-type">{marketPrimaryLabel(sid, m)}</div>
+                                             <div className="event-market-type">{fullMarketName(m.id, ctx)}</div>
                                              <PeriodMeta sportId={sid} m={m} />
                                           </td>
-                                          {values.length > 0 ? (
-                                             values.map((v, i) => (
-                                                <td key={i} className="event-markets-td-odds">
-                                                   {v === 0 ? (
-                                                      <button type="button" className="odd-btn odd-btn--empty" disabled>
-                                                         —
-                                                      </button>
-                                                   ) : (
-                                                      <button
-                                                         type="button"
-                                                         className={oddBtnClass(m, column, i)}
-                                                         onClick={() => toggleSheet(m, column, i, v)}
-                                                      >
-                                                         <span className="odds-value">{fmtOdd(v)}</span>
-                                                      </button>
-                                                   )}
-                                                </td>
-                                             ))
-                                          ) : (
-                                             <td className="event-markets-td-odds">
-                                                <button type="button" className="odd-btn odd-btn--empty" disabled>
-                                                   —
-                                                </button>
-                                             </td>
-                                          )}
+                                          {Array.from({ length: n }, (_, i) => oddCell(m, column, i, values[i] ?? 0))}
                                        </tr>
                                     </tbody>
                                  </table>

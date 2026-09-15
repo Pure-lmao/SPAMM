@@ -54,12 +54,10 @@ export const RFQ_NETWORK_LOCAL = 3;
 export const RFQ_NETWORK_DOMAIN = RFQ_NETWORK_DEVNET;
 
 /** RFQ signed-message kind byte (after `networkDomain`). See `types.ts` for wire layouts. */
-export {
-   RFQ_BET_MESSAGE_KIND,
-   RFQ_PARLAY_MESSAGE_KIND,
-   RFQ_CASHOUT_MESSAGE_KIND,
-   RFQ_CASHOUT_PARLAY_MESSAGE_KIND,
-} from './types.js';
+export const RFQ_BET_MESSAGE_KIND = 1;
+export const RFQ_PARLAY_MESSAGE_KIND = 2;
+export const RFQ_CASHOUT_MESSAGE_KIND = 3;
+export const RFQ_CASHOUT_PARLAY_MESSAGE_KIND = 4;
 
 export const MINT_ID: Address = address(
    'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr',

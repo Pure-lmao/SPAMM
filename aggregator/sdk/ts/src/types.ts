@@ -6,7 +6,7 @@ import type { Address, ReadonlyUint8Array } from '@solana/kit';
  * for these values remains `u32` (see `ODDS_SCALE` in `constants.ts`).
  */
 
-import { ADDRESS_LEN, MAX_NUMBER_OF_MMS, MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS, U32_LEN, U64_LEN } from './constants.js';
+import { ADDRESS_LEN, MAX_NUMBER_OF_MMS, MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS, U32_LEN, U64_LEN } from './constants';
 
 export { MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS };
 
@@ -135,6 +135,9 @@ export enum Sport {
    Basketball = 4,
    IceHockey = 5,
    Tennis = 6,
+   Golf = 7,
+   Motorsports = 8,
+   Cricket = 9,
    Cs2 = 101,
    Dota = 102,
    Lol = 103,
@@ -235,7 +238,7 @@ export type GetParlayQuoteReturnWire = {
  */
 export const NETTING_PDA_DISCRIMINATOR = 6;
 
-export type NettingPdaDataHeader = {
+export type NettingAccountDataHeader = {
    discriminator: number;
    bump: number;
    eventId: EventId;
@@ -252,7 +255,7 @@ export type NettingLine = {
    open1: bigint;
 };
 
-export type NettingPdaAccountData = NettingPdaDataHeader & {
+export type NettingAccountData = NettingAccountDataHeader & {
    lines: NettingLine[];
 };
 
@@ -315,7 +318,7 @@ export type MmParlayQuoteBuffer = {
 /** Aggregator config PDA (`CONFIG_PDA_DISCRIMINATOR`). */
 export const CONFIG_PDA_DISCRIMINATOR = 4;
 
-export type ConfigPdaData = {
+export type ConfigAccountData = {
    discriminator: number;
    status: number;
    authority: Address;
@@ -324,12 +327,12 @@ export type ConfigPdaData = {
 /** MM list PDA header (`MM_LIST_PDA_DISCRIMINATOR`). */
 export const MM_LIST_PDA_DISCRIMINATOR = 3;
 
-export type MmListPdaHeader = {
+export type MmListAccountDataHeader = {
    discriminator: number;
    numberOfMms: number;
 };
 
-export type MmListPdaData = MmListPdaHeader & {
+export type MmListAccountData = MmListAccountDataHeader & {
    mmProgramAddresses: Address[];
 };
 
@@ -355,7 +358,7 @@ export type EventStateData = {
 /** MM market data PDA body (`MM_MARKET_DATA_PDA_DISCRIMINATOR`). */
 export const MM_MARKET_DATA_PDA_DISCRIMINATOR = 100;
 
-export type MmMarketDataPdaData = {
+export type MmMarketDataAccountData = {
    discriminator: number;
    bump: number;
 };
@@ -363,7 +366,7 @@ export type MmMarketDataPdaData = {
 /** MM encumbrance PDA (`MM_ENCUMBRANCE_PDA_DISCRIMINATOR`). */
 export const MM_ENCUMBRANCE_PDA_DISCRIMINATOR = 5;
 
-export type MmEncumbrancePdaData = {
+export type MmEncumbranceAccountData = {
    discriminator: number;
    bump: number;
    encumbrance: bigint;
@@ -372,7 +375,7 @@ export type MmEncumbrancePdaData = {
 /** MM `["config"]` PDA under the SPAMM program (`MM_ACCOUNT_CONFIG_DISCRIMINATOR`). */
 export const MM_ACCOUNT_CONFIG_DISCRIMINATOR = 101;
 
-export type MmAccountConfig = {
+export type MMConfigAccountData = {
    discriminator: number;
    bump: number;
    admin: Address;
@@ -381,10 +384,12 @@ export type MmAccountConfig = {
 
 export const RFQ_SIGNATURE_LEN = 64;
 /** Byte after `networkDomain`: bet=1, parlay=2, cashout bet=3, cashout parlay=4 (`rfq_message.rs`). */
-export const RFQ_BET_MESSAGE_KIND = 1;
-export const RFQ_PARLAY_MESSAGE_KIND = 2;
-export const RFQ_CASHOUT_MESSAGE_KIND = 3;
-export const RFQ_CASHOUT_PARLAY_MESSAGE_KIND = 4;
+export {
+   RFQ_BET_MESSAGE_KIND,
+   RFQ_PARLAY_MESSAGE_KIND,
+   RFQ_CASHOUT_MESSAGE_KIND,
+   RFQ_CASHOUT_PARLAY_MESSAGE_KIND,
+} from './constants.js';
 /** Canonical RFQ bet message: `networkDomain` + `kind` + offer body + `mmProgramId`. */
 export const RFQ_BET_MESSAGE_LEN =
    1 + 1 + ADDRESS_LEN + U64_LEN + MARKET_ID_WIRE_SIZE + EVENT_GAME_STATE_LEN + 2 + 1 + U64_LEN + U32_LEN + U32_LEN + ADDRESS_LEN;
@@ -532,7 +537,7 @@ export enum FreebetState {
    Used = 1,
 }
 
-export type FreebetIssuer = {
+export type FreebetIssuerAccountData = {
    discriminator: number;
    bump: number;
    auth: Address;
@@ -568,7 +573,7 @@ export type IssueFreebetIxData = {
    allowedOperators: Address[];
 };
 
-export type CashoutEscrow = {
+export type CashoutEscrowAccountData = {
    discriminator: number;
    bump: number;
    owner: Address;
@@ -811,7 +816,7 @@ export type RfqCashoutFillIxFromQuote =
         kind: 'fillRfqParlayCashout';
         data: FillRfqParlayCashoutIxData;
         mmProgram: Address;
-        origLegs: { marketId: MarketId }[];
+        marketIds: MarketId[];
      };
 
 export type MmReturnData = {
@@ -819,7 +824,7 @@ export type MmReturnData = {
    oddsScaled: bigint;
 };
 
-/** One MM quote from `get_quote_proxy` / `get_parlay_quote_proxy` return data (`ProxyQuoteData` on-chain). */
+/** One MM quote from `get_quote_proxy` return data (`ProxyQuoteData` on-chain). */
 export type ProxyQuoteData = {
    mmAddress: Address;
    maxAmount: bigint;
@@ -1023,7 +1028,6 @@ export type DecodedAggregatorInstruction =
    | { kind: 'getCashoutQuoteProxy'; data: FillCashoutIxData }
    | { kind: 'getParlayCashoutQuoteProxy'; data: FillParlayCashoutIxData }
    | { kind: 'gradeBets'; betResults: Uint8Array }
-   /** Grade mask for one parlay account; length equals `num_legs`. */
    | { kind: 'gradeParlay'; legGradeMask: Uint8Array }
    | { kind: 'settleBet' }
    | { kind: 'settleParlay' }
@@ -1036,3 +1040,16 @@ export type DecodedAggregatorInstruction =
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint }
    | { kind: 'writeArbitraryData'; data: Uint8Array }
    | { kind: 'forceClosePda' };
+
+export type DecodedAccountData = 
+   | { kind: 'betAccount'; data: BetAccountData }
+   | { kind: 'parlayBetAccount'; data: ParlayBetAccountData }
+   | { kind: 'mmListAccount'; data: MmListAccountData }
+   | { kind: 'configAccount'; data: ConfigAccountData }
+   | { kind: 'mmEncumbranceAccount'; data: MmEncumbranceAccountData }
+   | { kind: 'nettingAccount'; data: NettingAccountData }
+   | { kind: 'cashoutEscrowAccount'; data: CashoutEscrowAccountData }
+   | { kind: 'cashoutAccount'; data: CashoutAccountData }
+   | { kind: 'cashoutParlayAccount'; data: CashoutParlayAccountData }
+   | { kind: 'freebetIssuerAccount'; data: FreebetIssuerAccountData }
+   | { kind: 'freebetAccount'; data: FreebetAccountData };

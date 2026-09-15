@@ -84,7 +84,7 @@ import {
    type BetAccountData,
    type BetFiller,
    type CashoutAccountData,
-   type CashoutEscrow,
+   type CashoutEscrowAccountData,
    type CashoutParlayAccountData,
    type EventId,
    type FillBetIxData,
@@ -917,19 +917,6 @@ export async function getRevokeFreebetIx(auth: Address, freebetId: number): Prom
    };
 }
 
-async function spliceFreebetFillAccounts(
-   accounts: Instruction['accounts'],
-   issuerAuth: Address,
-   freebetId: number,
-): Promise<NonNullable<Instruction['accounts']>> {
-   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
-   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
-   const next = [...(accounts ?? [])];
-   next.splice(2, 1, ro(issuerPda), rw(issuerAta), rw(freebetPda));
-   return next;
-}
-
 async function cashoutEscrowAccountMetas(
    user: Address,
    origBetId: bigint,
@@ -969,6 +956,7 @@ export async function getFillBetIx(
    const [betPda] = await getBetPda(user, fill.betId);
    const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
+   const accounts: { address: Address; role: AccountRole }[] = [];
    const baseAccounts = [
       ws(feepayer),
       rs(user),
@@ -984,7 +972,7 @@ export async function getFillBetIx(
       ro(SYSVAR_INSTRUCTIONS_ID),
       ro(CLOCK_ID)
    ];
-   const perMarketMakerAccounts: { address: Address; role: AccountRole }[] = [];
+   accounts.push(...baseAccounts);
    for (const mmProgram of mmPrograms) {
       const [mmConfigPda] = await getMmConfigPda(mmProgram);
       const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
@@ -1001,7 +989,7 @@ export async function getFillBetIx(
       const nettingPda = hasActiveNetting
          ? (await getNettingPda(mmProgram, fill.marketId.eventId))[0]
          : SYSTEM_PROGRAM_ID;
-      perMarketMakerAccounts.push(
+      accounts.push(
          ro(mmProgram),
          rw(mmConfigPda),
          rw(eventStatePda),
@@ -1015,7 +1003,7 @@ export async function getFillBetIx(
    }
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [...baseAccounts, ...perMarketMakerAccounts],
+      accounts,
       data: encodeAggregatorInstructionData({
          kind: 'fillBet',
          data: fill,
@@ -1148,6 +1136,10 @@ function requireFreebetId(freebetId: number): void {
 
 /**
  * **`freebet_fill_bet`** — auction fill funded from the issuer ATA (`freebet_id` prefix + `FillBetIxData`).
+ *
+ * **Rust:** `aggregator::instructions::freebet_fill_bet::process` (`FREEBET_FILL_BET_IX_DISCRIMINATOR` = 15).
+ * Accounts: 15 fixed + 9 × N MM accounts. Same as {@link getFillBetIx} except `user_ata` is replaced
+ * by `issuer_pda` (readonly), `issuer_ata` (writable) and `freebet_pda` (writable) at indices 2–4.
  */
 export async function getFreebetFillBetIx(
    fill: FillBetIxData,
@@ -1159,16 +1151,74 @@ export async function getFreebetFillBetIx(
    hasActiveNetting: boolean,
 ): Promise<Instruction> {
    requireFreebetId(freebetId);
-   const ix = await getFillBetIx(fill, feepayer, user, mmPrograms, hasActiveNetting);
+   validateFillBetIxData(fill, 'fill');
+   if (mmPrograms.length === 0 || mmPrograms.length > MAX_NUMBER_OF_MMS) {
+      throw new RangeError(`mmPrograms.length must be in [1, ${MAX_NUMBER_OF_MMS}]`);
+   }
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
+   const [betPda] = await getBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const accounts: { address: Address; role: AccountRole }[] = [
+      ws(feepayer),
+      rs(user),
+      ro(issuerPda),
+      rw(issuerAta),
+      rw(freebetPda),
+      rw(betPda),
+      rw(betAta),
+      ro(configPda),
+      ro(MINT_ID),
+      ro(SPL_TOKEN_PROGRAM_ID),
+      ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+      ro(SYSVAR_RENT_ID),
+      ro(SYSTEM_PROGRAM_ID),
+      ro(SYSVAR_INSTRUCTIONS_ID),
+      ro(CLOCK_ID),
+   ];
+   for (const mmProgram of mmPrograms) {
+      const [mmConfigPda] = await getMmConfigPda(mmProgram);
+      const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
+      const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
+      const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+      const liabilityAta = await getAta(
+         mmEncumbrancePda,
+         MINT_ID,
+         SPL_TOKEN_PROGRAM_ID,
+         SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+      );
+      const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+      const nettingPda = hasActiveNetting
+         ? (await getNettingPda(mmProgram, fill.marketId.eventId))[0]
+         : SYSTEM_PROGRAM_ID;
+      accounts.push(
+         ro(mmProgram),
+         rw(mmConfigPda),
+         rw(eventStatePda),
+         rw(marketDataPda),
+         rw(mmQuoteBufferPda),
+         rw(mmEncumbrancePda),
+         rw(liabilityAta),
+         rw(mmTokenAta),
+         rw(nettingPda),
+      );
+   }
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: await spliceFreebetFillAccounts(ix.accounts, issuerAuth, freebetId),
+      accounts,
       data: encodeAggregatorInstructionData({ kind: 'freebetFillBet', freebetId, data: fill }),
    };
 }
 
 /**
  * **`freebet_fill_parlay`** — parlay auction fill funded from the issuer ATA.
+ *
+ * **Rust:** `aggregator::instructions::freebet_fill_parlay::process` (`FREEBET_FILL_PARLAY_IX_DISCRIMINATOR` = 16).
+ * Accounts: 15 fixed + 6 + 2 × L MM accounts. Same as {@link getFillParlayIx} except `user_ata` is replaced
+ * by `issuer_pda` (readonly), `issuer_ata` (writable) and `freebet_pda` (writable) at indices 2–4.
  */
 export async function getFreebetFillParlayIx(
    fill: FillParlayIxData,
@@ -1179,16 +1229,65 @@ export async function getFreebetFillParlayIx(
    mmProgram: Address,
 ): Promise<Instruction> {
    requireFreebetId(freebetId);
-   const ix = await getFillParlayIx(fill, feepayer, user, mmProgram);
+   validateFillParlayIxData(fill, 'fill');
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
+   const [betPda] = await getParlayBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const liabilityAta = await getAta(
+      mmEncumbrancePda,
+      MINT_ID,
+      SPL_TOKEN_PROGRAM_ID,
+      SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   );
+   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const accounts = [
+      ws(feepayer),
+      rs(user),
+      ro(issuerPda),
+      rw(issuerAta),
+      rw(freebetPda),
+      rw(betPda),
+      rw(betAta),
+      ro(configPda),
+      ro(MINT_ID),
+      ro(SPL_TOKEN_PROGRAM_ID),
+      ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+      ro(SYSVAR_RENT_ID),
+      ro(SYSTEM_PROGRAM_ID),
+      ro(SYSVAR_INSTRUCTIONS_ID),
+      ro(CLOCK_ID),
+      ro(mmProgram),
+      rw(mmConfigPda),
+      rw(mmParlayQuoteBufferPda),
+      rw(mmEncumbrancePda),
+      rw(liabilityAta),
+      rw(mmTokenAta),
+   ];
+   for (let legIdx = 0; legIdx < fill.numLegs; legIdx++) {
+      const leg = fill.legs[legIdx]!;
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, leg.marketId);
+      const [eventStatePda] = await getEventStatePda(mmProgram, leg.marketId.eventId);
+      accounts.push(ro(marketDataPda), ro(eventStatePda));
+   }
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: await spliceFreebetFillAccounts(ix.accounts, issuerAuth, freebetId),
+      accounts,
       data: encodeAggregatorInstructionData({ kind: 'freebetFillParlay', freebetId, data: fill }),
    };
 }
 
 /**
  * **`freebet_fill_rfq_bet`** — RFQ single fill funded from the issuer ATA. Signed RFQ payload is unprefixed.
+ *
+ * **Rust:** `aggregator::instructions::freebet_fill_rfq_bet::process` (`FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR` = 17).
+ * Accounts: 15 fixed + 8 MM accounts. Same as {@link getFillRfqBetIx} except `user_ata` is replaced
+ * by `issuer_pda` (readonly), `issuer_ata` (writable) and `freebet_pda` (writable) at indices 2–4.
  */
 export async function getFreebetFillRfqBetIx(
    fill: FillRfqBetIxData,
@@ -1200,16 +1299,64 @@ export async function getFreebetFillRfqBetIx(
    hasActiveNetting: boolean,
 ): Promise<Instruction> {
    requireFreebetId(freebetId);
-   const ix = await getFillRfqBetIx(fill, feepayer, user, mmProgram, hasActiveNetting);
+   validateFillRfqBetIxData(fill, 'fill');
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
+   const [betPda] = await getBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
+   const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const liabilityAta = await getAta(
+      mmEncumbrancePda,
+      MINT_ID,
+      SPL_TOKEN_PROGRAM_ID,
+      SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   );
+   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const nettingPda = hasActiveNetting
+      ? (await getNettingPda(mmProgram, fill.marketId.eventId))[0]
+      : SYSTEM_PROGRAM_ID;
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: await spliceFreebetFillAccounts(ix.accounts, issuerAuth, freebetId),
+      accounts: [
+         ws(feepayer),
+         rs(user),
+         ro(issuerPda),
+         rw(issuerAta),
+         rw(freebetPda),
+         rw(betPda),
+         rw(betAta),
+         ro(configPda),
+         ro(MINT_ID),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSVAR_RENT_ID),
+         ro(SYSTEM_PROGRAM_ID),
+         ro(SYSVAR_INSTRUCTIONS_ID),
+         ro(CLOCK_ID),
+         ro(mmProgram),
+         rw(mmConfigPda),
+         rw(eventStatePda),
+         rw(marketDataPda),
+         rw(mmEncumbrancePda),
+         rw(liabilityAta),
+         rw(mmTokenAta),
+         rw(nettingPda),
+      ],
       data: encodeAggregatorInstructionData({ kind: 'freebetFillRfqBet', freebetId, data: fill }),
    };
 }
 
 /**
  * **`freebet_fill_rfq_parlay`** — RFQ parlay fill funded from the issuer ATA. Signed RFQ payload is unprefixed.
+ *
+ * **Rust:** `aggregator::instructions::freebet_fill_rfq_parlay::process` (`FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR` = 18).
+ * Accounts: 15 fixed + 6 MM accounts. Same as {@link getFillRfqParlayIx} except `user_ata` is replaced
+ * by `issuer_pda` (readonly), `issuer_ata` (writable) and `freebet_pda` (writable) at indices 2–4.
  */
 export async function getFreebetFillRfqParlayIx(
    fill: FillRfqParlayIxData,
@@ -1220,10 +1367,46 @@ export async function getFreebetFillRfqParlayIx(
    mmProgram: Address,
 ): Promise<Instruction> {
    requireFreebetId(freebetId);
-   const ix = await getFillRfqParlayIx(fill, feepayer, user, mmProgram);
+   validateFillRfqParlayIxData(fill, 'fill');
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
+   const [betPda] = await getParlayBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const liabilityAta = await getAta(
+      mmEncumbrancePda,
+      MINT_ID,
+      SPL_TOKEN_PROGRAM_ID,
+      SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   );
+   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: await spliceFreebetFillAccounts(ix.accounts, issuerAuth, freebetId),
+      accounts: [
+         ws(feepayer),
+         rs(user),
+         ro(issuerPda),
+         rw(issuerAta),
+         rw(freebetPda),
+         rw(betPda),
+         rw(betAta),
+         ro(configPda),
+         ro(MINT_ID),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSVAR_RENT_ID),
+         ro(SYSTEM_PROGRAM_ID),
+         ro(SYSVAR_INSTRUCTIONS_ID),
+         ro(CLOCK_ID),
+         ro(mmProgram),
+         rw(mmConfigPda),
+         rw(mmEncumbrancePda),
+         rw(liabilityAta),
+         rw(mmTokenAta),
+      ],
       data: encodeAggregatorInstructionData({ kind: 'freebetFillRfqParlay', freebetId, data: fill }),
    };
 }
@@ -1280,7 +1463,7 @@ export async function getFillCashoutIx(
       delay,
    );
    const [configPda] = await getConfigPda();
-   const baseAccounts = [
+   const accounts = [
       ws(feepayer),
       rw(bet.feepayer),
       rs(user),
@@ -1300,7 +1483,6 @@ export async function getFillCashoutIx(
       ro(SYSVAR_INSTRUCTIONS_ID),
       ro(CLOCK_ID),
    ];
-   const perMarketMakerAccounts: { address: Address; role: AccountRole }[] = [];
    for (const mmProgram of mmPrograms) {
       const [mmConfigPda] = await getMmConfigPda(mmProgram);
       const [eventStatePda] = await getEventStatePda(mmProgram, marketId.eventId);
@@ -1309,7 +1491,7 @@ export async function getFillCashoutIx(
       const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
       const mmLiabilityAta = await getAta(mmEncumbrancePda);
       const mmTokenAta = await getAta(mmConfigPda);
-      perMarketMakerAccounts.push(
+      accounts.push(
          ro(mmProgram),
          rw(mmConfigPda),
          rw(eventStatePda),
@@ -1322,7 +1504,7 @@ export async function getFillCashoutIx(
    }
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [...baseAccounts, ...perMarketMakerAccounts],
+      accounts,
       data: encodeAggregatorInstructionData({ kind: 'fillCashout', data: fill }),
    };
 }
@@ -1338,8 +1520,8 @@ export async function getFillParlayCashoutIx(
    fill: FillParlayCashoutIxData,
    feepayer: Address,
    parlay: ParlayBetAccountData,
-   origLegs: readonly { marketId: MarketId }[],
-   mmProgram: Address,
+   marketIds: MarketId[],
+   fillingMm: Address,
 ): Promise<Instruction> {
    if (parlay.legs.length !== fill.numLegs) {
       throw new RangeError('parlay.legs.length must equal fill.numLegs');
@@ -1353,14 +1535,14 @@ export async function getFillParlayCashoutIx(
    if (parlay.freebetId !== 0) {
       throw new RangeError('cannot cash out a freebet ticket');
    }
-   if (origLegs.length !== fill.numLegs) {
-      throw new RangeError('origLegs.length must equal fill.numLegs');
+   if (marketIds.length !== fill.numLegs) {
+      throw new RangeError('marketIds.length must equal fill.numLegs');
    }
    const user = parlay.owner;
    const userAta = await getAta(user);
    const [betPda] = await getParlayBetPda(user, fill.origBetId);
    const betAta = await getAta(betPda);
-   const [cashoutPda] = await getCashoutParlayPda(mmProgram, fill.cashoutId);
+   const [cashoutPda] = await getCashoutParlayPda(fillingMm, fill.cashoutId);
    const cashoutAta = await getAta(cashoutPda);
    const delay = parlayCashoutRequiresDelay(parlay.legs, fill.snapshots);
    const [escrowPdaMeta, escrowAtaMeta] = await cashoutEscrowAccountMetas(
@@ -1369,15 +1551,15 @@ export async function getFillParlayCashoutIx(
       delay,
    );
    const [configPda] = await getConfigPda();
-   const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [mmParlayQuoteBuffer] = await getMmParlayQuoteBufferPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmConfigPda] = await getMmConfigPda(fillingMm);
+   const [mmParlayQuoteBuffer] = await getMmParlayQuoteBufferPda(fillingMm);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(fillingMm);
    const mmLiabilityAta = await getAta(mmEncumbrancePda);
    const mmTokenAta = await getAta(mmConfigPda);
    const legAccounts: { address: Address; role: AccountRole }[] = [];
-   for (const leg of origLegs) {
-      const [marketDataPda] = await getMmMarketDataPda(mmProgram, leg.marketId);
-      const [eventStatePda] = await getEventStatePda(mmProgram, leg.marketId.eventId);
+   for (const mid of marketIds) {
+      const [marketDataPda] = await getMmMarketDataPda(fillingMm, mid);
+      const [eventStatePda] = await getEventStatePda(fillingMm, mid.eventId);
       legAccounts.push(ro(marketDataPda), ro(eventStatePda));
    }
    return {
@@ -1401,7 +1583,7 @@ export async function getFillParlayCashoutIx(
          ro(SYSTEM_PROGRAM_ID),
          ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
-         ro(mmProgram),
+         ro(fillingMm),
          rw(mmConfigPda),
          rw(mmParlayQuoteBuffer),
          rw(mmEncumbrancePda),
@@ -1508,8 +1690,8 @@ export async function getFillRfqParlayCashoutIx(
    fill: FillRfqParlayCashoutIxData,
    feepayer: Address,
    parlay: ParlayBetAccountData,
-   origLegs: readonly { marketId: MarketId }[],
-   mmProgram: Address,
+   marketIds: MarketId[],
+   fillingMm: Address,
 ): Promise<Instruction> {
    if (parlay.legs.length !== fill.numLegs) {
       throw new RangeError('parlay.legs.length must equal fill.numLegs');
@@ -1523,14 +1705,14 @@ export async function getFillRfqParlayCashoutIx(
    if (parlay.freebetId !== 0) {
       throw new RangeError('cannot cash out a freebet ticket');
    }
-   if (origLegs.length !== fill.numLegs) {
-      throw new RangeError('origLegs.length must equal fill.numLegs');
+   if (marketIds.length !== fill.numLegs) {
+      throw new RangeError('marketIds.length must equal fill.numLegs');
    }
    const user = parlay.owner;
    const userAta = await getAta(user);
    const [betPda] = await getParlayBetPda(user, fill.origBetId);
    const betAta = await getAta(betPda);
-   const [cashoutPda] = await getCashoutParlayPda(mmProgram, fill.cashoutId);
+   const [cashoutPda] = await getCashoutParlayPda(fillingMm, fill.cashoutId);
    const cashoutAta = await getAta(cashoutPda);
    const delay = parlayCashoutRequiresDelay(parlay.legs, fill.snapshots);
    const [escrowPdaMeta, escrowAtaMeta] = await cashoutEscrowAccountMetas(
@@ -1539,8 +1721,8 @@ export async function getFillRfqParlayCashoutIx(
       delay,
    );
    const [configPda] = await getConfigPda();
-   const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmConfigPda] = await getMmConfigPda(fillingMm);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(fillingMm);
    const mmLiabilityAta = await getAta(mmEncumbrancePda);
    const mmTokenAta = await getAta(mmConfigPda);
    return {
@@ -1564,7 +1746,7 @@ export async function getFillRfqParlayCashoutIx(
          ro(SYSTEM_PROGRAM_ID),
          ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
-         ro(mmProgram),
+         ro(fillingMm),
          rw(mmConfigPda),
          rw(mmEncumbrancePda),
          rw(mmLiabilityAta),
@@ -1583,7 +1765,7 @@ export async function getFillRfqParlayCashoutIx(
  */
 export async function getClaimCashoutEscrowIx(
    feepayer: Address,
-   escrow: CashoutEscrow,
+   escrow: CashoutEscrowAccountData,
    ticket: Pick<BetAccountData, 'feepayer'> | Pick<ParlayBetAccountData, 'feepayer'>,
 ): Promise<Instruction> {
    const user = escrow.owner;
@@ -1630,7 +1812,7 @@ export async function getClaimCashoutEscrowIx(
  */
 export async function getRevertCashoutIx(
    feepayer: Address,
-   escrow: CashoutEscrow,
+   escrow: CashoutEscrowAccountData,
 ): Promise<Instruction> {
    const user = escrow.owner;
    const userAta = await getAta(user);
@@ -1938,7 +2120,7 @@ export async function getGetMarketQuotesProxyIx(
 }
 
 /**
- * **`get_parlay_quote_proxy`** — CPI each MM `get_quote_parlay`, return `ProxyQuoteData[]` via transaction return data.
+ * **`get_parlay_quote_proxy`** — CPI each MM `get_quote_parlay`, return `ProxyParlayQuoteData[]` via transaction return data.
  *
  * **Rust:** `get_parlay_quote_proxy::get_parlay_quote_proxy` (`GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR` = 31). Body matches `fill_parlay` (`FillParlayIxData`; `bet_id` unused). Per MM: `3 + 2 × num_legs` accounts.
  *
@@ -2883,8 +3065,8 @@ export type AggregatorInstructionInput =
         fill: FillParlayCashoutIxData;
         feepayer: Address;
         parlay: ParlayBetAccountData;
-        origLegs: { marketId: MarketId }[];
-        mmProgram: Address;
+        marketIds: MarketId[];
+        fillingMm: Address;
      }
    | {
         kind: 'fillRfqCashout';
@@ -2899,16 +3081,16 @@ export type AggregatorInstructionInput =
         fill: FillRfqParlayCashoutIxData;
         feepayer: Address;
         parlay: ParlayBetAccountData;
-        origLegs: { marketId: MarketId }[];
-        mmProgram: Address;
+        marketIds: MarketId[];
+        fillingMm: Address;
      }
    | {
         kind: 'claimCashoutEscrow';
         feepayer: Address;
-        escrow: CashoutEscrow;
+        escrow: CashoutEscrowAccountData;
         ticket: Pick<BetAccountData, 'feepayer'> | Pick<ParlayBetAccountData, 'feepayer'>;
      }
-   | { kind: 'revertCashout'; feepayer: Address; escrow: CashoutEscrow }
+   | { kind: 'revertCashout'; feepayer: Address; escrow: CashoutEscrowAccountData }
    | {
         kind: 'getMarketQuotesProxy';
         quote: FillBetIxData;
@@ -3105,8 +3287,8 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
             input.fill,
             input.feepayer,
             input.parlay,
-            input.origLegs,
-            input.mmProgram,
+            input.marketIds,
+            input.fillingMm,
          );
       case 'fillRfqCashout':
          return getFillRfqCashoutIx(
@@ -3121,8 +3303,8 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
             input.fill,
             input.feepayer,
             input.parlay,
-            input.origLegs,
-            input.mmProgram,
+            input.marketIds,
+            input.fillingMm,
          );
       case 'claimCashoutEscrow':
          return getClaimCashoutEscrowIx(input.feepayer, input.escrow, input.ticket);

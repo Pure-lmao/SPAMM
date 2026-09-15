@@ -87,14 +87,29 @@ pub fn fold_cashout_parlay_ticket_result_from_account(
    Ok(fold.finish())
 }
 
-#[derive(Default)]
+/// Fold accumulator. `all_*` flags start `true` (neutral identity) so an
+/// all-`Won` / all-void / all-`RolledBack` fold can ever be detected; each
+/// `observe` clears the flags the observed result invalidates.
 struct ParlayFoldState {
    any_lost: bool,
    any_modified: bool,
+   any_pending: bool,
    all_won: bool,
    all_void: bool,
    all_rolled_back: bool,
-   any_pending: bool,
+}
+
+impl Default for ParlayFoldState {
+   fn default() -> Self {
+      Self {
+         any_lost: false,
+         any_modified: false,
+         any_pending: false,
+         all_won: true,
+         all_void: true,
+         all_rolled_back: true,
+      }
+   }
 }
 
 impl ParlayFoldState {
@@ -168,6 +183,7 @@ pub fn product_parlay_odds<L: ParlayLegOddsView>(num_legs: usize, legs: &[L]) ->
    let mut prod = ODDS_SCALE;
    for i in 0..num_legs {
       let leg = legs.get(i).ok_or(ProgramError::InvalidInstructionData)?;
+      log!("product_parlay_odds: leg {} odds_scaled {}", i, leg.odds_scaled());
       if leg.odds_scaled() > 0 {
          prod = prod
             .checked_mul(leg.odds_scaled() as u128).ok_or(ProgramError::ArithmeticOverflow)?
@@ -200,9 +216,6 @@ pub fn validate_parlay_same_event_odds<L: ParlayLegOddsView>(
          }
       }
       if !found {
-         if unlikely(group_count >= MAX_RFQ_PARLAY_LEGS) {
-            return Err(ProgramError::InvalidInstructionData);
-         }
          groups[group_count] = Some((eid, positive));
          group_count += 1;
       }

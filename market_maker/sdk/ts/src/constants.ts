@@ -1,12 +1,10 @@
 import { address, type Address } from '@solana/kit';
-import {
-   ADDRESS_LEN,
-   MAX_RFQ_PARLAY_LEGS as AGGREGATOR_MAX_RFQ_PARLAY_LEGS,
-   MAX_PARLAY_LEGS as AGGREGATOR_MAX_PARLAY_LEGS,
-   ODDS_SCALE as AGGREGATOR_ODDS_SCALE,
-   U32_LEN,
-   U64_LEN,
-} from 'spamm-aggregator-sdk';
+
+
+const ADDRESS_LEN = 32;
+const U32_LEN = 4;
+const U64_LEN = 8;
+
 
 export { ADDRESS_LEN, U32_LEN, U64_LEN };
 
@@ -43,13 +41,13 @@ export const CLOCK_ID: Address = address(
 );
 
 /** `constants::ODDS_SCALE` — odds are scaled by this factor (e.g. 15000 = 1.5x). */
-export const ODDS_SCALE = AGGREGATOR_ODDS_SCALE;
+export const ODDS_SCALE = 10000n;
 
 /** `constants::MAX_PARLAY_LEGS` — auction fill / cashout / get-quote max. */
-export const MAX_PARLAY_LEGS = AGGREGATOR_MAX_PARLAY_LEGS;
+export const MAX_PARLAY_LEGS = 20;
 
 /** `spamm_aggregator::constants::MAX_RFQ_PARLAY_LEGS` — RFQ message / fill / RFQ bet PDA max. */
-export const MAX_RFQ_PARLAY_LEGS = AGGREGATOR_MAX_RFQ_PARLAY_LEGS;
+export const MAX_RFQ_PARLAY_LEGS = 40;
 
 export const MM_ACCOUNT_CONFIG_SEED = 'config' as const;
 export const MM_QUOTE_BUFFER_SEED = 'mm_quote_buffer' as const;

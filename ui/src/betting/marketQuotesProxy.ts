@@ -4,6 +4,7 @@ import {
    getGetMarketQuotesProxyIx,
    maxProxyMmsForMarketQuotes,
    MAX_NUMBER_OF_MMS_PROXY,
+   MIN_BET_AMOUNT,
    numSidesForMkt,
    ODDS_SCALE,
    type ProxyMarketMmQuotes,
@@ -14,13 +15,15 @@ import {
    buildMarketId,
    DEFAULT_EVENT_STATE_SEQUENCE,
    EVENT_GAME_STATE_PG,
+   parseOperatorAddress,
    SIM_FEE_PAYER_ADDRESS,
 } from "./chainIds";
 import { getMmListCached } from "./mmCache";
-import { simulateInstructionReturnData } from "./txPipeline";
+import { runPacedRpc, simulateInstructionReturnData } from "./txPipeline";
 
 const QUOTE_PROBE_BET_ID = 1n;
 const QUOTE_PROBE_MIN_ODDS = ODDS_SCALE + 1n;
+const BLOCKHASH_REFRESH_EVERY = 20;
 
 function bestOddsPerSideFromMarketQuotes(
    quotes: readonly ProxyMarketMmQuotes[],
@@ -38,10 +41,16 @@ function bestOddsPerSideFromMarketQuotes(
    return best;
 }
 
+async function fetchLatestBlockhash(rpc: Rpc<SolanaRpcApi>) {
+   const { value } = await runPacedRpc(() => rpc.getLatestBlockhash({ commitment: "confirmed" }).send());
+   return value;
+}
+
 async function fetchLiveOddsForMarket(
    rpc: Rpc<SolanaRpcApi>,
    market: UiMarket,
    mmPrograms: readonly Address[],
+   lifetime: Awaited<ReturnType<typeof fetchLatestBlockhash>>,
 ): Promise<number[] | null> {
    const numSides = numSidesForMkt(market.id);
    if (numSides === undefined) {
@@ -62,6 +71,8 @@ async function fetchLiveOddsForMarket(
       apiSportToSdk(market.sport_id),
       market.id,
       market.period_id,
+      BigInt(market.player_id ?? 0),
+      parseOperatorAddress(market.operator),
    );
 
    try {
@@ -70,7 +81,7 @@ async function fetchLiveOddsForMarket(
             betId: QUOTE_PROBE_BET_ID,
             marketId,
             side: 0,
-            amount: 1n,
+            amount: MIN_BET_AMOUNT,
             minOddsScaled: QUOTE_PROBE_MIN_ODDS,
             eventGameState: EVENT_GAME_STATE_PG,
             eventStateSequence: DEFAULT_EVENT_STATE_SEQUENCE,
@@ -78,13 +89,19 @@ async function fetchLiveOddsForMarket(
          SIM_FEE_PAYER_ADDRESS,
          mmProgramsForMarket,
       );
-      const returnData = await simulateInstructionReturnData(rpc, quoteIx, SIM_FEE_PAYER_ADDRESS, false);
+      const returnData = await simulateInstructionReturnData(
+         rpc,
+         quoteIx,
+         SIM_FEE_PAYER_ADDRESS,
+         lifetime,
+      );
       if (!returnData || returnData.length === 0) {
          return null;
       }
       const quotes = decodeMarketQuotesProxyReturnData(returnData, numSides);
       return bestOddsPerSideFromMarketQuotes(quotes, numSides);
-   } catch {
+   } catch (error) {
+      console.warn(`Live quote failed for mkt ${market.id} player ${market.player_id ?? 0}`, error);
       return null;
    }
 }
@@ -93,6 +110,7 @@ async function fetchLiveOddsForMarket(
 export async function refreshEventOddsFromProxy(
    rpc: Rpc<SolanaRpcApi>,
    ev: UiGroupedEvent,
+   onUpdate?: (next: UiGroupedEvent) => void,
 ): Promise<UiGroupedEvent> {
    const markets = ev.markets;
    if (!markets?.length) {
@@ -102,25 +120,30 @@ export async function refreshEventOddsFromProxy(
    const mmList = await getMmListCached(rpc);
    const mmPrograms = mmList.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY);
    if (mmPrograms.length === 0) {
+      console.warn("Live odds refresh skipped: mm list has no programs");
       return ev;
    }
 
-   const oddsResults = await Promise.all(
-      markets.map((m) => fetchLiveOddsForMarket(rpc, m, mmPrograms)),
-   );
+   let lifetime = await fetchLatestBlockhash(rpc);
+   const updatedMarkets = [...markets];
+   let next: UiGroupedEvent = ev;
 
-   const now = Date.now();
-   const updatedMarkets = markets.map((m, i) => {
-      const odds = oddsResults[i];
-      if (odds == null) {
-         return m;
+   for (let i = 0; i < markets.length; i++) {
+      if (i > 0 && i % BLOCKHASH_REFRESH_EVERY === 0) {
+         lifetime = await fetchLatestBlockhash(rpc);
       }
-      return {
-         ...m,
+      const odds = await fetchLiveOddsForMarket(rpc, markets[i]!, mmPrograms, lifetime);
+      if (odds == null) {
+         continue;
+      }
+      updatedMarkets[i] = {
+         ...markets[i]!,
          last_odds: JSON.stringify(odds),
-         last_update: now,
+         last_update: Date.now(),
       };
-   });
+      next = { ...ev, markets: [...updatedMarkets] };
+      onUpdate?.(next);
+   }
 
-   return { ...ev, markets: updatedMarkets };
+   return next;
 }

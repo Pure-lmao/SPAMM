@@ -1,16 +1,15 @@
 import type { Rpc, SolanaRpcApi } from "@solana/kit";
-import { getMmListData, type MmListPdaData } from "spamm-aggregator-sdk";
+import { getMmListData, type MmListAccountData } from "spamm-aggregator-sdk";
 
-let cached: MmListPdaData | null = null;
+const cachedByRpc = new Map<string, MmListAccountData>();
 
-export async function getMmListCached(rpc: Rpc<SolanaRpcApi>): Promise<MmListPdaData> {
-   if (cached) {
-      return cached;
+export async function getMmListCached(rpc: Rpc<SolanaRpcApi>, rpcUrl?: string): Promise<MmListAccountData> {
+   const key = rpcUrl?.trim() || "default";
+   const hit = cachedByRpc.get(key);
+   if (hit != null) {
+      return hit;
    }
-   cached = await getMmListData(rpc);
-   return cached;
-}
-
-export function clearMmListCache(): void {
-   cached = null;
+   const data = await getMmListData(rpc);
+   cachedByRpc.set(key, data);
+   return data;
 }

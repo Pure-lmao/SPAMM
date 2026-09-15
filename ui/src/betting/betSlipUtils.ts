@@ -1,21 +1,23 @@
 import { ODDS_SCALE, type MarketId, type ParlayLegSel } from "spamm-aggregator-sdk";
-import { apiSportToSdk, buildMarketId, DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG } from "./chainIds";
+import { apiSportToSdk, buildMarketId, DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG, parseOperatorAddress } from "./chainIds";
 import { pickBetSide } from "./outcomeSide";
 import type { BetSlipSelection } from "./types";
 
-export function marketKey(sel: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId">): string {
-   return `${sel.eventId}:${sel.marketWireId}:${sel.periodId}`;
+export function marketKey(
+   sel: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId" | "playerId">,
+): string {
+   return `${sel.eventId}:${sel.marketWireId}:${sel.periodId}:${sel.playerId ?? 0}`;
 }
 
 export function selectionId(
-   sel: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId" | "column" | "outcomeIndex">,
+   sel: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId" | "playerId" | "column" | "outcomeIndex">,
 ): string {
    return `${marketKey(sel)}:${sel.column}:${sel.outcomeIndex}`;
 }
 
 export function selectionMatches(
-   a: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId" | "column" | "outcomeIndex">,
-   b: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId" | "column" | "outcomeIndex">,
+   a: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId" | "playerId" | "column" | "outcomeIndex">,
+   b: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId" | "playerId" | "column" | "outcomeIndex">,
 ): boolean {
    return selectionId(a) === selectionId(b);
 }
@@ -48,22 +50,57 @@ export function calcPotentialPayoutBase(amount: bigint, oddsScaled: bigint): big
    return (oddsScaled * amount) / ODDS_SCALE;
 }
 
+/** Matches on-chain `calc_potential_profit` — `(odds − 1) × stake`. */
+export function calcPotentialProfitBase(amount: bigint, oddsScaled: bigint): bigint | null {
+   if (amount <= 0n || oddsScaled <= ODDS_SCALE) {
+      return null;
+   }
+   return ((oddsScaled - ODDS_SCALE) * amount) / ODDS_SCALE;
+}
+
+/** Full payout for cash; profit only for freebets (stake returns to the issuer). */
+export function userWinCreditBase(
+   amount: bigint,
+   payout: bigint,
+   oddsScaled: bigint | null,
+   isFreebet: boolean,
+): bigint {
+   if (isFreebet) {
+      if (oddsScaled !== null && oddsScaled > ODDS_SCALE) {
+         return ((oddsScaled - ODDS_SCALE) * amount) / ODDS_SCALE;
+      }
+      return payout > amount ? payout - amount : 0n;
+   }
+   if (oddsScaled !== null && oddsScaled > 0n) {
+      return (amount * oddsScaled) / ODDS_SCALE;
+   }
+   return payout;
+}
+
 export function buildMarketIdForSelection(sel: BetSlipSelection): MarketId {
    const sport = apiSportToSdk(sel.sportApiId);
-   return buildMarketId(sel.eventId, sel.leagueId, sport, sel.marketWireId, sel.periodId);
+   return buildMarketId(
+      sel.eventId,
+      sel.leagueId,
+      sport,
+      sel.marketWireId,
+      sel.periodId,
+      BigInt(sel.playerId ?? 0),
+      parseOperatorAddress(sel.operator),
+   );
 }
 
 export function parlayLegFromSelection(sel: BetSlipSelection): ParlayLegSel {
    return {
       marketId: buildMarketIdForSelection(sel),
-      side: pickBetSide(sel.column, sel.mktString, sel.outcomeIndex),
+      side: pickBetSide(sel.column, sel.mktString, sel.outcomeIndex, sel.marketWireId),
       eventStateSequence: DEFAULT_EVENT_STATE_SEQUENCE,
       eventGameState: EVENT_GAME_STATE_PG,
    };
 }
 
 export function solscanTxUrl(signature: string): string {
-   return `https://solscan.io/tx/${encodeURIComponent(signature)}`;
+   return `https://solscan.io/tx/${encodeURIComponent(signature)}?cluster=devnet`;
 }
 
 const PROXY_QUOTE_DECODE_ERR =

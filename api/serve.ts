@@ -20,7 +20,7 @@ import {
 } from "./localDb";
 import { safeJSONStringify } from "./utils";
 import { getClosedBetRecordsByUser } from "./quickIndexer";
-import { parseRfqHttpRequestJson, RFQ_MM_WS_PATH } from "spamm-aggregator-sdk";
+import { parseRfqCashoutHttpRequestJson, parseRfqHttpRequestJson, RFQ_MM_WS_PATH } from "spamm-aggregator-sdk";
 import { rfqHub, type MmWsData } from "./rfqHub";
 
 const TTL_MS = 5000;
@@ -85,6 +85,7 @@ function withCors(req: Request, res: Response): Response {
  * - /api/promos?sport={sportId}&league={leagueId}&event={eventId}
  * - /api/promos?id={promoId}
  * - POST /api/rfq — fan-out RFQ to connected MMs (WS), wait 2s, return quotes
+ * - POST /api/rfq/cashout — fan-out cashout RFQ (`rfq.cashout.request`), wait 2s, return quotes
  * - WS  /ws/mm — MM sockets: send signed `mm.hello` (mmProgramId + rfqSigner + timestamp);
  *   server checks mm_list, on-chain config, recent timestamp, ed25519
  */
@@ -136,14 +137,14 @@ export class ApiServer {
       return Response.json({ error: "Missing query params. Use all=true or sport=" }, { status: 400 });
    }
 
-   // private async handleGetSolAirdrop(params: URLSearchParams): Promise<Response> {
-   //    const user = params.get("user");
-   //    if (!user) {
-   //       return Response.json({ error: "Missing query params. Use user=" }, { status: 400 });
-   //    }
-   //    const result = await airdropUser(user);
-   //    return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
-   // }
+   private async handleGetSolAirdrop(params: URLSearchParams): Promise<Response> {
+      const user = params.get("user");
+      if (!user) {
+         return Response.json({ error: "Missing query params. Use user=" }, { status: 400 });
+      }
+      const result = await airdropUser(user);
+      return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
+   }
 
    private async handleGetBetHistory(params: URLSearchParams): Promise<Response> {
       const user = params.get("user");
@@ -252,6 +253,28 @@ export class ApiServer {
       });
    }
 
+   private async handlePostRfqCashout(req: Request): Promise<Response> {
+      let body: unknown;
+      try {
+         body = await req.json();
+      } catch {
+         return Response.json({ error: "Invalid JSON body" }, { status: 400 });
+      }
+
+      let parsed;
+      try {
+         parsed = parseRfqCashoutHttpRequestJson(body);
+      } catch (e) {
+         const message = e instanceof Error ? e.message : String(e);
+         return Response.json({ error: message }, { status: 400 });
+      }
+
+      const result = await rfqHub.collectCashoutQuotes(parsed);
+      return new Response(safeJSONStringify(result), {
+         headers: { "Content-Type": "application/json" },
+      });
+   }
+
    /**
     * HTTP fetch handler. Pass `server` from `Bun.serve` so `/ws/mm` can upgrade.
     * Returns `undefined` when a WebSocket upgrade succeeds (Bun sends 101).
@@ -261,7 +284,13 @@ export class ApiServer {
 
       if (url.pathname === RFQ_MM_WS_PATH && server != null) {
          const upgraded = server.upgrade(req, {
-            data: { mmProgramId: null, rfqSigner: null },
+            data: {
+               mmProgramId: null,
+               rfqSigner: null,
+               closed: false,
+               helloInFlight: false,
+               errorCount: 0,
+            },
          });
          if (upgraded) {
             return undefined;
@@ -284,9 +313,9 @@ export class ApiServer {
       if (url.pathname === "/api/leagues") {
          return this.handleGetLeagues(params).then((r) => withCors(req, r));
       }
-      // if (url.pathname === "/api/airdrop/sol") {
-      //    return this.handleGetSolAirdrop(params).then((r) => withCors(req, r));
-      // }
+      if (url.pathname === "/api/airdrop/sol") {
+         return this.handleGetSolAirdrop(params).then((r) => withCors(req, r));
+      }
       if (url.pathname === "/api/betHistory") {
          return this.handleGetBetHistory(params).then((r) => withCors(req, r));
       }
@@ -304,6 +333,9 @@ export class ApiServer {
       }
       if (url.pathname === "/api/rfq" && req.method === "POST") {
          return this.handlePostRfq(req).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/rfq/cashout" && req.method === "POST") {
+         return this.handlePostRfqCashout(req).then((r) => withCors(req, r));
       }
 
       return withCors(req, new Response("Not Found", { status: 404 }));

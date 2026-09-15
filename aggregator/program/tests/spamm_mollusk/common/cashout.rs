@@ -551,10 +551,10 @@ pub fn decode_proxy_cashout_quote_return(data: &[u8]) -> Vec<(Pubkey, u64)> {
    out
 }
 
-/// Fair cash ≈ `amount * ODDS_SCALE / odds` capped at `payout - 1` (matches example MM).
+/// Fair cash ≈ `payout * ODDS_SCALE / odds` capped at `payout - 1` (matches example MM).
 pub fn expected_cashout_payment(amount: u64, payout: u64, odds_scaled: u32) -> u64 {
    use spamm_aggregator::constants::ODDS_SCALE;
-   let fair = ((amount as u128)
+   let fair = ((payout as u128)
       .saturating_mul(ODDS_SCALE)
       .checked_div(odds_scaled as u128).unwrap_or(0)) as u64;
    let cap = payout.saturating_sub(1);

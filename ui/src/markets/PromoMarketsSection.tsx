@@ -2,6 +2,7 @@ import { type ReactElement } from "react";
 import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import { useBetSlip } from "../betting/BetSlipContext";
+import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 import { decimalOddsFromDb, fmtOdd, parseOdds } from "./oddsFormat";
 import type { UiPromotionalMarket } from "./types";
 
@@ -85,6 +86,9 @@ export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSection
                      sportApiId: promo.sport_id,
                      marketWireId: mktId,
                      periodId: promo.period_id,
+                     playerId: 0,
+                     playerName: "",
+                     operator: DEFAULT_MARKET_OPERATOR,
                      column: "main",
                      outcomeIndex: 0,
                      mktString: "PROMO",
@@ -95,6 +99,7 @@ export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSection
                   eventId: promo.event_id,
                   marketWireId: mktId,
                   periodId: promo.period_id,
+                  playerId: 0,
                   column: "main",
                   outcomeIndex: 0,
                });

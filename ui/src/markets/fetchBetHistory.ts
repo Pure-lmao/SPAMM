@@ -1,5 +1,5 @@
 import { Address } from "@solana/connector";
-import { address, type Rpc, type SolanaRpcApi } from "@solana/kit";
+import { address, type Address as KitAddress, type Rpc, type SolanaRpcApi } from "@solana/kit";
 import {
    getBetsData,
    getParlaysData,
@@ -8,20 +8,27 @@ import {
    type MarketId,
    type ParlayBetAccountData,
 } from "spamm-aggregator-sdk";
+import { mapFreebetIdToIssuerAuth } from "../betting/freebets";
 import { type BetRecord, type Selection } from "../../../api/quickIndexer";
-import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
+import { parseOperatorAddress } from "../betting/chainIds";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 export type WalletParlayLeg = {
    marketId: MarketId;
    side: number;
+   /** Per-leg scaled odds; `0n` is a same-event SGP companion. `null` when history omitted it. */
+   oddsScaled: bigint | null;
+   result?: BetResult | null;
 };
 
 export type WalletSingleRow = {
    kind: "single";
    address: string;
    data: BetAccountData;
+   issuerAuth?: KitAddress;
+   finalPayout?: bigint | null;
+   historySig?: string;
 };
 
 export type WalletParlayRow = {
@@ -35,6 +42,10 @@ export type WalletParlayRow = {
    legs: readonly WalletParlayLeg[];
    /** Present when loaded from chain (open bets); used for settle. */
    account?: ParlayBetAccountData;
+   issuerAuth?: KitAddress;
+   freebetId?: number;
+   finalPayout?: bigint | null;
+   historySig?: string;
 };
 
 export type WalletBetRow = WalletSingleRow | WalletParlayRow;
@@ -63,6 +74,8 @@ export function parlayLegsFromAccount(p: ParlayBetAccountData): readonly WalletP
    return p.legs.slice(0, p.numLegs).map((leg) => ({
       marketId: leg.marketId,
       side: leg.side,
+      oddsScaled: leg.oddsScaled,
+      result: leg.result,
    }));
 }
 
@@ -71,6 +84,17 @@ function toBigIntField(value: unknown, label: string): bigint {
       throw new Error(`Cannot convert undefined to a BigInt (${label})`);
    }
    return BigInt(value as string | number | bigint);
+}
+
+function optionalBigIntField(value: unknown): bigint | null {
+   if (value === undefined || value === null || value === "") {
+      return null;
+   }
+   try {
+      return toBigIntField(value, "odds_scaled");
+   } catch {
+      return null;
+   }
 }
 
 /** API/DB may return selections as a JSON string; normalize before mapping to wallet rows. */
@@ -119,7 +143,12 @@ export function parseSelectionsField(raw: unknown): Selection[] {
          period_id,
          player_id,
          is_pregame: isRaw === 1 || isRaw === true ? 1 : 0,
+         operator: String(r.operator ?? ""),
          side,
+         event_state_sequence: Number(r.event_state_sequence ?? r.eventStateSequence ?? 0) || 0,
+         event_game_state: { gamePhase: "", homePrimary: 0, awayPrimary: 0, homeSecondary: 0, awaySecondary: 0 },
+         odds_scaled: optionalBigIntField(r.odds_scaled ?? r.oddsScaled),
+         result: r.result == null || r.result === "" ? null : Number(r.result) as BetResult,
       });
    }
    return out;
@@ -157,7 +186,7 @@ export function normalizeBetRecordFromApi(raw: unknown): BetRecord | null {
 
    return {
       id: String(r.id),
-      bet_id: String(r.bet_id),
+      bet_id: toBigIntField(r.bet_id, "bet_id"),
       type,
       user_address: String(r.user_address),
       selections,
@@ -165,12 +194,15 @@ export function normalizeBetRecordFromApi(raw: unknown): BetRecord | null {
       amount_filled,
       min_odds_requested,
       payout,
+      freebet_id: Number(r.freebet_id ?? 0),
       timestamp: Number(r.timestamp),
       result: result as BetResult,
+      fillers: [],
       created_at: Number(r.created_at),
       created_sig: String(r.created_sig ?? ""),
       graded_at: r.graded_at == null ? null : Number(r.graded_at),
       graded_sig: r.graded_sig == null ? null : String(r.graded_sig),
+      final_payout: r.final_payout == null ? null : Number(r.final_payout),
       claimed_at: r.claimed_at == null ? null : Number(r.claimed_at),
       claimed_sig: r.claimed_sig == null ? null : String(r.claimed_sig),
       last_update_slot: Number(r.last_update_slot),
@@ -189,7 +221,7 @@ export function selectionToMarketId(sel: Selection): MarketId {
       mkt: sel.mkt_id,
       period: sel.period_id,
       isPregame: Boolean(sel.is_pregame),
-      operator: DEFAULT_MARKET_OPERATOR,
+      operator: parseOperatorAddress(sel.operator),
    };
 }
 
@@ -199,10 +231,14 @@ function closedBetRecordToSingleRow(rec: BetRecord): WalletSingleRow | null {
    }
    const sel = rec.selections[0]!;
    const amountFilled = toBigIntField(rec.amount_filled, "amount_filled");
+   const historySig = rec.claimed_sig || rec.created_sig || undefined;
+   const finalPayout = rec.final_payout == null ? null : toBigIntField(rec.final_payout, "final_payout");
 
    return {
       kind: "single",
       address: rec.id,
+      historySig,
+      finalPayout,
       data: {
          discriminator: 0,
          bump: 0,
@@ -223,6 +259,7 @@ function closedBetRecordToSingleRow(rec: BetRecord): WalletSingleRow | null {
             awaySecondary: 0,
          },
          result: rec.result,
+         freebetId: rec.freebet_id,
          numFillers: 0,
          fillers: [],
       },
@@ -241,9 +278,14 @@ function closedBetRecordToParlayRow(rec: BetRecord): WalletParlayRow | null {
       amount: toBigIntField(rec.amount_filled, "amount_filled"),
       payout: toBigIntField(rec.payout, "payout"),
       result: rec.result,
+      freebetId: rec.freebet_id,
+      finalPayout: rec.final_payout == null ? null : toBigIntField(rec.final_payout, "final_payout"),
+      historySig: rec.claimed_sig || rec.created_sig || undefined,
       legs: rec.selections.map((sel) => ({
          marketId: selectionToMarketId(sel),
          side: sel.side,
+         oddsScaled: sel.odds_scaled,
+         result: sel.result,
       })),
    };
 }
@@ -280,7 +322,17 @@ export async function fetchOpenWalletBets(
          account: r.data,
       })),
    ];
-   return sortWalletBetRows(rows);
+   const ids = rows.map((row) =>
+      row.kind === "single" ? row.data.freebetId : row.account?.freebetId ?? 0,
+   );
+   const issuers = await mapFreebetIdToIssuerAuth(rpc, user, ids);
+   return sortWalletBetRows(
+      rows.map((row) => {
+         const id = row.kind === "single" ? row.data.freebetId : row.account?.freebetId ?? 0;
+         const issuerAuth = issuers.get(id);
+         return issuerAuth == null ? row : { ...row, issuerAuth };
+      }),
+   );
 }
 
 /** Claimed bets for a wallet (`/api/betHistory?user=`). */
@@ -294,6 +346,12 @@ export async function fetchClosedBetHistory(userAddress: string): Promise<readon
    if (!Array.isArray(raw)) {
       throw new Error("Expected array from /api/betHistory");
    }
-   const records = raw.map(normalizeBetRecordFromApi).filter((rec): rec is BetRecord => rec !== null);
+   const records = raw.map((item, i) => {
+      const rec = normalizeBetRecordFromApi(item);
+      if (rec == null) {
+         console.warn("Dropped closed bet history row", i);
+      }
+      return rec;
+   }).filter((rec): rec is BetRecord => rec !== null);
    return sortWalletBetRows(records.map(closedBetRecordToRow).filter((row): row is WalletBetRow => row !== null));
 }

@@ -15,7 +15,7 @@ use crate::{
       parlay_helpers::{
          fold_cashout_parlay_ticket_result_from_account, fold_parlay_ticket_result_from_account,
       }, verify_config_pda, verify_market_operator_or_authority, verify_signer,
-      verify_cashout_parlay_pda, verify_parlay_pda,
+      verify_cashout_parlay_pda_address, verify_parlay_pda_address,
    }, state::{
       CASHOUT_PARLAY_ACCOUNT_DISCRIMINATOR, CashoutParlayAccountData, PARLAY_BET_ACCOUNT_DISCRIMINATOR, ParlayBetAccountData, account_bet::{BetResult, GRADE_PARLAY_LEG_SKIP},
    },
@@ -49,31 +49,24 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    };
    let is_cashout = disc == CASHOUT_PARLAY_ACCOUNT_DISCRIMINATOR;
 
-   let (ticket_result, num_legs) = {
-      let raw = bet_account.try_borrow()?;
-      let acct = raw.as_ref();
-      if is_cashout {
-         let header = CashoutParlayAccountData::decode_header(acct)?;
-         verify_cashout_parlay_pda(
-            bet_account,
-            &header.mm,
-            header.cashout_id,
-            header.bump,
-         )?;
-         (header.result, header.num_legs as usize)
-      } else {
-         if unlikely(disc != PARLAY_BET_ACCOUNT_DISCRIMINATOR) {
-            log!("grade_parlay: account discriminator is not a parlay bet account");
-            return Err(ProgramError::InvalidAccountData);
-         }
-         let header = ParlayBetAccountData::decode_header(acct)?;
-         verify_parlay_pda(bet_account, &header.owner, header.bet_id, header.bump)?;
-         (header.result, header.num_legs as usize)
-      }
-   };
+   let bet_address = *bet_account.address();
 
    let mut raw = bet_account.try_borrow_mut()?;
    let acct = raw.as_mut();
+
+   let (ticket_result, num_legs) = if is_cashout {
+      let header = CashoutParlayAccountData::decode_header(acct)?;
+      verify_cashout_parlay_pda_address(&bet_address, &header.mm, header.cashout_id, header.bump)?;
+      (header.result, header.num_legs as usize)
+   } else {
+      if unlikely(disc != PARLAY_BET_ACCOUNT_DISCRIMINATOR) {
+         log!("grade_parlay: account discriminator is not a parlay bet account");
+         return Err(ProgramError::InvalidAccountData);
+      }
+      let header = ParlayBetAccountData::decode_header(acct)?;
+      verify_parlay_pda_address(&bet_address, &header.owner, header.bet_id, header.bump)?;
+      (header.result, header.num_legs as usize)
+   };
 
    if unlikely(data.len() != num_legs) {
       log!("grade_parlay: grade mask len mismatch");

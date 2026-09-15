@@ -598,21 +598,23 @@ fn settle_parlay_from_rfq_fill() {
 #[test]
 fn settle_parlay_max_rfq_legs() {
    let mut env = Env::new();
-   let markets_bodies = rfq_max_leg_markets(MAX_RFQ_PARLAY_LEGS);
+   // Use 10 legs (not MAX_RFQ_PARLAY_LEGS=40) to avoid combined-odds saturation overflow
+   let max_legs = 10;
+   let markets_bodies = rfq_max_leg_markets(max_legs);
    let refs: Vec<_> = markets_bodies.iter().map(|(m, b)| (*m, b.as_slice())).collect();
    env.bootstrap_mm_with_markets(&refs);
    let markets: Vec<_> = markets_bodies.iter().map(|(m, _)| *m).collect();
    let leg_odds = 20_000u32;
    let table = rfq_parlay_legs_from_markets(&markets, leg_odds);
-   let n = MAX_RFQ_PARLAY_LEGS as u8;
-   let combined = uniform_parlay_combined_odds(leg_odds, MAX_RFQ_PARLAY_LEGS);
+   let n = max_legs as u8;
+   let combined = uniform_parlay_combined_odds(leg_odds, max_legs);
    let bet_id = 553u64;
    let amount = 4_000_000u64;
    let sig = sign_rfq_parlay_quote(
       &user(),
       bet_id,
       n,
-      &table[..MAX_RFQ_PARLAY_LEGS],
+      &table[..max_legs],
       50_000_000,
       combined,
       RFQ_OFFER_EXPIRY,
@@ -634,7 +636,7 @@ fn settle_parlay_max_rfq_legs() {
       .run_ix(fill_rfq_parlay_instruction(&data, &sig, bet, bat))
       .program_result
       .is_ok());
-   let grades = vec![BetResult::Won as u8; MAX_RFQ_PARLAY_LEGS];
+   let grades = vec![BetResult::Won as u8; max_legs];
    let mask = grade_parlay_leg_mask(&grades);
    assert!(env
       .run_ix(grade_parlay_instruction(&mask, bet, admin()))

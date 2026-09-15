@@ -4,6 +4,7 @@ import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import type { BetColumn, MarketRow } from "../betting/types";
 import { useBetSlip } from "../betting/BetSlipContext";
+import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
 import { LineWithOddsCell, MainOddsCell, EmptyTotalOddsPlaceholder } from "../markets/MarketOddsCells";
 import {
@@ -40,8 +41,21 @@ function toMarketRow(m: {
    mkt_string: string;
    period_id: number;
    line_value: number | null;
+   player_id?: number;
+   player_name?: string;
+   operator?: string;
+   sport_id?: number;
 }): MarketRow {
-   return { id: m.id, mkt_string: m.mkt_string, period_id: m.period_id, line_value: m.line_value };
+   return {
+      id: m.id,
+      mkt_string: m.mkt_string,
+      period_id: m.period_id,
+      line_value: m.line_value,
+      player_id: m.player_id,
+      player_name: m.player_name,
+      operator: m.operator,
+      sport_id: m.sport_id,
+   };
 }
 
 /** Padding beyond widest single-line team label (cell + link inset, rounded). */
@@ -281,7 +295,7 @@ export function HomePage(): ReactElement {
                                              const sp = getSpreadOdds(mkts, sport.id);
                                              const tot = getTotalOdds(mkts, sport.id);
                                              const mainDetail = getMainOddsDetail(mkts, sport.id);
-                                             const moreN = extraMarketsCount(mkts);
+                                             const moreN = extraMarketsCount(mkts, sport.id);
 
                                              const toggleSheet = (
                                                 column: BetColumn,
@@ -294,7 +308,7 @@ export function HomePage(): ReactElement {
                                                    marketLabel: buildMarketLabel(
                                                       column,
                                                       row,
-                                                      pickBetSide(column, row.mkt_string, outcomeIndex),
+                                                      pickBetSide(column, row.mkt_string, outcomeIndex, row.id),
                                                       {
                                                          homeName: ev.home_name,
                                                          awayName: ev.away_name,
@@ -306,6 +320,9 @@ export function HomePage(): ReactElement {
                                                    sportApiId: sport.id,
                                                    marketWireId: row.id,
                                                    periodId: row.period_id,
+                                                   playerId: row.player_id ?? 0,
+                                                   playerName: row.player_name ?? "",
+                                                   operator: row.operator || DEFAULT_MARKET_OPERATOR,
                                                    column,
                                                    outcomeIndex,
                                                    mktString: row.mkt_string,
@@ -317,6 +334,7 @@ export function HomePage(): ReactElement {
                                                    eventId: ev.id,
                                                    marketWireId: row.id,
                                                    periodId: row.period_id,
+                                                   playerId: row.player_id ?? 0,
                                                    column,
                                                    outcomeIndex,
                                                 });

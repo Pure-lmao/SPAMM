@@ -3,6 +3,9 @@
   "module": "index.ts",
   "type": "module",
   "private": true,
+  "scripts": {
+    "rfq": "bun rfq.ts"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "spamm-market-maker-sdk": "file:../sdk/ts",

@@ -25,7 +25,7 @@
       "prepack": "bun run build"
    },
    "dependencies": {
-      "@solana/kit": "^6.8.0"
+      "@solana/kit": "^8.2.0"
    },
    "devDependencies": {
       "typescript": "^5.7.2"

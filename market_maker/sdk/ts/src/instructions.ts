@@ -42,7 +42,7 @@ import {
    getMmMarketDataPda,
    getMmParlayQuoteBufferPda,
    getMmQuoteBufferPda,
-} from './helpers.js';
+} from 'spamm-aggregator-sdk';
 import type {
    EventGameState,
    EventId,

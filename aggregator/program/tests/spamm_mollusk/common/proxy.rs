@@ -7,7 +7,7 @@ use spamm_aggregator::instructions::{
    FillBetIxData, FillParlayIxData, FILL_BET_IX_DATA_LEN, GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR,
    GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR, GET_QUOTE_PROXY_IX_DISCRIMINATOR,
 };
-use spamm_aggregator::constants::{ADDRESS_LEN, U32_LEN, U64_LEN};
+use spamm_aggregator::constants::{ADDRESS_LEN, MAX_RFQ_PARLAY_LEGS, U32_LEN, U64_LEN};
 use spamm_aggregator::state::{
    mm_quote::{
       proxy_market_mm_entry_wire_len, proxy_parlay_quote_data_len, PROXY_QUOTE_DATA_LEN,
@@ -174,7 +174,7 @@ pub fn event_id_soccer_n(i: u16) -> spamm_aggregator::state::EventId {
 
 /// Build N distinct two-outcome spread markets + three-outcome FT markets alternating.
 pub fn rfq_max_leg_markets(n: usize) -> Vec<(MarketId, Vec<u8>)> {
-   assert!(n >= 2 && n <= 10);
+   assert!(n >= 2 && n <= MAX_RFQ_PARLAY_LEGS);
    let mut out = Vec::with_capacity(n);
    for i in 0..n {
       let eid = event_id_soccer_n(i as u16);

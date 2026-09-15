@@ -1,6 +1,6 @@
 import { addMarket, fetchEventsByEventId, fetchMarket, fetchUpcomingEvents } from "./localDb";
-import type { Event, Market } from "./types";
-import { safeJSONStringify } from "./utils";
+import type { DbEvent, DbMarket } from "./types";
+import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
 
 export type MarketLineKind = "spread" | "total";
 
@@ -49,7 +49,7 @@ export function periodIdForSport(sportId: number): number {
    return sportId === 1 ? 1 : 0;
 }
 
-function resolveEvent(eventId: number): Event {
+function resolveEvent(eventId: number): DbEvent {
    const matches = fetchEventsByEventId(eventId);
    if (matches.length === 0) {
       throw new Error(`Event ${eventId} not found`);
@@ -61,7 +61,7 @@ function resolveEvent(eventId: number): Event {
    return matches[0]!;
 }
 
-export function addEventLineMarket(eventId: number, kind: MarketLineKind, line: number): Market {
+export function addEventLineMarket(eventId: number, kind: MarketLineKind, line: number): DbMarket {
    const event = resolveEvent(eventId);
    if (event.start_time <= Date.now()) {
       throw new Error(`Event ${eventId} has already started`);
@@ -71,21 +71,24 @@ export function addEventLineMarket(eventId: number, kind: MarketLineKind, line: 
    const mkt_string = mktStringForLine(kind, line);
    const period_id = periodIdForSport(event.sport_id);
 
-   const existing = fetchMarket(id, eventId, event.league_id, event.sport_id);
+   const existing = fetchMarket(id, eventId, event.league_id, event.sport_id, period_id, 0);
    if (existing) {
       throw new Error(`Market already exists: ${existing.mkt_string} (id ${existing.id})`);
    }
 
-   const market: Market = {
+   const market: DbMarket = {
       id,
       event_id: eventId,
       league_id: event.league_id,
       sport_id: event.sport_id,
       period_id,
+      player_id: 0,
+      player_name: "",
       line_value: line,
       last_odds: safeJSONStringify([0, 0]),
       last_update: Date.now(),
       mkt_string,
+      operator: DEFAULT_MARKET_OPERATOR,
    };
    addMarket(market);
    return market;
