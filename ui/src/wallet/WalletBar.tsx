@@ -16,6 +16,7 @@ export function WalletBar(): ReactElement {
    const connectors = useWalletConnectors();
 
    const [menuOpen, setMenuOpen] = useState(false);
+   const [copied, setCopied] = useState(false);
    const wrapRef = useRef<HTMLDivElement>(null);
 
    const busy = isConnecting || connectBusy || isDisconnecting;
@@ -97,9 +98,22 @@ export function WalletBar(): ReactElement {
             </div>
          ) : (
             <div className="wallet-bar__connected">
-               <span className="wallet-bar__addr" title={address}>
-                  {formatted}
-               </span>
+               <button
+                  type="button"
+                  className="wallet-bar__addr"
+                  title={copied ? "Copied" : address}
+                  onClick={async () => {
+                     try {
+                        await navigator.clipboard.writeText(address);
+                        setCopied(true);
+                        window.setTimeout(() => setCopied(false), 2000);
+                     } catch {
+                        setCopied(false);
+                     }
+                  }}
+               >
+                  {copied ? "Copied" : formatted}
+               </button>
                <button type="button" className="wallet-bar__btn wallet-bar__btn--ghost" disabled={busy} onClick={() => disconnect()}>
                   Disconnect
                </button>

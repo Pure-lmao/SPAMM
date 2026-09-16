@@ -7,6 +7,9 @@ export function AppTopNav(): ReactElement {
          <NavLink to="/my-bets" className={({ isActive }) => `app-top-nav__link${isActive ? " app-top-nav__link--active" : ""}`}>
             My Bets
          </NavLink>
+         <NavLink to="/demo" className={({ isActive }) => `app-top-nav__link${isActive ? " app-top-nav__link--active" : ""}`}>
+            Demo
+         </NavLink>
       </nav>
    );
 }

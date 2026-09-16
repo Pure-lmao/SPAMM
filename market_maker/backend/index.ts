@@ -34,7 +34,12 @@ async function runMarketMakerCycle() {
       httpUrl: process.env.SOLANA_RPC_URL,
       wsUrl: process.env.SOLANA_WS_URL,
    });
-   const dbEventsAndMarkets = fetchEventsGrouped(true)
+   const dbEventsAndMarkets = fetchEventsGrouped(true);
+   const eventCount = dbEventsAndMarkets.reduce(
+      (count, sport) => count + sport.leagues.reduce((leagueCount, league) => leagueCount + league.events.length, 0),
+      0,
+   );
+   console.log(`Processing ${eventCount} upcoming events`);
    for (const sport of dbEventsAndMarkets) {
       for (const league of sport.leagues) {
          for (const event of league.events) {
@@ -287,10 +292,6 @@ async function getESPNOdds(sport: string, league: string, event: string): Promis
    }
 }
 
-if (import.meta.main === true) {
-   runRepeatedly(runMarketMakerCycle, 1000 * 60 * 5, "runMarketMakerCycle");
-}
-
 function scaleOdds(odds: number): bigint {
    return BigInt(Math.floor(odds * Number(ODDS_SCALE)));
 }
@@ -335,4 +336,13 @@ async function closeEventAndMarkets(event: GroupedEvent, clients: RpcClients) {
    }
    const txResult = await sendAndConfirmInstructionGroups(clients, ixs, [ADMIN_SIGNER]);
    console.log("Event and markets closed onchain", event.id, txResult);
+}
+
+function main(): void {
+   console.log("MM backend starting (5 min cycle)");
+   runRepeatedly(runMarketMakerCycle, 1000 * 60 * 5, "runMarketMakerCycle");
+}
+
+if (import.meta.main) {
+   main();
 }

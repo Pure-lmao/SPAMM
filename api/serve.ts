@@ -1,3 +1,4 @@
+import { createDemoPromo, issueDemoFreebet, listDemoEvents } from "./demoAdmin";
 import { airdropUser } from "./solana";
 import {
    fetchEvents,
@@ -84,6 +85,9 @@ function withCors(req: Request, res: Response): Response {
  * - /api/promos?active=true
  * - /api/promos?sport={sportId}&league={leagueId}&event={eventId}
  * - /api/promos?id={promoId}
+ * - GET  /api/demo/events
+ * - POST /api/demo/freebet
+ * - POST /api/demo/promo
  * - POST /api/rfq — fan-out RFQ to connected MMs (WS), wait 2s, return quotes
  * - POST /api/rfq/cashout — fan-out cashout RFQ (`rfq.cashout.request`), wait 2s, return quotes
  * - WS  /ws/mm — MM sockets: send signed `mm.hello` (mmProgramId + rfqSigner + timestamp);
@@ -231,6 +235,71 @@ export class ApiServer {
       });
    }
 
+   private handleGetDemoEvents(): Response {
+      return new Response(safeJSONStringify(listDemoEvents()), {
+         headers: { "Content-Type": "application/json" },
+      });
+   }
+
+   private async parseJsonBody(req: Request): Promise<{ ok: true; body: unknown } | { ok: false; res: Response }> {
+      try {
+         return { ok: true, body: await req.json() };
+      } catch {
+         return { ok: false, res: Response.json({ error: "Invalid JSON body" }, { status: 400 }) };
+      }
+   }
+
+   private errorResponse(e: unknown, status = 400): Response {
+      const message = e instanceof Error ? e.message : String(e);
+      return Response.json({ error: message }, { status });
+   }
+
+   private async handlePostDemoFreebet(req: Request): Promise<Response> {
+      const parsed = await this.parseJsonBody(req);
+      if (!parsed.ok) {
+         return parsed.res;
+      }
+      const body = parsed.body;
+      if (body == null || typeof body !== "object" || !("user" in body) || typeof body.user !== "string") {
+         return Response.json({ error: "Missing user" }, { status: 400 });
+      }
+      try {
+         const result = await issueDemoFreebet(body.user);
+         return new Response(safeJSONStringify(result), {
+            headers: { "Content-Type": "application/json" },
+         });
+      } catch (e) {
+         return this.errorResponse(e);
+      }
+   }
+
+   private async handlePostDemoPromo(req: Request): Promise<Response> {
+      const parsed = await this.parseJsonBody(req);
+      if (!parsed.ok) {
+         return parsed.res;
+      }
+      const body = parsed.body;
+      if (body == null || typeof body !== "object") {
+         return Response.json({ error: "Invalid body" }, { status: 400 });
+      }
+      const rec = body as Record<string, unknown>;
+      try {
+         const result = await createDemoPromo({
+            title: typeof rec.title === "string" ? rec.title : "",
+            eventId: Number(rec.eventId),
+            odds: Number(rec.odds),
+            yesLabel: typeof rec.yesLabel === "string" ? rec.yesLabel : "",
+            description: typeof rec.description === "string" ? rec.description : undefined,
+            allow: typeof rec.allow === "string" ? rec.allow : undefined,
+         });
+         return new Response(safeJSONStringify(result), {
+            headers: { "Content-Type": "application/json" },
+         });
+      } catch (e) {
+         return this.errorResponse(e);
+      }
+   }
+
    private async handlePostRfq(req: Request): Promise<Response> {
       let body: unknown;
       try {
@@ -330,6 +399,15 @@ export class ApiServer {
       }
       if (url.pathname === "/api/promos") {
          return this.handleGetPromos(params).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/demo/events") {
+         return withCors(req, this.handleGetDemoEvents());
+      }
+      if (url.pathname === "/api/demo/freebet" && req.method === "POST") {
+         return this.handlePostDemoFreebet(req).then((r) => withCors(req, r));
+      }
+      if (url.pathname === "/api/demo/promo" && req.method === "POST") {
+         return this.handlePostDemoPromo(req).then((r) => withCors(req, r));
       }
       if (url.pathname === "/api/rfq" && req.method === "POST") {
          return this.handlePostRfq(req).then((r) => withCors(req, r));
