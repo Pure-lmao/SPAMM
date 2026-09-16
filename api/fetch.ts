@@ -21,6 +21,7 @@ import { createRpcClients, simulateTransaction, withRpcRetry, type RpcClients } 
 import { ADMIN_SIGNER } from "../aggregator/client/admin.ts";
 import { gradeBets, gradeParlays } from "./solana.ts";
 import { getAthleteName, getProps } from "./playerProps.ts";
+import { runOddsIndexer } from "./oddsIndexer.ts";
 
 /** Unused by on-chain quote proxy; must be > 0 for SDK validation. */
 const QUOTE_PROBE_BET_ID = 1n;
@@ -449,13 +450,14 @@ function runRepeatedly(fn: () => Promise<void>, intervalMs: number, label: strin
 }
 
 function main() {
-   runRepeatedly(() => setUpcomingEvents(), 1000 * 60 * 60, "setUpcomingEvents");
+   runRepeatedly(async () => await setUpcomingEvents(), 1000 * 60 * 60, "setUpcomingEvents");
    runRepeatedly(async () => {
       await setFinishedEvents();
       await gradeBets();
       await gradeParlays();
    }, 1000 * 60 * 30, "setFinishedEvents/grade");
-   runRepeatedly(() => cacheOdds(), 1000 * 60 * 5, "cacheOdds");
+   // runRepeatedly(() => cacheOdds(), 1000 * 60 * 5, "cacheOdds");
+   runRepeatedly(async () => await runOddsIndexer(), 1000 * 60 * 5, "runOddsIndexer");
 }
 
 if (import.meta.main) {

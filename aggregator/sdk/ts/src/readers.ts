@@ -248,7 +248,7 @@ function bytesToBase64EncodedBytes(bytes: Uint8Array): Base64EncodedBytes {
    return btoa(binary) as Base64EncodedBytes;
 }
 
-function u8WireByte(value: number): Uint8Array {
+export function u8WireByte(value: number): Uint8Array {
    return new Uint8Array([value & 0xff]);
 }
 
@@ -258,7 +258,7 @@ function u64Le(value: bigint): Uint8Array {
    return out;
 }
 
-function memcmp(offset: bigint, bytes: Uint8Array): GetProgramAccountsMemcmpFilter {
+export function memcmp(offset: bigint, bytes: Uint8Array): GetProgramAccountsMemcmpFilter {
    return {
       memcmp: {
          offset,

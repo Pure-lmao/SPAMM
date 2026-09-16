@@ -9,9 +9,10 @@
     "promo": "bun run scripts/promo-cli.ts"
   },
   "dependencies": {
+    "@solana/kit": "^8.2.0",
     "discord.js": "^14.18.0",
-    "spamm-aggregator-sdk": "file:../aggregator/sdk/ts",
-    "@solana/kit": "^8.2.0"
+    "litesvm": "^1.4.1",
+    "spamm-aggregator-sdk": "file:../aggregator/sdk/ts"
   },
   "devDependencies": {
     "@types/bun": "latest"
