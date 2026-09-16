@@ -1,4 +1,4 @@
-import { fetch } from "bun";
+import { fetch, sleep } from "bun";
 import type { ESPNEvent, ESPNOdds, DbEvent } from "./types";
 import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, updateEventScore, updateMarket, PROMO_MKT_ID } from "./localDb";
 import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
@@ -17,7 +17,7 @@ import {
    MIN_BET_AMOUNT,
 } from "spamm-aggregator-sdk";
 import { address, type Base64EncodedDataResponse } from "@solana/kit";
-import { createRpcClients, simulateTransaction, type RpcClients } from "../aggregator/client/txSendV1.ts";
+import { createRpcClients, simulateTransaction, withRpcRetry, type RpcClients } from "../aggregator/client/txSendV1.ts";
 import { ADMIN_SIGNER } from "../aggregator/client/admin.ts";
 import { gradeBets, gradeParlays } from "./solana.ts";
 import { getAthleteName, getProps } from "./playerProps.ts";
@@ -339,7 +339,7 @@ async function cacheOdds() {
          httpUrl: process.env.CHAINSTACK_RPC_URL,
       }),
    ] as [RpcClients, RpcClients];
-   const marketMakers = await getMmListData(clients[0]!.rpc);
+   const marketMakers = await withRpcRetry(() => getMmListData(clients[0]!.rpc));
    const mmPrograms = marketMakers.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY);
    const fakeSigner = ADMIN_SIGNER;
 
@@ -433,27 +433,31 @@ function nDaysFromNow(n: number, backwards: boolean = false): string {
    return date;
 }
 
-async function main() {
-   await setUpcomingEvents();
-   await setFinishedEvents();
-   await gradeBets();
-   await gradeParlays();
-   await cacheOdds();
-   console.log("Initial done.");
 
-   setInterval(async () => {
-      await setUpcomingEvents();
-   }, 1000 * 60 * 60);
-   setInterval(async () => {
+/** Run `fn`, wait `intervalMs`, repeat. Never overlaps concurrent executions. */
+function runRepeatedly(fn: () => Promise<void>, intervalMs: number, label: string): void {
+   void (async () => {
+      while (true) {
+         try {
+            await fn();
+         } catch (error) {
+            console.error(`${label} failed:`, error instanceof Error ? error.message : error);
+         }
+         await sleep(intervalMs);
+      }
+   })();
+}
+
+function main() {
+   runRepeatedly(() => setUpcomingEvents(), 1000 * 60 * 60, "setUpcomingEvents");
+   runRepeatedly(async () => {
       await setFinishedEvents();
       await gradeBets();
       await gradeParlays();
-   }, 1000 * 60 * 30);
-   setInterval(async () => {
-      await cacheOdds();
-   }, 1000 * 60 * 5);
-};
+   }, 1000 * 60 * 30, "setFinishedEvents/grade");
+   runRepeatedly(() => cacheOdds(), 1000 * 60 * 5, "cacheOdds");
+}
 
 if (import.meta.main) {
-   await main().catch(console.error);
+   main();
 }

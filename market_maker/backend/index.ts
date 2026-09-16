@@ -14,12 +14,18 @@ import { getProps } from "../../api/playerProps";
 // check if markets exist onchain, if not, create them
 // update the market odds onchain
 
-async function main() {
-   try {
-      await runMarketMakerCycle();
-   } catch (error) {
-      console.error("Market maker cycle failed:", error);
-   }
+/** Run `fn`, wait `intervalMs`, repeat. Never overlaps concurrent executions. */
+function runRepeatedly(fn: () => Promise<void>, intervalMs: number, label: string): void {
+   void (async () => {
+      while (true) {
+         try {
+            await fn();
+         } catch (error) {
+            console.error(`${label} failed:`, error instanceof Error ? error.message : error);
+         }
+         await sleep(intervalMs);
+      }
+   })();
 }
 
 async function runMarketMakerCycle() {
@@ -208,7 +214,12 @@ async function runMarketMakerCycle() {
             // send the ixs
             if (ixs.length > 0) {
                try {
-                  const txResult = await sendAndConfirmInstructionGroups(clients, ixs, [ADMIN_SIGNER], {maxInstructionsPerTransaction});
+                  const txResult = await sendAndConfirmInstructionGroups(
+                     clients, 
+                     ixs, 
+                     [ADMIN_SIGNER], 
+                     {maxInstructionsPerTransaction: Math.max(maxInstructionsPerTransaction, 32)}
+                  );
                   console.log("Markets updated onchain", eventId, txResult);
                } catch (error) {
                   logSolanaError(`Failed to update markets for event ${event.id}:`, error);
@@ -277,10 +288,7 @@ async function getESPNOdds(sport: string, league: string, event: string): Promis
 }
 
 if (import.meta.main === true) {
-   await main();
-   setInterval(() => {
-      void main();
-   }, 1000 * 60 * 5);
+   runRepeatedly(runMarketMakerCycle, 1000 * 60 * 5, "runMarketMakerCycle");
 }
 
 function scaleOdds(odds: number): bigint {
