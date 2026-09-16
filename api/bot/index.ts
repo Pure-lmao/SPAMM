@@ -8,6 +8,7 @@
 
 import { Client, GatewayIntentBits, REST, Routes } from "discord.js";
 
+import { logSolanaError } from "../../aggregator/client/txSend.ts";
 import { marketDiscordCommands } from "./commands.ts";
 import { marketHandlers } from "./handlers.ts";
 
@@ -53,6 +54,7 @@ client.on("interactionCreate", async (interaction) => {
    try {
       await handler(interaction);
    } catch (e) {
+      logSolanaError(`[discord] ${interaction.commandName} failed`, e);
       const message = e instanceof Error ? e.message : String(e);
       if (interaction.deferred || interaction.replied) {
          await interaction.editReply({ content: `Error: ${message}` });

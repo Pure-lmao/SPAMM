@@ -154,7 +154,7 @@ pub struct MmEncumbrancePdaData {
    pub discriminator: u8,
    pub bump: u8,
    /// Sum of per-line peaks (and unnetted ticket P). Withdraw/deregister reserve.
-   pub encumbrance: i64,
+   pub encumbrance: u64,
 }
 pub const MM_ENCUMBRANCE_PDA_LEN: usize = <MmEncumbrancePdaData as ZeroPodFixed>::SIZE;
 pub const MM_ENCUMBRANCE_PDA_BUMP_OFFSET: usize = offset_of!(MmEncumbrancePdaDataZc, bump);

@@ -1,7 +1,7 @@
 use pinocchio::{AccountView, error::ProgramError, sysvars::clock::Clock};
 
 use crate::{
-   readers::{read_i64_le_unchecked, read_u64_le_unchecked}, state::{
+   readers::{read_u64_le_unchecked}, state::{
       other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
    },
 };
@@ -14,9 +14,9 @@ pub fn get_token_account_balance(token_account: &AccountView) -> Result<u64, Pro
 }
 
 /// Caller must have already passed `verify_mm_encumbrance_pda` (checks `data_len`).
-pub fn get_encumbrance(encumbrance_pda: &AccountView) -> Result<i64, ProgramError> {
+pub fn get_encumbrance(encumbrance_pda: &AccountView) -> Result<u64, ProgramError> {
    Ok(unsafe {
-      read_i64_le_unchecked(encumbrance_pda.data_ptr(), MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET)
+      read_u64_le_unchecked(encumbrance_pda.data_ptr(), MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET)
    })
 }
 

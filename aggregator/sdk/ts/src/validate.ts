@@ -196,7 +196,7 @@ export function validatePositiveU64(n: bigint, label = 'value'): void {
 export function validateMinBetAmount(n: bigint, label = 'amount'): void {
    validatePositiveU64(n, label);
    if (n < MIN_BET_AMOUNT) {
-      throw new RangeError(`${label} must be >= MIN_BET_AMOUNT (${MIN_BET_AMOUNT})`);
+      throw new RangeError(`${label} must be >= MIN_BET_AMOUNT (${MIN_BET_AMOUNT}, $${Number(MIN_BET_AMOUNT)/10**6})`);
    }
 }
 

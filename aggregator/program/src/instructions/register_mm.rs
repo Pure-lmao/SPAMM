@@ -162,7 +162,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       let enc = MmEncumbrancePdaDataZc {
          discriminator: MM_ENCUMBRANCE_PDA_DISCRIMINATOR.into(),
          bump: mm_encumbrance_pda_bump.into(),
-         encumbrance: 0i64.into(),
+         encumbrance: 0u64.into(),
       };
       core::ptr::write(p.cast::<MmEncumbrancePdaDataZc>(), enc);
    }

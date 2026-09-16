@@ -48,7 +48,7 @@ use crate::{
       parlay_helpers::{apply_leg_odds, ensure_parlay_odds_product_matches},
    }, instructions::fill_bet::FillBetStake, state::{
       FILL_QUOTE_PARLAY_IX_DISCRIMINATOR, FillParlayIxData, FillParlayQuoteIxData, ParlayLegSel, ParlayLegWire, empty_parlay_leg_buf, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
-   }, writers::write_i64_le_unchecked,
+   }, writers::write_u64_le_unchecked,
 };
 
 pub const FILL_PARLAY_IX_DISCRIMINATOR: u8 = 11;
@@ -204,15 +204,14 @@ fn cpi_fill_parlay_quote_apply(
       return Err(ProgramError::InvalidAccountData);
    };
 
-   let Ok(gross_margin_u64) = calc_potential_profit(amount_to_fill, odds_scaled) else {
+   let Ok(gross_margin) = calc_potential_profit(amount_to_fill, odds_scaled) else {
       return Err(ProgramError::InvalidInstructionData);
    };
-   let gross_margin_i64: i64 = gross_margin_u64.try_into().map_err(|_| ProgramError::InvalidInstructionData)?;
 
    let (amount_to_send, new_outstanding_liability) = compute_liability_shortfall(
       mm_liability_account_balance_before,
       outstanding_liability,
-      gross_margin_i64,
+      gross_margin,
    )?;
 
    let fill_ix_data = FillParlayQuoteIxData {
@@ -262,7 +261,7 @@ fn cpi_fill_parlay_quote_apply(
    )?;
 
    unsafe {
-      write_i64_le_unchecked(
+      write_u64_le_unchecked(
          mm_encumbrance_pda.data_mut_ptr(),
          MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
          new_outstanding_liability,

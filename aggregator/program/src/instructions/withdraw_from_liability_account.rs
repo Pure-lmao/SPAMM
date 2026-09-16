@@ -69,14 +69,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let liability_balance = get_token_account_balance(mm_liability_token_account)?;
 
    let encumbrance = get_encumbrance(mm_encumbrance_pda)?;
-   let encumbrance_u64: u64 = if encumbrance < 0 {
-      0
-   } else {
-      encumbrance.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?
-   };
-
    let free_balance = liability_balance
-      .checked_sub(encumbrance_u64).ok_or(ProgramError::ArithmeticOverflow)?;
+      .checked_sub(encumbrance).ok_or(ProgramError::ArithmeticOverflow)?;
 
    if amount > free_balance {
       log!("withdraw_from_liability_account: amount is greater than free balance");

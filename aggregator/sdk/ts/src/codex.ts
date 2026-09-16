@@ -727,14 +727,14 @@ export const getMmEncumbranceAccountDataEncoder = (): Encoder<MmEncumbranceAccou
    getStructEncoder([
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
-      ['encumbrance', getI64Encoder()],
+      ['encumbrance', getU64Encoder()],
    ]);
 
 export const getMmEncumbranceAccountDataDecoder = (): Decoder<MmEncumbranceAccountData> =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
-      ['encumbrance', getI64Decoder()],
+      ['encumbrance', getU64Decoder()],
    ]);
 
 export const getMmMarketDataAccountDataEncoder = (): Encoder<MmMarketDataAccountData> =>

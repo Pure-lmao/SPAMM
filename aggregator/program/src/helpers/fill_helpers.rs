@@ -73,40 +73,20 @@ pub fn parse_parlay_quote_return_for_mm(
 #[inline(always)]
 pub fn compute_liability_shortfall(
    liability_balance: u64,
-   outstanding_liability: i64,
-   delta: i64,
-) -> Result<(u64, i64), ProgramError> {
-   let balance_i64: i64 = liability_balance.try_into().map_err(|_| {
-      log!("fill_helpers: liability balance does not fit i64");
-      ProgramError::InvalidAccountData
-   })?;
-   let encumbered_i64: i64 = if outstanding_liability < 0 {
-      0
-   } else {
-      outstanding_liability
-   };
-   let free_i64: i64 = balance_i64
-      .checked_sub(encumbered_i64).ok_or_else(|| {
-         log!("fill_helpers: free-liability underflow");
-         ProgramError::ArithmeticOverflow
-      })?;
-   let shortfall_i64: i64 = delta.checked_sub(free_i64).ok_or_else(|| {
-      log!("fill_helpers: shortfall overflow");
+   outstanding_liability: u64,
+   delta: u64,
+) -> Result<(u64, u64), ProgramError> {
+   let free = liability_balance.checked_sub(outstanding_liability).ok_or_else(|| {
+      log!("fill_helpers: free-liability underflow");
       ProgramError::ArithmeticOverflow
    })?;
-   let amount_to_send: u64 = if shortfall_i64 <= 0 {
-      0u64
-   } else {
-      shortfall_i64.try_into().map_err(|_| {
-         log!("fill_helpers: shortfall does not fit u64");
-         ProgramError::InvalidInstructionData
-      })?
-   };
-   let new_outstanding: i64 = outstanding_liability
-      .checked_add(delta).ok_or_else(|| {
-         log!("fill_helpers: outstanding liability overflow");
-         ProgramError::InvalidInstructionData
-      })?;
+   let amount_to_send = delta
+      .checked_sub(core::cmp::min(delta, free))
+      .ok_or(ProgramError::ArithmeticOverflow)?;
+   let new_outstanding = outstanding_liability.checked_add(delta).ok_or_else(|| {
+      log!("fill_helpers: outstanding liability overflow");
+      ProgramError::InvalidInstructionData
+   })?;
    Ok((amount_to_send, new_outstanding))
 }
 

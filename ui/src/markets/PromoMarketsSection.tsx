@@ -1,9 +1,13 @@
-import { type ReactElement } from "react";
+import { useEffect, useMemo, useState, type ReactElement } from "react";
+import { address, createSolanaRpc, type Rpc, type SolanaRpcApi } from "@solana/kit";
+import { useCluster, useWallet } from "@solana/connector/react";
 import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import { useBetSlip } from "../betting/BetSlipContext";
 import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
+import { resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { decimalOddsFromDb, fmtOdd, parseOdds } from "./oddsFormat";
+import { filterPromosOpenToUser } from "./promoQuoteAccess";
 import type { UiPromotionalMarket } from "./types";
 
 type PromoMarketsSectionProps = {
@@ -42,16 +46,58 @@ function promoEventTitle(promo: UiPromotionalMarket): string | null {
 
 export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSectionProps): ReactElement | null {
    const { toggleSelection, isSelected } = useBetSlip();
+   const { account, isConnected } = useWallet();
+   const { cluster } = useCluster();
+   const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
+   const rpc = useMemo(() => createSolanaRpc(clusterRpcUrl) as Rpc<SolanaRpcApi>, [clusterRpcUrl]);
 
-   const visible = promos.filter((p) => {
-      if (p.status !== "open") {
-         return false;
+   const filterSport = eventFilter?.sportId;
+   const filterLeague = eventFilter?.leagueId;
+   const filterEvent = eventFilter?.eventId;
+
+   const fromEndpoint = useMemo(() => {
+      const filter =
+         filterSport != null && filterLeague != null && filterEvent != null
+            ? { sportId: filterSport, leagueId: filterLeague, eventId: filterEvent }
+            : null;
+      return promos.filter((p) => {
+         if (p.status !== "open") {
+            return false;
+         }
+         if (filter == null) {
+            return true;
+         }
+         return promoMatchesEvent(p, filter);
+      });
+   }, [promos, filterSport, filterLeague, filterEvent]);
+
+   const [visible, setVisible] = useState<readonly UiPromotionalMarket[]>(() =>
+      isConnected && account != null ? [] : fromEndpoint,
+   );
+
+   useEffect(() => {
+      let cancelled = false;
+      if (!isConnected || account == null) {
+         setVisible(fromEndpoint);
+         return;
       }
-      if (eventFilter == null) {
-         return true;
-      }
-      return promoMatchesEvent(p, eventFilter);
-   });
+      setVisible([]);
+      const userAddress = address(account);
+      filterPromosOpenToUser(rpc, userAddress, fromEndpoint)
+         .then((rows) => {
+            if (!cancelled) {
+               setVisible(rows);
+            }
+         })
+         .catch(() => {
+            if (!cancelled) {
+               setVisible([]);
+            }
+         });
+      return () => {
+         cancelled = true;
+      };
+   }, [fromEndpoint, isConnected, account, rpc]);
 
    if (visible.length === 0) {
       return null;

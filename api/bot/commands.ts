@@ -23,26 +23,83 @@ export const marketCommandBuilders = [
       ),
    new SlashCommandBuilder()
       .setName("promo-create")
-      .setDescription("Create a promotional market (mkt 9)")
+      .setDescription("Create a promo (DB + on-chain MM bootstrap, mkt 9)")
       .addStringOption((o) => o.setName("title").setDescription("Market title").setRequired(true))
       .addIntegerOption((o) =>
          o.setName("period_id").setDescription("Period id (0 or 1 for soccer)").setRequired(true),
       )
-      .addIntegerOption((o) =>
-         o.setName("event_id").setDescription("Single-game: event id from events-list"),
+      .addNumberOption((o) =>
+         o.setName("odds").setDescription("Yes decimal odds (e.g. 1.90)").setRequired(true),
       )
-      .addIntegerOption((o) => o.setName("sport_id").setDescription("Multi/manual: on-chain sport id"))
-      .addIntegerOption((o) => o.setName("league_id").setDescription("Multi/manual: on-chain league id"))
+      .addNumberOption((o) =>
+         o.setName("max_usdc").setDescription("Max stake per bet (USDC)").setRequired(true),
+      )
+      .addNumberOption((o) =>
+         o.setName("max_total_usdc").setDescription("Max total stake across bets (USDC)").setRequired(true),
+      )
+      .addStringOption((o) =>
+         o
+            .setName("allow")
+            .setDescription("Optional wallet allowlist (comma-separated). Omit = anyone can bet"),
+      )
+      .addStringOption((o) =>
+         o.setName("allow2").setDescription("More allowlist pubkeys if allow hits the 600 char cap"),
+      )
+      .addStringOption((o) =>
+         o.setName("allow3").setDescription("More allowlist pubkeys if allow+allow2 are full"),
+      )
       .addIntegerOption((o) =>
-         o.setName("chain_event_id").setDescription("Multi/manual: on-chain event id"),
+         o
+            .setName("event_id")
+            .setDescription("Single-game: catalog id from /events-list (copies sport/league/event)"),
+      )
+      .addIntegerOption((o) =>
+         o
+            .setName("sport_id")
+            .setDescription("Manual SLE: on-chain sport id in the market key"),
+      )
+      .addIntegerOption((o) =>
+         o
+            .setName("league_id")
+            .setDescription("Manual SLE: on-chain league id in the market key"),
+      )
+      .addIntegerOption((o) =>
+         o
+            .setName("chain_event_id")
+            .setDescription("Manual SLE: on-chain event id in the market key"),
       )
       .addStringOption((o) =>
          o
             .setName("related_event_ids")
-            .setDescription("Optional comma-separated event ids to link in UI (multi-game)"),
+            .setDescription("Catalog event ids from /events-list to show on the card; sets close time"),
       )
       .addStringOption((o) => o.setName("description").setDescription("Optional description"))
       .addStringOption((o) => o.setName("yes_label").setDescription("Yes label (default: Yes)")),
+   new SlashCommandBuilder()
+      .setName("promo-set-odds")
+      .setDescription("Update promo MM odds and DB last_odds")
+      .addIntegerOption((o) => o.setName("promo_id").setDescription("Promo id from promo-list").setRequired(true))
+      .addNumberOption((o) => o.setName("odds").setDescription("Yes decimal odds (e.g. 1.90)").setRequired(true)),
+   new SlashCommandBuilder()
+      .setName("promo-set-max")
+      .setDescription("Set per-bet max USDC on the promo MM")
+      .addIntegerOption((o) => o.setName("promo_id").setDescription("Promo id from promo-list").setRequired(true))
+      .addNumberOption((o) => o.setName("max_usdc").setDescription("Max stake per bet (USDC)").setRequired(true)),
+   new SlashCommandBuilder()
+      .setName("promo-set-max-total")
+      .setDescription("Set total max USDC on the promo MM")
+      .addIntegerOption((o) => o.setName("promo_id").setDescription("Promo id from promo-list").setRequired(true))
+      .addNumberOption((o) =>
+         o.setName("max_total_usdc").setDescription("Max total stake (USDC)").setRequired(true),
+      ),
+   new SlashCommandBuilder()
+      .setName("promo-status")
+      .setDescription("Read on-chain promo MM oracle (caps, allowlist, odds)")
+      .addIntegerOption((o) => o.setName("promo_id").setDescription("Promo id from promo-list").setRequired(true)),
+   new SlashCommandBuilder()
+      .setName("promo-close-market")
+      .setDescription("Close promo MM market + event PDAs (does not settle DB)")
+      .addIntegerOption((o) => o.setName("promo_id").setDescription("Promo id from promo-list").setRequired(true)),
    new SlashCommandBuilder()
       .setName("promo-settle")
       .setDescription("Settle a promotional market and grade its bets")

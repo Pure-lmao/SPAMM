@@ -68,6 +68,45 @@ function sortPlayerPropLines(a: UiMarket, b: UiMarket): number {
    return sortById(a, b);
 }
 
+/** Last-scorer line in First/Next/Last Scorer (UI label "Last"). */
+const NTH_SCORER_LAST_LINE = 99;
+
+/**
+ * Line used to rank a player in the table. Independent of the row's line picker
+ * so switching first → last scorer does not reshuffle rows.
+ * Uses the lowest line (first scorer / anytime 0.5 / Top 1), skipping last-scorer.
+ */
+function playerPropRankingMarket(markets: readonly UiMarket[]): UiMarket {
+   const sorted = [...markets].sort(sortPlayerPropLines);
+   const first = sorted[0];
+   if (first == null) {
+      throw new Error("playerPropRankingMarket: empty markets");
+   }
+   const forRank = sorted.filter((m) => m.line_value !== NTH_SCORER_LAST_LINE);
+   return forRank[0] ?? first;
+}
+
+/** Yes / Over db odds for ranking; 0 and missing sort last. */
+function playerPropRankingOddsDb(markets: readonly UiMarket[]): number | null {
+   const yesOrOver = parseOdds(playerPropRankingMarket(markets).last_odds)[0] ?? 0;
+   return yesOrOver > 0 ? yesOrOver : null;
+}
+
+function comparePlayerPropClusters(a: PlayerPropCluster, b: PlayerPropCluster): number {
+   const oa = playerPropRankingOddsDb(a.markets);
+   const ob = playerPropRankingOddsDb(b.markets);
+   if (oa != null && ob != null && oa !== ob) {
+      return oa - ob;
+   }
+   if (oa == null && ob != null) {
+      return 1;
+   }
+   if (oa != null && ob == null) {
+      return -1;
+   }
+   return a.playerName.localeCompare(b.playerName) || a.playerId - b.playerId;
+}
+
 /** Group player-prop markets in a section into one row per player (all lines). */
 export function clusterPlayerPropMarkets(rows: readonly UiMarket[]): PlayerPropCluster[] {
    const buckets = new Map<string, UiMarket[]>();
@@ -90,7 +129,7 @@ export function clusterPlayerPropMarkets(rows: readonly UiMarket[]): PlayerPropC
          markets: [...markets].sort(sortPlayerPropLines),
       });
    }
-   clusters.sort((a, b) => a.playerName.localeCompare(b.playerName) || a.playerId - b.playerId);
+   clusters.sort(comparePlayerPropClusters);
    return clusters;
 }
 

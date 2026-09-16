@@ -1,0 +1,26 @@
+{
+  "name": "spamm-promo-mm",
+  "module": "src/index.ts",
+  "type": "module",
+  "scripts": {
+    "setup": "bun run src/scripts/setup.ts",
+    "get-config": "bun run src/scripts/getConfig.ts",
+    "read-oracle": "bun run src/scripts/readOracle.ts",
+    "init-promo": "bun run src/scripts/initPromo.ts",
+    "promo-admin": "bun run src/scripts/promoAdmin.ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "devDependencies": {
+    "@types/bun": "latest"
+  },
+  "dependencies": {
+    "@solana-program/compute-budget": "^0.15.0",
+    "@solana/kit": "^8.2.0",
+    "@solana/transaction-messages": "^6.9.0",
+    "spamm-aggregator-sdk": "file:../../aggregator/sdk/ts"
+  },
+  "private": true,
+  "peerDependencies": {
+    "typescript": "^5"
+  }
+}

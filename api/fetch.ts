@@ -1,6 +1,6 @@
 import { fetch } from "bun";
 import type { ESPNEvent, ESPNOdds, DbEvent } from "./types";
-import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, updateEventScore, updateMarket } from "./localDb";
+import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, updateEventScore, updateMarket, PROMO_MKT_ID } from "./localDb";
 import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
 import {
    decodeMarketQuotesProxyReturnData,
@@ -56,12 +56,16 @@ function bestOddsPerSideFromMarketQuotes(
    return best;
 }
 
-async function getScoreboard(sport: string, league: string, date: string): Promise<ESPNEvent[]> {
-   const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/scoreboard?dates=${date}`
-   // console.log(url);
-   const response = await fetch(url, {headers});
-   const data = await response.json() as {events: ESPNEvent[]};
-   return data.events;
+async function getEvents(sport: string, league: string, numberOfDays: number, backwards: boolean = false): Promise<ESPNEvent[]> {
+   const events = [];
+   for (let i = 0; i < numberOfDays; i++) {
+      const date = nDaysFromNow(i, backwards);
+      const url = `https://site.api.espn.com/apis/site/v2/sports/${sport}/${league}/scoreboard?dates=${date}`
+      const response = await fetch(url, {headers});
+      const data = await response.json() as {events: ESPNEvent[]};
+      events.push(...data.events);
+   }
+   return events;
 };
 
 function getScoreFromEvent(event: ESPNEvent): {isCompleted: boolean, homeScore: number, awayScore: number} | null {
@@ -145,7 +149,7 @@ async function setUpcomingEvents() {
    for (const [id, league] of leagues) {
       const sport = sports.get(league.sport_id)!;
       if(sport.id < 100) {
-         const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${today}-${fiveDaysFromNow}`);
+         const scoreboard = await getEvents(sport.api_id, league.api_id, 5);
          for (const event of scoreboard) {
             let eventExists = events.has(`${sport.id}:${league.id}:${event.id}`) || false;
 
@@ -306,7 +310,7 @@ async function setFinishedEvents() {
 
    for (const [id, league] of leagues) {
       const sport = sports.get(league.sport_id)!;
-      const scoreboard = await getScoreboard(sport.api_id, league.api_id, `${twoDaysAgo}-${today}`);
+      const scoreboard = await getEvents(sport.api_id, league.api_id, 2, true);
       for (const event of scoreboard) {
          // console.log("scoreboard event:", event.id);
          if (!events.has(`${sport.id}:${league.id}:${event.id}`)) {
@@ -352,6 +356,9 @@ async function cacheOdds() {
       const numSides = numSidesForMkt(market.id);
       if (numSides === undefined) {
          console.warn(`Skipping odds cache for unsupported mkt ${market.id} (${market.mkt_string})`);
+         continue;
+      }
+      if (market.id === PROMO_MKT_ID) {
          continue;
       }
 
@@ -418,6 +425,12 @@ async function getCachedAthleteName(athleteId: number, athleteRef: string): Prom
    const athleteName = await getAthleteName(athleteRef);
    cachedAthletes.set(athleteId, athleteName);
    return athleteName;
+}
+
+function nDaysFromNow(n: number, backwards: boolean = false): string {
+   const now = new Date();
+   const date = new Date(now.getFullYear(), now.getMonth(), now.getDate() + (backwards ? -n : n)).toISOString().split('T')[0]!.replace(/-/g, '');
+   return date;
 }
 
 async function main() {

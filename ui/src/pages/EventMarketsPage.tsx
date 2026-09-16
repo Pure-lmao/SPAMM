@@ -1,14 +1,15 @@
-import { useEffect, useMemo, useState, Fragment, type ReactElement } from "react";
-import { createSolanaRpc, type Rpc, type SolanaRpcApi } from "@solana/kit";
-import { useCluster } from "@solana/connector/react";
+import { useEffect, useState, Fragment, type ReactElement } from "react";
 import { Link, useLocation, useParams } from "react-router-dom";
 import { fullMarketName, sideLabel, sideLabels } from "spamm-aggregator-sdk";
 import { buildMarketLabel } from "../betting/marketLabel";
-import { refreshEventOddsFromProxy } from "../betting/marketQuotesProxy";
+// Live RPC quote overlay is too slow on large events; restore with marketQuotesProxy.
+// import { createSolanaRpc, type Rpc, type SolanaRpcApi } from "@solana/kit";
+// import { useCluster } from "@solana/connector/react";
+// import { refreshEventOddsFromProxy } from "../betting/marketQuotesProxy";
+// import { resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { pickBetSide } from "../betting/outcomeSide";
 import type { MarketRow } from "../betting/types";
 import { useBetSlip } from "../betting/BetSlipContext";
-import { resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 import { displayEventTitle, formatStart } from "../markets/eventDisplay";
 import { fetchOneEvent } from "../markets/fetchEvent";
@@ -59,14 +60,13 @@ export function EventMarketsPage(): ReactElement {
    const { state } = useLocation();
    const leagueName = (state as NavState | null)?.leagueName?.trim() ?? "";
    const { toggleSelection, isSelected } = useBetSlip();
-   const { cluster } = useCluster();
+   // const { cluster } = useCluster();
    const [ev, setEv] = useState<EventPayload | null>(null);
    const [promos, setPromos] = useState<UiPromotionalMarket[]>([]);
    const [err, setErr] = useState<string | null>(null);
 
-   const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
-
-   const rpc = useMemo(() => createSolanaRpc(clusterRpcUrl) as Rpc<SolanaRpcApi>, [clusterRpcUrl]);
+   // const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
+   // const rpc = useMemo(() => createSolanaRpc(clusterRpcUrl) as Rpc<SolanaRpcApi>, [clusterRpcUrl]);
 
    useEffect(() => {
       const s = Number(sportId);
@@ -88,18 +88,18 @@ export function EventMarketsPage(): ReactElement {
             if (!cancelled) {
                setPromos(eventPromos);
             }
-            try {
-               const withLiveOdds = await refreshEventOddsFromProxy(rpc, row, (partial) => {
-                  if (!cancelled) {
-                     setEv(partial);
-                  }
-               });
-               if (!cancelled) {
-                  setEv(withLiveOdds);
-               }
-            } catch (quoteErr: unknown) {
-               console.warn("Live odds refresh failed", quoteErr);
-            }
+            // try {
+            //    const withLiveOdds = await refreshEventOddsFromProxy(rpc, row, (partial) => {
+            //       if (!cancelled) {
+            //          setEv(partial);
+            //       }
+            //    });
+            //    if (!cancelled) {
+            //       setEv(withLiveOdds);
+            //    }
+            // } catch (quoteErr: unknown) {
+            //    console.warn("Live odds refresh failed", quoteErr);
+            // }
          } catch (x: unknown) {
             if (!cancelled) {
                setErr(x instanceof Error ? x.message : String(x));
@@ -110,7 +110,7 @@ export function EventMarketsPage(): ReactElement {
       return () => {
          cancelled = true;
       };
-   }, [sportId, leagueId, eventId, rpc]);
+   }, [sportId, leagueId, eventId]);
 
    if (err != null) {
       return (

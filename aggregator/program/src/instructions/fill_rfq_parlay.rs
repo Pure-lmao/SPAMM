@@ -40,7 +40,7 @@ use crate::{
       freebet_helpers::{odds_in_freebet_range, require_freebet_mm_allowed, require_freebet_operator_allowed, verify_freebet_for_fill},
    }, instructions::fill_bet::FillBetStake, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
       FILL_PARLAY_RFQ_IX_DISCRIMINATOR, FillRfqIxData, FillRfqParlayIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, build_rfq_parlay_message, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, rfq_message::{RFQ_PARLAY_MESSAGE_LEN, rfq_parlay_message_len},
-   }, writers::write_i64_le_unchecked,
+   }, writers::write_u64_le_unchecked,
 };
 
 pub const FILL_RFQ_PARLAY_IX_DISCRIMINATOR: u8 = 13;
@@ -270,19 +270,15 @@ pub(crate) fn run_fill_rfq_parlay(
       return Err(ProgramError::InvalidAccountData);
    };
 
-   let Ok(gross_margin_u64) = calc_potential_profit(amount, odds_scaled) else {
+   let Ok(gross_margin) = calc_potential_profit(amount, odds_scaled) else {
       log!("fill_rfq_parlay: failed to calc potential profit");
       return Err(ProgramError::InvalidInstructionData);
    };
-   let gross_margin_i64: i64 = gross_margin_u64.try_into().map_err(|_| {
-      log!("fill_rfq_parlay: gross margin does not fit i64");
-      ProgramError::InvalidInstructionData
-   })?;
 
    let (amount_to_send, new_outstanding_liability) = compute_liability_shortfall(
       mm_liability_account_balance_before,
       outstanding_liability,
-      gross_margin_i64,
+      gross_margin,
    )?;
 
    let fill_ix_data = FillRfqIxData {
@@ -326,7 +322,7 @@ pub(crate) fn run_fill_rfq_parlay(
    )?;
 
    unsafe {
-      write_i64_le_unchecked(
+      write_u64_le_unchecked(
          mm_encumbrance_pda.data_mut_ptr(),
          MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
          new_outstanding_liability,

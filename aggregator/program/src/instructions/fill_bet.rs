@@ -60,7 +60,7 @@ use crate::{
       get_encumbrance, get_token_account_balance,
    }, state::{
       BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillBetIxData, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, FreebetAccountData, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, event_id_wire_from_market_wire, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
-   }, writers::write_i64_le_unchecked,
+   }, writers::write_u64_le_unchecked,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
 
@@ -492,21 +492,19 @@ pub(crate) fn run_fill_bet(
          log!("fill_bet: failed to calc potential profit");
          continue;
       };
-      let gross_margin_i64: i64 = match gross_margin_u64.try_into() {
-         Ok(v) => v,
-         Err(_) => continue,
-      };
-
-      let delta_i64: i64 = if is_potentially_netted {
-         netting_calc.map(|c| c.delta).unwrap_or(0)
+      let delta = if is_potentially_netted {
+         match u64::try_from(netting_calc.map(|c| c.delta).unwrap_or(0)) {
+            Ok(v) => v,
+            Err(_) => continue,
+         }
       } else {
-         gross_margin_i64
+         gross_margin_u64
       };
 
       let Ok((amount_to_send, new_outstanding_liability)) = compute_liability_shortfall(
          mm_liability_account_balance_before,
          outstanding_liability,
-         delta_i64,
+         delta,
       ) else {
          continue;
       };
@@ -607,7 +605,7 @@ pub(crate) fn run_fill_bet(
       }
 
       unsafe {
-         write_i64_le_unchecked(
+         write_u64_le_unchecked(
             mm_accounts[quote.encumbrance_pda_index].data_mut_ptr(),
             MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
             new_outstanding_liability

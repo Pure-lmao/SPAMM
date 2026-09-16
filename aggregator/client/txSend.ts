@@ -105,8 +105,40 @@ export async function sendAndConfirmSignedTransaction(
       rpc: clients.rpc,
       rpcSubscriptions: clients.rpcSubscriptions,
    } as never);
-   await sendAndConfirmTransaction(signedTransaction as never, { commitment });
+   try {
+      await sendAndConfirmTransaction(signedTransaction as never, { commitment });
+   } catch (error) {
+      logSolanaError('[sendAndConfirmSignedTransaction]', error);
+      throw error;
+   }
    return getSignatureFromTransaction(signedTransaction);
+}
+
+/** Kit `SolanaError.cause` / `context.logs` are often hidden by `console.error(error)`. */
+export function logSolanaError(prefix: string, error: unknown): void {
+   console.error(prefix, error);
+   const seen = new Set<unknown>();
+   let current: unknown = error;
+   let depth = 0;
+   while (current != null && typeof current === 'object' && !seen.has(current) && depth < 10) {
+      seen.add(current);
+      const obj = current as {
+         message?: unknown;
+         context?: { logs?: unknown; err?: unknown; code?: unknown };
+         cause?: unknown;
+      };
+      if (typeof obj.message === 'string') {
+         console.error(`${prefix} message[${depth}]:`, obj.message);
+      }
+      if (obj.context != null) {
+         console.error(`${prefix} context[${depth}]:`, obj.context);
+         if (Array.isArray(obj.context.logs)) {
+            console.error(`${prefix} logs[${depth}]:\n${obj.context.logs.join('\n')}`);
+         }
+      }
+      current = obj.cause;
+      depth++;
+   }
 }
 
 

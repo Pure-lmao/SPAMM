@@ -59,7 +59,7 @@ use crate::{
       account_netting::apply_settle_netting,
       other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED},
    },
-   writers::write_i64_le_unchecked,
+   writers::write_u64_le_unchecked,
 };
 
 pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 25;
@@ -280,17 +280,17 @@ fn filler_token_amounts(result: BetResult, filler: &BetFiller) -> Result<(u64, u
    }
 }
 
-pub(crate) fn unwind_encumbrance(mm_encumbrance_pda: &mut AccountView, delta: i64) -> ProgramResult {
+pub(crate) fn unwind_encumbrance(mm_encumbrance_pda: &mut AccountView, delta: u64) -> ProgramResult {
    if delta == 0 {
       return Ok(());
    }
    let encumbrance = get_encumbrance(mm_encumbrance_pda)?
       .checked_sub(delta).ok_or(ProgramError::ArithmeticOverflow)?;
    unsafe {
-      write_i64_le_unchecked(
+      write_u64_le_unchecked(
          mm_encumbrance_pda.data_mut_ptr(),
          MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
-         encumbrance,
+         encumbrance
       );
    }
    Ok(())
@@ -330,13 +330,14 @@ pub(crate) fn unwind_fillers_encumbrance_after_settle(
             header.side,
             profit,
          )?;
-         peak_delta.checked_neg().ok_or(ProgramError::ArithmeticOverflow)?
+         u64::try_from(peak_delta.checked_neg().ok_or(ProgramError::ArithmeticOverflow)?)
+            .map_err(|_| ProgramError::ArithmeticOverflow)?
       } else {
          if unlikely(!address_eq(filler_accounts[base + 4].address(), &SYSTEM_ID)) {
             log!("settle_bet: unnetted filler must pass system program as netting");
             return Err(ProgramError::InvalidAccountData);
          }
-         profit.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?
+         profit
       };
       unwind_encumbrance(&mut filler_accounts[base + 2], drop)?;
    }

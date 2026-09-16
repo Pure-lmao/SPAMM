@@ -19,7 +19,6 @@ import type {
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { sportsTodayDateString } from './sportsDay';
-import { DEFAULT_MARKET_OPERATOR } from "./utils";
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const DB_PATH = path.join(__dirname, "data.db");
@@ -565,12 +564,6 @@ export function updateMarket(
    database.query(
       "UPDATE markets SET last_odds = ?, last_update = ? WHERE id = ? AND event_id = ? AND league_id = ? AND sport_id = ? AND period_id = ? AND player_id = ?"
    ).run(odds, timestamp, marketId, eventId, leagueId, sportId, periodId, playerId);
-   if (marketId === PROMO_MKT_ID) {
-      database.query(
-         `UPDATE promotional_markets SET last_odds = ?, last_update = ?
-          WHERE sport_id = ? AND league_id = ? AND event_id = ? AND player_id = ? AND status = 'open'`,
-      ).run(odds, timestamp, sportId, leagueId, eventId, playerId);
-   }
 }
 
 export function getLeagues(): { api_id: string; sport_id: number; id: number }[] {
@@ -723,7 +716,6 @@ export type AddPredictionContestInput = Omit<
 };
 
 export function addPredictionContest(input: AddPredictionContestInput): PredictionContest {
-   initPredictionContestsTable();
    const database = getDb();
    const status = input.status ?? 'open';
    const created_at = input.created_at ?? Date.now();
@@ -787,7 +779,6 @@ export function addPredictionContest(input: AddPredictionContestInput): Predicti
 }
 
 export function fetchPredictionContest(id: number): PredictionContest | null {
-   initPredictionContestsTable();
    const database = getDb();
    const row = database
       .query<PredictionContestRow, [string]>(`SELECT * FROM prediction_contests WHERE id = ?`)
@@ -796,7 +787,6 @@ export function fetchPredictionContest(id: number): PredictionContest | null {
 }
 
 export function fetchPredictionContestByDate(date: string): PredictionContest | null {
-   initPredictionContestsTable();
    const database = getDb();
    const row = database
       .query<PredictionContestRow, [string]>(
@@ -807,7 +797,6 @@ export function fetchPredictionContestByDate(date: string): PredictionContest | 
 }
 
 export function fetchPredictionContestsHistory(limit: number = 30): PredictionContest[] {
-   initPredictionContestsTable();
    const database = getDb();
    const rows = database
       .query<PredictionContestRow, [string]>(
@@ -818,7 +807,6 @@ export function fetchPredictionContestsHistory(limit: number = 30): PredictionCo
 }
 
 export function listPredictionContests(): PredictionContest[] {
-   initPredictionContestsTable();
    const database = getDb();
    const rows = database
       .query<PredictionContestRow, []>(`SELECT * FROM prediction_contests ORDER BY id DESC`)
@@ -866,7 +854,6 @@ export function updatePredictionContest(
    id: number,
    patch: UpdatePredictionContestPatch,
 ): PredictionContest | null {
-   initPredictionContestsTable();
    if (fetchPredictionContest(id) == null) {
       return null;
    }
@@ -892,7 +879,6 @@ export function updatePredictionContestResult(
    resultPrediction: Uint8Array,
    notes: string | null,
 ): PredictionContest | null {
-   initPredictionContestsTable();
    const database = getDb();
    database
       .query(
@@ -950,8 +936,10 @@ type PromotionalMarketRow = {
    settled_notes: string | null;
 };
 
+// initPromotionalMarketsTable();
 export function initPromotionalMarketsTable(): void {
    const database = getDb();
+   database.run(`DROP TABLE IF EXISTS promotional_markets`);
    database.run(`
       CREATE TABLE IF NOT EXISTS promotional_markets (
          id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -1036,6 +1024,39 @@ export function addPromotionalMarket(input: AddPromotionalMarketInput): Promotio
       );
    const id = Number(database.query<{ id: number }, []>("SELECT last_insert_rowid() AS id").get()!.id);
    return fetchPromotionalMarket(id)!;
+}
+
+export function updatePromotionalMarketLastOdds(promoId: number, lastOdds: string): PromotionalMarket {
+   const promo = fetchPromotionalMarket(promoId);
+   if (!promo) {
+      throw new Error(`Promotional market ${promoId} not found`);
+   }
+   const now = Date.now();
+   getDb()
+      .query(`UPDATE promotional_markets SET last_odds = ?, last_update = ? WHERE id = ?`)
+      .run(lastOdds, now, promoId);
+   return { ...promo, last_odds: lastOdds, last_update: now };
+}
+
+export function fetchOpenPromotionalMarketOnEvent(
+   sportId: number,
+   leagueId: number,
+   eventId: number,
+   periodId: number,
+): PromotionalMarket | null {
+   const row = getDb()
+      .query<PromotionalMarketRow, string[]>(
+         `SELECT * FROM promotional_markets
+          WHERE sport_id = ? AND league_id = ? AND event_id = ? AND period_id = ? AND status = 'open'
+          LIMIT 1`,
+      )
+      .get(
+         sportId.toString(),
+         leagueId.toString(),
+         eventId.toString(),
+         periodId.toString(),
+      );
+   return row ? rowToPromotionalMarket(row) : null;
 }
 
 export function fetchPromotionalMarket(id: number): PromotionalMarket | null {
@@ -1157,20 +1178,6 @@ export function settlePromotionalMarket(
    if (!promo) {
       return null;
    }
-   addMarket({
-      id: PROMO_MKT_ID,
-      event_id: promo.event_id,
-      league_id: promo.league_id,
-      sport_id: promo.sport_id,
-      period_id: promo.period_id,
-      player_id: 0,
-      player_name: "",
-      line_value: null,
-      last_odds: settledOdds,
-      last_update: now,
-      mkt_string: PROMO_MKT_STRING,
-      operator: DEFAULT_MARKET_OPERATOR,
-   });
    return promo;
 }
 

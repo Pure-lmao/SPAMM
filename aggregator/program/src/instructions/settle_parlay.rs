@@ -45,7 +45,7 @@ use crate::{ID,
       CASHOUT_PARLAY_ACCOUNT_MIN_LEN,
       account_bet::BetResult, 
       other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED},
-   }, writers::write_i64_le_unchecked
+   }, writers::write_u64_le_unchecked
 };
 
 pub const SETTLE_PARLAY_IX_DISCRIMINATOR: u8 = 26;
@@ -330,9 +330,12 @@ pub(crate) fn settle_parlay_core(
    };
 
    let amount_to_user_from_bet_ata = core::cmp::min(user_return, amount);
-   let amount_to_user_from_filler_liability_token_account =
-      user_return.saturating_sub(amount_to_user_from_bet_ata);
-   let amount_to_liability_from_bet_ata = amount.saturating_sub(amount_to_user_from_bet_ata);
+   let amount_to_user_from_filler_liability_token_account = user_return
+      .checked_sub(amount_to_user_from_bet_ata)
+      .ok_or(ProgramError::ArithmeticOverflow)?;
+   let amount_to_liability_from_bet_ata = amount
+      .checked_sub(amount_to_user_from_bet_ata)
+      .ok_or(ProgramError::ArithmeticOverflow)?;
 
    let profit_via_liability = amount_to_user_from_filler_liability_token_account > 0
       && !address_eq(mm_liability_token_account.address(), profit_dest_ata.address());
@@ -409,14 +412,12 @@ pub(crate) fn settle_parlay_core(
       batch.invoke_signed(core::slice::from_ref(&signer_bet))?;
    }
 
-   let encumbrance_delta: i64 = potential_profit.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
-   if encumbrance_delta != 0 {
-      let mut encumbrance = get_encumbrance(mm_encumbrance_pda)?;
-      encumbrance = encumbrance
-         .checked_sub(encumbrance_delta).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
+   if potential_profit != 0 {
+      let encumbrance = get_encumbrance(mm_encumbrance_pda)?
+         .checked_sub(potential_profit).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
 
       unsafe {
-         write_i64_le_unchecked(
+         write_u64_le_unchecked(
             mm_encumbrance_pda.data_mut_ptr(),
             MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
             encumbrance

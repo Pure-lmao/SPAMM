@@ -40,7 +40,7 @@ use crate::{
       freebet_helpers::{odds_in_freebet_range, require_freebet_mm_allowed, require_freebet_operator_allowed, verify_freebet_for_fill},
    }, instructions::fill_bet::FillBetStake, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
       BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_RFQ_IX_DISCRIMINATOR, FillRfqBetIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, build_rfq_bet_message, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, rfq_message::RFQ_BET_MESSAGE_LEN,
-   }, writers::write_i64_le_unchecked,
+   }, writers::write_u64_le_unchecked,
 };
 
 pub const FILL_RFQ_BET_IX_DISCRIMINATOR: u8 = 12;
@@ -281,21 +281,19 @@ pub(crate) fn run_fill_rfq_bet(
       log!("fill_rfq_bet: failed to calc potential profit");
       return Err(ProgramError::InvalidInstructionData);
    };
-   let gross_margin_i64: i64 = gross_margin_u64.try_into().map_err(|_| {
-      log!("fill_rfq_bet: gross margin does not fit i64");
-      ProgramError::InvalidInstructionData
-   })?;
-
-   let delta_i64: i64 = if is_potentially_netted {
-      netting_calc.map(|c| c.delta).unwrap_or(0)
+   let delta = if is_potentially_netted {
+      u64::try_from(netting_calc.map(|c| c.delta).unwrap_or(0)).map_err(|_| {
+         log!("fill_rfq_bet: netting delta does not fit u64");
+         ProgramError::InvalidInstructionData
+      })?
    } else {
-      gross_margin_i64
+      gross_margin_u64
    };
 
    let (amount_to_send, new_outstanding_liability) = compute_liability_shortfall(
       mm_liability_account_balance_before,
       outstanding_liability,
-      delta_i64,
+      delta,
    )?;
 
    let fill_ix_data = FillRfqIxData {
@@ -347,7 +345,7 @@ pub(crate) fn run_fill_rfq_bet(
    }
 
    unsafe {
-      write_i64_le_unchecked(
+      write_u64_le_unchecked(
          mm_encumbrance_pda.data_mut_ptr(),
          MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
          new_outstanding_liability,

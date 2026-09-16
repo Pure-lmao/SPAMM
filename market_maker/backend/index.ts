@@ -58,7 +58,7 @@ async function runMarketMakerCycle() {
                      getEventStateData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId),
                   );
                }
-               
+
                oddsData = await getESPNOdds(sport.api_id, league.api_id, event.api_id);
                // console.log(sport.api_id, league.api_id, event.api_id, oddsData);
             } catch (error) {
@@ -85,6 +85,7 @@ async function runMarketMakerCycle() {
                }
             }
             const ixs: Instruction[][] = [];
+            let maxInstructionsPerTransaction = 64;
             for (const market of event.markets ?? []) {
                // check for market data account
                const marketId: MarketId = {
@@ -108,6 +109,7 @@ async function runMarketMakerCycle() {
                      ixs.push([await getInitMarketIx(
                         ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, new Uint8Array(3*4)
                      )]);
+                     maxInstructionsPerTransaction--;
                   } else {
                      console.error(error);
                   }
@@ -206,7 +208,7 @@ async function runMarketMakerCycle() {
             // send the ixs
             if (ixs.length > 0) {
                try {
-                  const txResult = await sendAndConfirmInstructionGroups(clients, ixs, [ADMIN_SIGNER]);
+                  const txResult = await sendAndConfirmInstructionGroups(clients, ixs, [ADMIN_SIGNER], {maxInstructionsPerTransaction});
                   console.log("Markets updated onchain", eventId, txResult);
                } catch (error) {
                   logSolanaError(`Failed to update markets for event ${event.id}:`, error);

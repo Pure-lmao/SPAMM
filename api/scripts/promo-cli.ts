@@ -3,13 +3,18 @@
  *
  * Usage:
  *   bun run promo events
- *   bun run promo create --title "..." --period-id 1 --event-id 12345
- *   bun run promo create --title "..." --period-id 0 --sport-id 1 --league-id 2 --chain-event-id 99999 --related-event-ids "111,222"
+ *   bun run promo create --title "..." --period-id 1 --event-id 12345 \
+ *     --odds 1.90 --max-usdc 25 --max-total-usdc 500 --allow pk1,pk2
  *   bun run promo list
  *   bun run promo get --id 1
  *   bun run promo active
  *   bun run promo for-event --sport 1 --league 2 --event 12345
- *   bun run promo settle --id 1 --result yes [--notes "..."] [--grade]
+ *   bun run promo set-odds --id 1 --odds 2.10
+ *   bun run promo set-max --id 1 --max-usdc 25
+ *   bun run promo set-max-total --id 1 --max-total-usdc 500
+ *   bun run promo status --id 1
+ *   bun run promo close-market --id 1
+ *   bun run promo settle --id 1 --result yes [--notes "..."]
  *   bun run market-add --event-id 12345 --type spread --line -1.5
  */
 
@@ -21,7 +26,17 @@ import {
    promotionalMarketToJson,
 } from "../localDb";
 import { addEventLineMarket, listUpcomingEvents, type MarketLineKind } from "../marketAdmin";
-import { gradePromoBets, settlePromotionalMarketAdmin } from "../promoAdmin";
+import {
+   closePromoMarket,
+   createPromotionalMarket,
+   gradePromoBets,
+   parseAllowAddresses,
+   promoMarketStatus,
+   setPromoMaxTotalUsdc,
+   setPromoMaxUsdc,
+   setPromoOdds,
+   settlePromotionalMarketAdmin,
+} from "../promoAdmin";
 import { safeJSONStringify } from "../utils";
 
 const EVENT_LIST_LIMIT = 40;
@@ -34,10 +49,6 @@ function opt(name: string): string | undefined {
    return process.argv[i + 1];
 }
 
-function hasFlag(name: string): boolean {
-   return process.argv.includes(name);
-}
-
 function optInt(name: string): number | undefined {
    const raw = opt(name);
    if (raw == null) {
@@ -48,6 +59,10 @@ function optInt(name: string): number | undefined {
       throw new Error(`Invalid number for ${name}: ${raw}`);
    }
    return n;
+}
+
+function optNumber(name: string): number | undefined {
+   return optInt(name);
 }
 
 function parseEventIdList(raw: string | undefined): number[] | undefined {
@@ -70,32 +85,33 @@ function printJson(value: unknown): void {
 }
 
 function usage(): void {
-   console.log(`Promo CLI (writes to api/data.db)
+   console.log(`Promo CLI (writes to api/data.db + promo MM on-chain)
 
 Subcommands:
   events                          List upcoming events (ids for --event-id)
   market-add                      Add spread/total line to an event
-  create                          Create promotional market (mkt 9)
+  create                          Create promo (DB + chain bootstrap)
   list                            List all promotional markets
   get --id N                      Fetch one promo by id
   active                          List open promos (not past closes_at)
   for-event --sport S --league L --event E   Promos for an event page
-  settle --id N --result yes|no   Settle promo (--grade to grade on-chain bets)
+  set-odds --id N --odds D        Update chain + DB odds
+  set-max --id N --max-usdc N     Per-bet cap
+  set-max-total --id N --max-total-usdc N
+  status --id N                   On-chain oracle snapshot
+  close-market --id N             Close MM market + event PDAs
+  settle --id N --result yes|no   Settle promo and grade on-chain bets
 
 Create (single game):
-  --title --period-id --event-id
-  Optional: --description --yes-label
+  --title --period-id --event-id --odds --max-usdc --max-total-usdc
+  Optional: --allow pk1,pk2 --description --yes-label
 
 Create (multi/manual):
-  --title --period-id --sport-id --league-id --chain-event-id
-  Optional: --related-event-ids "1,2,3" --description --yes-label
+  --title --period-id --sport-id --league-id --chain-event-id --odds --max-usdc --max-total-usdc
+  Optional: --allow … --related-event-ids "1,2,3" --description --yes-label
 
 Market add:
   --event-id --type spread|total --line <number>
-
-Settle:
-  --id --result yes|no
-  Optional: --notes --grade
 `);
 }
 
@@ -132,11 +148,14 @@ async function cmdMarketAdd(): Promise<void> {
 async function cmdCreate(): Promise<void> {
    const title = opt("--title");
    const periodId = optInt("--period-id");
-   if (!title || periodId == null) {
-      throw new Error("Required: --title --period-id");
+   const odds = optNumber("--odds");
+   const maxUsdc = optNumber("--max-usdc");
+   const maxTotalUsdc = optNumber("--max-total-usdc");
+   const allowRaw = opt("--allow");
+   if (!title || periodId == null || odds == null || maxUsdc == null || maxTotalUsdc == null) {
+      throw new Error("Required: --title --period-id --odds --max-usdc --max-total-usdc");
    }
-   const { createPromotionalMarket } = await import("../promoAdmin");
-   const promo = createPromotionalMarket({
+   const promo = await createPromotionalMarket({
       title,
       description: opt("--description"),
       yesLabel: opt("--yes-label"),
@@ -146,6 +165,10 @@ async function cmdCreate(): Promise<void> {
       leagueId: optInt("--league-id"),
       chainEventId: optInt("--chain-event-id"),
       relatedEventIds: parseEventIdList(opt("--related-event-ids")),
+      allow: parseAllowAddresses(allowRaw ?? ""),
+      odds,
+      maxUsdc,
+      maxTotalUsdc,
    });
    printJson(promotionalMarketToJson(promo));
 }
@@ -183,6 +206,52 @@ async function cmdForEvent(): Promise<void> {
    printJson({ sport, league, event, count: rows.length, promos: rows });
 }
 
+async function cmdSetOdds(): Promise<void> {
+   const id = optInt("--id");
+   const odds = optNumber("--odds");
+   if (id == null || odds == null) {
+      throw new Error("Required: --id --odds");
+   }
+   printJson(promotionalMarketToJson(await setPromoOdds(id, odds)));
+}
+
+async function cmdSetMax(): Promise<void> {
+   const id = optInt("--id");
+   const maxUsdc = optNumber("--max-usdc");
+   if (id == null || maxUsdc == null) {
+      throw new Error("Required: --id --max-usdc");
+   }
+   await setPromoMaxUsdc(id, maxUsdc);
+   printJson({ id, max_usdc: maxUsdc });
+}
+
+async function cmdSetMaxTotal(): Promise<void> {
+   const id = optInt("--id");
+   const maxTotalUsdc = optNumber("--max-total-usdc");
+   if (id == null || maxTotalUsdc == null) {
+      throw new Error("Required: --id --max-total-usdc");
+   }
+   await setPromoMaxTotalUsdc(id, maxTotalUsdc);
+   printJson({ id, max_total_usdc: maxTotalUsdc });
+}
+
+async function cmdStatus(): Promise<void> {
+   const id = optInt("--id");
+   if (id == null) {
+      throw new Error("Required: --id");
+   }
+   printJson(await promoMarketStatus(id));
+}
+
+async function cmdCloseMarket(): Promise<void> {
+   const id = optInt("--id");
+   if (id == null) {
+      throw new Error("Required: --id");
+   }
+   await closePromoMarket(id);
+   printJson({ id, closed: true });
+}
+
 async function cmdSettle(): Promise<void> {
    const id = optInt("--id");
    const result = opt("--result");
@@ -205,6 +274,11 @@ const commands: Record<string, () => Promise<void>> = {
    get: cmdGet,
    active: cmdActive,
    "for-event": cmdForEvent,
+   "set-odds": cmdSetOdds,
+   "set-max": cmdSetMax,
+   "set-max-total": cmdSetMaxTotal,
+   status: cmdStatus,
+   "close-market": cmdCloseMarket,
    settle: cmdSettle,
    help: async () => usage(),
 };

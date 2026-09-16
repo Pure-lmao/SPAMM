@@ -163,7 +163,9 @@ pub fn split_fillers(
             return Err(SpammError::InvalidCashout.into());
          }
          i -= 1;
-         let cap = orig[i].amount.saturating_sub(cashed_amt[i]);
+         let cap = orig[i].amount
+            .checked_sub(cashed_amt[i])
+            .ok_or(ProgramError::ArithmeticOverflow)?;
          let take = core::cmp::min(overflow, cap);
          cashed_amt[i] = cashed_amt[i]
             .checked_add(take).ok_or(ProgramError::ArithmeticOverflow)?;
@@ -789,18 +791,10 @@ pub fn verify_cashout_mm_encumbrance(
 #[inline(always)]
 pub fn cashout_amount_to_send(
    mm_liability_account_balance_before: u64,
-   outstanding_liability: i64,
+   outstanding_liability: u64,
    cashout_payment: u64,
 ) -> Result<(u64, u64), ProgramError> {
-   let reserved_profit: u64 = if outstanding_liability < 0 {
-      0
-   } else {
-      outstanding_liability.try_into().map_err(|_| {
-         log!("cashout: reserved profit does not fit u64");
-         ProgramError::ArithmeticOverflow
-      })?
-   };
-   let free_balance = mm_liability_account_balance_before.saturating_sub(reserved_profit);
+   let free_balance = mm_liability_account_balance_before.checked_sub(outstanding_liability).ok_or(ProgramError::ArithmeticOverflow)?;
    let amount_from_liability = core::cmp::min(cashout_payment, free_balance);
    let amount_to_send = cashout_payment
       .checked_sub(amount_from_liability)
