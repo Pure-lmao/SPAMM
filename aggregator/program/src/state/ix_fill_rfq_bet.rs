@@ -9,7 +9,7 @@ use crate::{
 use super::{
    ix_common::{
       split_freebet_id_prefix, validate_amount_over_min, validate_event_state_sequence,
-      validate_odds_above_scale, validate_side_for_mkt, validate_sport, IX_ED25519_SIGNATURE_LEN,
+      validate_odds_above_scale, validate_side_for_mkt, IX_ED25519_SIGNATURE_LEN,
    },
    ids::MarketId,
    other::EventGameState,
@@ -66,7 +66,6 @@ impl FillRfqBetIxData {
          parsed.market_id.is_pregame(),
          LABEL,
       )?;
-      validate_sport(parsed.market_id.event_id.sport, LABEL)?;
       validate_side_for_mkt(parsed.side, parsed.market_id.mkt, LABEL)?;
       let mut sig = [0u8; IX_ED25519_SIGNATURE_LEN];
       sig.copy_from_slice(&data[FILL_RFQ_BET_IX_BODY_LEN..]);

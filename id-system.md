@@ -2,6 +2,8 @@
 
 ## Sport (u8 - max 255)
 
+These ids are suggested but ultimately controlled by the market operator. Only 0 and 1 are enforced by the aggregator program. 0 is used as a null placeholder, and 1 is used for soccer, creating a 3-way event netting header (home, away, draw).
+
 0 - Invalid
 1 - Soccer
 2 - American Football

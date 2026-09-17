@@ -4,15 +4,8 @@ use pinocchio::{error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
 
 use crate::{
-   constants::{MAX_RFQ_PARLAY_LEGS, ODDS_SCALE},
-   errors::SpammError,
-   state::{
-      account_bet::BetResult,
-      account_cashout_parlay::CashoutParlayAccountData,
-      account_parlay_bet::{ParlayBetAccountData, ParlayLegSettleView},
-      ids::EventId,
-      mm_parlay_quote::{ParlayLegQuoted, ParlayLegSel, ParlayLegWire},
-      MarketId, Sport,
+   constants::{MAX_RFQ_PARLAY_LEGS, ODDS_SCALE}, errors::SpammError, state::{
+      MarketId, account_bet::BetResult, account_cashout_parlay::CashoutParlayAccountData, account_parlay_bet::{ParlayBetAccountData, ParlayLegSettleView}, ids::{EventId, INVALID_SPORT}, mm_parlay_quote::{ParlayLegQuoted, ParlayLegSel, ParlayLegWire},
    },
 };
 
@@ -297,7 +290,7 @@ pub fn compute_modified_parlay_settlement_from_account(
       event_id: EventId {
          event: 0,
          league: 0,
-         sport: Sport::Invalid,
+         sport: INVALID_SPORT,
       },
       odds_scaled: 0,
       result: BetResult::Pending,
@@ -318,7 +311,7 @@ pub fn compute_modified_cashout_parlay_settlement_from_account(
       event_id: EventId {
          event: 0,
          league: 0,
-         sport: Sport::Invalid,
+         sport: INVALID_SPORT,
       },
       odds_scaled: 0,
       result: BetResult::Pending,

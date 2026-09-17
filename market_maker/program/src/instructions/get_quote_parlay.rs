@@ -29,7 +29,7 @@ use spamm_aggregator::{
    QuoteResult,
    constants::{MAX_PARLAY_LEGS, ODDS_SCALE},
    state::{
-      parlay_quote_return_wire_len, Sport, PARLAY_LEG_SEL_LEN, PARLAY_QUOTE_RETURN_WIRE_LEN,
+      parlay_quote_return_wire_len, PARLAY_LEG_SEL_LEN, PARLAY_QUOTE_RETURN_WIRE_LEN,
       mm_parlay_quote::{MMParlayQuoteBuffer, ParlayLegQuoted, ParlayLegSel, MM_PARLAY_QUOTE_BUFFER_LEN},
       mm_quote::GetParlayQuoteReturnWire,
    },
@@ -119,19 +119,11 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
          return Ok(());
       }
       let sport = leg.market_id.event_id.sport;
-      if unlikely(!matches!(
-         sport,
-         Sport::Soccer
-            | Sport::IceHockey
-            | Sport::AmericanFootball
-            | Sport::Basketball
-            | Sport::Baseball
-            | Sport::Tennis
-            | Sport::Cs2
-            | Sport::Dota
-            | Sport::Lol
-            | Sport::Valorant
-      )) {
+      if unlikely(
+         (sport == 0) ||
+         (sport > 10 && sport < 101) ||
+         (sport > 101 && sport < 110)
+      ) {
          log!("get_quote_parlay: invalid sport");
          set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
          return Ok(());

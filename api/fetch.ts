@@ -1,4 +1,4 @@
-import { fetch, sleep } from "bun";
+import { fetch } from "bun";
 import type { ESPNEvent, ESPNOdds, DbEvent } from "./types";
 import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, updateEventScore, updateMarket, PROMO_MKT_ID } from "./localDb";
 import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
@@ -28,6 +28,10 @@ const QUOTE_PROBE_BET_ID = 1n;
 
 function returnDataToBytes(raw: Base64EncodedDataResponse): Uint8Array {
    return new Uint8Array(Buffer.from(...raw));
+}
+
+function sleep(ms: number): Promise<void> {
+   return new Promise((resolve) => setTimeout(resolve, ms));
 }
 
 const headers = {

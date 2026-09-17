@@ -4,7 +4,6 @@ import {
    MAX_PARLAY_LEGS,
    BetResult,
    GRADE_PARLAY_LEG_SKIP,
-   Sport,
    type CashoutSnapshot,
    type EventGameState,
    type EventId,
@@ -222,28 +221,11 @@ export function validateBetSide(side: number, mkt: number, label = 'side'): void
    }
 }
 
-export function validateSportEnum(sport: Sport, label = 'sport'): void {
-   switch (sport) {
-      case Sport.Soccer:
-      case Sport.AmericanFootball:
-      case Sport.Baseball:
-      case Sport.Basketball:
-      case Sport.IceHockey:
-      case Sport.Tennis:
-      case Sport.Cs2:
-      case Sport.Dota:
-      case Sport.Lol:
-      case Sport.Valorant:
-         return;
-      default:
-         throw new RangeError(`${label} is not a valid Sport enum value: ${sport}`);
-   }
-}
 
 export function validateEventId(e: EventId, label = 'eventId'): void {
    validateU64(e.event, `${label}.event`);
    validateU16(e.league, `${label}.league`);
-   validateSportEnum(e.sport, `${label}.sport`);
+   validateU8(e.sport, `${label}.sport`);
 }
 
 export function validateAddress(addr: string, label = 'address'): void {

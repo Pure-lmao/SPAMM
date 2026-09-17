@@ -11,8 +11,7 @@ use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
-   constants::{MAX_PARLAY_LEGS, ODDS_SCALE},
-   state::{account_bet::BetResult, EventGameState, EventId, MarketId, Sport},
+   constants::{MAX_PARLAY_LEGS, ODDS_SCALE}, state::{EventGameState, EventId, MarketId, account_bet::BetResult, ids::INVALID_SPORT},
 };
 
 #[inline(always)]
@@ -21,7 +20,7 @@ fn placeholder_market_id() -> MarketId {
       event_id: EventId {
          event: 0,
          league: 0,
-         sport: Sport::Invalid,
+         sport: INVALID_SPORT,
       },
       player: 0,
       mkt: 0,

@@ -8,8 +8,7 @@ use pinocchio_system::{instructions::Transfer};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
-   helpers::{calc_potential_profit, get_rent, verify_system_program}, 
-   readers::{read_i64_le_unchecked, read_u8_unchecked, read_u16_le_unchecked, read_u64_pair_unchecked}, state::{EventId, MarketId, Sport}, writers::{write_netting_line_unchecked, write_u8_unchecked, write_u64_le_unchecked, write_u64_pair_unchecked},
+   helpers::{calc_potential_profit, get_rent, verify_system_program}, readers::{read_i64_le_unchecked, read_u8_unchecked, read_u16_le_unchecked, read_u64_pair_unchecked}, state::{EventId, MarketId, ids::SOCCER}, writers::{write_netting_line_unchecked, write_u8_unchecked, write_u64_le_unchecked, write_u64_pair_unchecked},
 };
 
 pub const NETTING_PDA_SEED: &[u8] = b"netting";
@@ -74,9 +73,9 @@ pub fn market_is_netting_eligible(market_id: &MarketId) -> bool {
 
 /// FT win market only: soccer `period` 1 / `mkt` 1 (1X2), else `period` 0 / `mkt` 0 (ML).
 #[inline(always)]
-fn is_header_market(sport: Sport, period: u8, mkt: u16) -> bool {
+fn is_header_market(sport: u8, period: u8, mkt: u16) -> bool {
    MarketId::is_full_time_period(sport, period)
-      && ((sport == Sport::Soccer && mkt == 1) || (sport != Sport::Soccer && mkt == 0))
+      && ((sport == SOCCER && mkt == 1) || (sport != SOCCER && mkt == 0))
 }
 
 #[inline(always)]
@@ -295,7 +294,7 @@ pub(crate) fn insert_blank_netting_line_at(
 #[inline(always)]
 pub fn add_netting_line(
    data: &mut [u8],
-   sport: Sport,
+   sport: u8,
    period: u8,
    mkt: u16,
 ) -> Result<(), ProgramError> {
@@ -450,7 +449,7 @@ pub fn calculate_netting(
 
    if is_header_market(sport, period, mkt) {
       let outcome_index = side as usize;
-      if sport == Sport::Soccer {
+      if sport == SOCCER {
          if outcome_index > 2 {
             return None;
          }
@@ -626,7 +625,7 @@ pub fn apply_settle_netting(
    let outcome_index = side as usize;
 
    if is_header_market(sport, period, mkt) {
-      if sport == Sport::Soccer {
+      if sport == SOCCER {
          if unlikely(outcome_index > 2) {
             return Err(ProgramError::InvalidInstructionData);
          }

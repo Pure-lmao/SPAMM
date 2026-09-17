@@ -168,7 +168,7 @@ pub fn event_id_soccer_n(i: u16) -> spamm_aggregator::state::EventId {
    spamm_aggregator::state::EventId {
       event: 1000u64 + i as u64,
       league: 39,
-      sport: spamm_aggregator::state::Sport::Soccer,
+      sport: 1,
    }
 }
 

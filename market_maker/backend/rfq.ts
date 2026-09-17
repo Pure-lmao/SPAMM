@@ -73,6 +73,7 @@ async function runSession(
    });
 
    const hello = await signMmHelloAuth(RFQ_SIGNER, { mmProgramId: MM_PROGRAM });
+   console.log("sending hello");
    ws.send(JSON.stringify(hello));
 
    await new Promise<void>((resolve, reject) => {

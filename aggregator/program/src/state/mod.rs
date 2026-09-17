@@ -118,7 +118,7 @@ pub use mm_cashout::{
    GetCashoutQuoteParlayIxHeader, ProxyCashoutQuoteData,
 };
 pub use ids::{
-   event_id_wire_from_market_wire, EventId, MarketId, Sport, market_id_pda_seed_parts,
+   event_id_wire_from_market_wire, EventId, MarketId, market_id_pda_seed_parts,
    MARKET_ID_LEN,
 };
 pub use other::{

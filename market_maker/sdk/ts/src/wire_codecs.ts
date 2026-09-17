@@ -34,34 +34,6 @@ const getBoolU8Decoder = (): Decoder<boolean> =>
       return n !== 0;
    });
 
-function sportFromWire(b: number): Sport {
-   switch (b) {
-      case Sport.Invalid:
-         return Sport.Invalid;
-      case Sport.Soccer:
-         return Sport.Soccer;
-      case Sport.AmericanFootball:
-         return Sport.AmericanFootball;
-      case Sport.Baseball:
-         return Sport.Baseball;
-      case Sport.Basketball:
-         return Sport.Basketball;
-      case Sport.IceHockey:
-         return Sport.IceHockey;
-      case Sport.Tennis:
-         return Sport.Tennis;
-      case Sport.Cs2:
-         return Sport.Cs2;
-      case Sport.Dota:
-         return Sport.Dota;
-      case Sport.Lol:
-         return Sport.Lol;
-      case Sport.Valorant:
-         return Sport.Valorant;
-      default:
-         throw new RangeError(`invalid Sport wire byte: ${b}`);
-   }
-}
 
 function sportToWire(s: Sport): number {
    switch (s) {
@@ -85,7 +57,7 @@ function sportToWire(s: Sport): number {
 const getSportU8Encoder = (): Encoder<Sport> =>
    transformEncoder(getU8Encoder(), (s: Sport) => sportToWire(s));
 
-const getSportU8Decoder = (): Decoder<Sport> => transformDecoder(getU8Decoder(), sportFromWire);
+const getSportU8Decoder = (): Decoder<Sport> => transformDecoder(getU8Decoder(), (b: number) => b as Sport);
 
 export const getEventIdEncoder = (): Encoder<EventId> =>
    getStructEncoder([

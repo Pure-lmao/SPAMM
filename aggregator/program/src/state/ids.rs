@@ -5,64 +5,15 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::constants::ADDRESS_LEN;
 
-#[derive(Copy, Clone, Debug, Eq, PartialEq, ZeroPod)]
-#[repr(u8)]
-pub enum Sport {
-   Invalid = 0,
-   Soccer = 1,
-   AmericanFootball = 2,
-   Baseball = 3,
-   Basketball = 4,
-   IceHockey = 5,
-   Tennis = 6,
-   Golf = 7,
-   Motorsports = 8,
-   Cricket = 9,
-   Cs2 = 101,
-   Dota = 102,
-   Lol = 103,
-   Valorant = 104,
-}
-
-impl Sport {
-   #[inline(always)]
-   pub fn to_bytes(self) -> u8 {
-      self as u8
-   }
-
-   #[inline(always)]
-   pub fn try_from_wire_byte(byte: u8) -> Option<Self> {
-      match byte {
-         0 => Some(Sport::Invalid),
-         1 => Some(Sport::Soccer),
-         2 => Some(Sport::AmericanFootball),
-         3 => Some(Sport::Baseball),
-         4 => Some(Sport::Basketball),
-         5 => Some(Sport::IceHockey),
-         6 => Some(Sport::Tennis),
-         7 => Some(Sport::Golf),
-         8 => Some(Sport::Motorsports),
-         9 => Some(Sport::Cricket),
-         101 => Some(Sport::Cs2),
-         102 => Some(Sport::Dota),
-         103 => Some(Sport::Lol),
-         104 => Some(Sport::Valorant),
-         _ => None,
-      }
-   }
-
-   #[inline(always)]
-   pub fn from_bytes(bytes: u8) -> Self {
-      Self::try_from_wire_byte(bytes).expect("Invalid sport bytes")
-   }
-}
+pub const SOCCER: u8 = 1;
+pub const INVALID_SPORT: u8 = 0;
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
 pub struct EventId {
    pub event: u64,
    pub league: u16,
-   pub sport: Sport,
+   pub sport: u8,
 }
 
 impl EventId {
@@ -89,7 +40,7 @@ impl EventId {
       Some(Self {
          event: z.event.get(),
          league: z.league.get(),
-         sport: Sport::try_from_wire_byte(z.sport.get())?,
+         sport: z.sport,
       })
    }
 
@@ -237,9 +188,9 @@ impl MarketId {
 
    /// Soccer FT = period 1; other sports FT = period 0 (incl. overtime).
    #[inline(always)]
-   pub fn is_full_time_period(sport: Sport, period: u8) -> bool {
+   pub fn is_full_time_period(sport: u8, period: u8) -> bool {
       match sport {
-         Sport::Soccer => period == 1,
+         SOCCER => period == 1,
          _ => period == 0,
       }
    }
@@ -248,9 +199,9 @@ impl MarketId {
    /// Soccer: BTTS (4), OU x.25 (51–99), AH x.25 (300–499).
    /// Other: AH x.5 (100–299), OU x.5 (1000–1999).
    #[inline(always)]
-   pub fn is_netting_line_mkt(sport: Sport, mkt: u16) -> bool {
+   pub fn is_netting_line_mkt(sport: u8, mkt: u16) -> bool {
       match sport {
-         Sport::Soccer => {
+        SOCCER => {
             mkt == 4 || mkt.wrapping_sub(51) <= 48 || mkt.wrapping_sub(300) <= 199
          }
          _ => mkt.wrapping_sub(100) <= 199 || mkt.wrapping_sub(1000) <= 999,
@@ -259,13 +210,13 @@ impl MarketId {
 
    /// Soccer half-time 1X2 (`period` 2, `mkt` 1): 3-way, cannot use two-outcome line slots.
    #[inline(always)]
-   pub fn is_soccer_ht_1x2(sport: Sport, period: u8, mkt: u16) -> bool {
-      sport == Sport::Soccer && period == 2 && mkt == 1
+   pub fn is_soccer_ht_1x2(sport: u8, period: u8, mkt: u16) -> bool {
+      sport == SOCCER && period == 2 && mkt == 1
    }
 
    /// Extra `(period, mkt)` line rows (not FT header). Period is unrestricted.
    #[inline(always)]
-   pub fn allow_add_netting_line(sport: Sport, _period: u8, mkt: u16) -> bool {
+   pub fn allow_add_netting_line(sport: u8, _period: u8, mkt: u16) -> bool {
       Self::is_netting_line_mkt(sport, mkt)
    }
 }

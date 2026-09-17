@@ -2,30 +2,77 @@ import { fetchEventsGrouped } from "../../api/localDb";
 import { getCloseNettingAccountIx, getEventGameState, getEventStateData, ODDS_SCALE, type EventId, type MarketId } from "spamm-aggregator-sdk";
 import { getCloseEventIx, getCloseMarketIx, getInitEventIx, getInitMarketIx, getMmMarketData, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID } from "spamm-market-maker-sdk";
 import { createRpcClients, logSolanaError, sendAndConfirmInstructionGroups, sendAndConfirmInstructions, withRpcRetry, type RpcClients } from "../../aggregator/client/txSendV1";
-import { sleep } from "bun";
-import { ADMIN_SIGNER } from "../client/admin";
+import { loadKeypairSignerFromJsonFile } from "../client/utils";
 import type { ESPNOdds, GroupedEvent } from "../../api/types";
 import type { Instruction } from "@solana/instructions";
-import type { Address } from "@solana/kit";
+import type { Address, KeyPairSigner } from "@solana/kit";
 import { getProps } from "../../api/playerProps";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 // read the db (instead of fetching from the api)
 // check if event exists onchain, if not, create it
 // check if markets exist onchain, if not, create them
 // update the market odds onchain
 
-/** Run `fn`, wait `intervalMs`, repeat. Never overlaps concurrent executions. */
-function runRepeatedly(fn: () => Promise<void>, intervalMs: number, label: string): void {
-   void (async () => {
-      while (true) {
-         try {
-            await fn();
-         } catch (error) {
-            console.error(`${label} failed:`, error instanceof Error ? error.message : error);
-         }
-         await sleep(intervalMs);
-      }
-   })();
+function sleep(ms: number): Promise<void> {
+   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+const CYCLE_MS = 1000 * 60 * 5;
+const KEYPAIR_PATH = path.join(
+   path.dirname(fileURLToPath(import.meta.url)),
+   "../client/admin_keypair.json",
+);
+
+let ADMIN_SIGNER!: KeyPairSigner;
+
+async function loadAdminSigner(): Promise<void> {
+   if (ADMIN_SIGNER) {
+      return;
+   }
+   ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(KEYPAIR_PATH);
+}
+
+async function tick(): Promise<void> {
+   try {
+      await loadAdminSigner();
+      await runMarketMakerCycle();
+   } catch (error) {
+      console.error("runMarketMakerCycle failed:", error instanceof Error ? error.message : error);
+   }
+   console.log(`Next cycle in ${CYCLE_MS / 1000}s`);
+   setTimeout(() => {
+      void tick();
+   }, CYCLE_MS);
+}
+
+function pinEventLoop(): void {
+   const keepAlive = setInterval(() => {}, 60_000);
+   if (typeof keepAlive.ref === "function") {
+      keepAlive.ref();
+   }
+   process.on("beforeExit", (code) => {
+      console.error(`MM backend beforeExit code=${code} — event loop empty`);
+   });
+   process.on("exit", (code) => {
+      console.error(`MM backend exit code=${code}`);
+   });
+   process.on("unhandledRejection", (reason) => {
+      console.error("MM backend unhandledRejection:", reason);
+   });
+   process.on("uncaughtException", (error) => {
+      console.error("MM backend uncaughtException:", error);
+   });
+   process.on("SIGHUP", () => {
+      console.error("MM backend received SIGHUP; ignoring");
+   });
+   for (const signal of ["SIGINT", "SIGTERM"] as const) {
+      process.on(signal, () => {
+         console.error(`MM backend received ${signal}`);
+         process.exit(0);
+      });
+   }
 }
 
 async function runMarketMakerCycle() {
@@ -338,9 +385,10 @@ async function closeEventAndMarkets(event: GroupedEvent, clients: RpcClients) {
    console.log("Event and markets closed onchain", event.id, txResult);
 }
 
-function main(): void {
+function main() {
    console.log("MM backend starting (5 min cycle)");
-   runRepeatedly(runMarketMakerCycle, 1000 * 60 * 5, "runMarketMakerCycle");
+   pinEventLoop();
+   void tick();
 }
 
 if (import.meta.main) {

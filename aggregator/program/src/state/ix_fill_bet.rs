@@ -4,7 +4,7 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 use super::{
    ix_common::{
       split_freebet_id_prefix, validate_amount_over_min, validate_event_state_sequence,
-      validate_odds_above_scale, validate_side_for_mkt, validate_sport,
+      validate_odds_above_scale, validate_side_for_mkt,
    },
    ids::MarketId,
    other::EventGameState,
@@ -50,7 +50,6 @@ impl FillBetIxData {
          parsed.market_id.is_pregame(),
          LABEL,
       )?;
-      validate_sport(parsed.market_id.event_id.sport, LABEL)?;
       validate_side_for_mkt(parsed.side, parsed.market_id.mkt, LABEL)?;
       Ok(parsed)
    }

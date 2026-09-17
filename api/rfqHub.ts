@@ -100,7 +100,9 @@ export class RfqHub {
    private readonly recentHellos = new Map<string, number>();
 
    constructor(rpc?: Rpc<SolanaRpcApi>) {
-      this.rpc = (rpc ?? createRpcClients().rpc);
+      this.rpc = (rpc ?? createRpcClients({
+         httpUrl: process.env.HELIUS_RPC_URL,
+      }).rpc);
    }
 
    connectedMmCount(): number {

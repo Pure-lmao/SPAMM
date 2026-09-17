@@ -299,64 +299,10 @@ const addrDecoder = getAddressDecoder();
 const amountDecoder = getU64Decoder();
 const oddsDecoder = getU32BigintDecoder();
 
-function sportFromWire(b: number): Sport {
-   switch (b) {
-      case Sport.Invalid:
-         return Sport.Invalid;
-      case Sport.Soccer:
-         return Sport.Soccer;
-      case Sport.AmericanFootball:
-         return Sport.AmericanFootball;
-      case Sport.Baseball:
-         return Sport.Baseball;
-      case Sport.Basketball:
-         return Sport.Basketball;
-      case Sport.IceHockey:
-         return Sport.IceHockey;
-      case Sport.Tennis:
-         return Sport.Tennis;
-      case Sport.Golf:
-         return Sport.Golf;
-      case Sport.Motorsports:
-         return Sport.Motorsports;
-      case Sport.Cricket:
-         return Sport.Cricket;
-      case Sport.Cs2:
-         return Sport.Cs2;
-      case Sport.Dota:
-         return Sport.Dota;
-      case Sport.Lol:
-         return Sport.Lol;
-      case Sport.Valorant:
-         return Sport.Valorant;
-      default:
-         throw new RangeError(`invalid Sport wire byte: ${b}`);
-   }
-}
-
-function sportToWire(s: Sport): number {
-   switch (s) {
-      case Sport.Invalid:
-      case Sport.Soccer:
-      case Sport.AmericanFootball:
-      case Sport.Baseball:
-      case Sport.Basketball:
-      case Sport.IceHockey:
-      case Sport.Tennis:
-      case Sport.Cs2:
-      case Sport.Dota:
-      case Sport.Lol:
-      case Sport.Valorant:
-         return s;
-      default:
-         throw new RangeError(`invalid Sport enum value: ${s}`);
-   }
-}
-
 const getSportU8Encoder = (): Encoder<Sport> =>
-   transformEncoder(getU8Encoder(), (s: Sport) => sportToWire(s));
+   transformEncoder(getU8Encoder(), (s: Sport) => s);
 
-const getSportU8Decoder = (): Decoder<Sport> => transformDecoder(getU8Decoder(), sportFromWire);
+const getSportU8Decoder = (): Decoder<Sport> => transformDecoder(getU8Decoder(), (b: number) => b as Sport);
 
 function betResultFromWire(b: number): BetResult {
    if (!Number.isInteger(b) || b < BetResult.Pending || b > BetResult.CashedOut) {

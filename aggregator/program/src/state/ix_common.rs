@@ -12,7 +12,7 @@ use crate::{
 };
 
 use super::{
-   ids::{num_sides_for_mkt, Sport},
+   ids::{num_sides_for_mkt},
    mm_parlay_quote::{ParlayLegQuoted, ParlayLegSel},
 };
 
@@ -39,27 +39,6 @@ pub fn validate_side_for_mkt(side: u8, mkt: u16, label: &str) -> Result<(), Prog
    };
    if unlikely(side >= num_sides) {
       log!("{}: side {} out of range for mkt {} (num_sides={})", label, side, mkt, num_sides);
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   Ok(())
-}
-
-#[inline(always)]
-pub fn validate_sport(sport: Sport, label: &str) -> Result<(), ProgramError> {
-   if unlikely(!matches!(
-      sport,
-      Sport::Soccer
-         | Sport::IceHockey
-         | Sport::AmericanFootball
-         | Sport::Basketball
-         | Sport::Baseball
-         | Sport::Tennis
-         | Sport::Cs2
-         | Sport::Dota
-         | Sport::Lol
-         | Sport::Valorant
-   )) {
-      log!("{}: invalid sport", label);
       return Err(ProgramError::InvalidInstructionData);
    }
    Ok(())
@@ -110,7 +89,6 @@ pub fn validate_parlay_leg_sels(num: usize, legs: &[ParlayLegSel], label: &str) 
    for i in 0..num {
       let leg = legs.get(i).ok_or(ProgramError::InvalidInstructionData)?;
       validate_event_state_sequence(leg.event_state_sequence, leg.market_id.is_pregame(), label)?;
-      validate_sport(leg.market_id.event_id.sport, label)?;
       validate_side_for_mkt(leg.side, leg.market_id.mkt, label)?;
    }
    validate_unique_parlay_market_ids(num, legs)?;
@@ -122,7 +100,6 @@ pub fn validate_parlay_leg_quoted(num: usize, legs: &[ParlayLegQuoted], label: &
    for i in 0..num {
       let leg = legs.get(i).ok_or(ProgramError::InvalidInstructionData)?;
       validate_event_state_sequence(leg.event_state_sequence, leg.market_id.is_pregame(), label)?;
-      validate_sport(leg.market_id.event_id.sport, label)?;
       validate_side_for_mkt(leg.side, leg.market_id.mkt, label)?;
    }
    validate_parlay_same_event_odds(num, legs)?;
