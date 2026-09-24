@@ -4,9 +4,9 @@ import {
    type EventGameState,
    type EventId,
    type FillParlayQuoteIxData,
-   type FillQuoteIxData,
+   type FillBetQuoteIxData,
    type FillCashoutQuoteIxData,
-   type FillCashoutQuoteParlayIxData,
+   type FillCashoutParlayQuoteIxData,
    type GetQuoteIxData,
    type GetQuoteParlayIxData,
    type GetCashoutQuoteIxData,
@@ -188,7 +188,7 @@ export function validateFillParlayQuoteIxData(ix: FillParlayQuoteIxData, label =
    validateU64(ix.amountToSend, `${label}.amountToSend`);
 }
 
-export function validateFillQuoteIxData(ix: FillQuoteIxData, label = 'fillQuote'): void {
+export function validateFillBetQuoteIxData(ix: FillBetQuoteIxData, label = 'fillBetQuote'): void {
    validatePositiveU64(ix.amountToFill, `${label}.amountToFill`);
    validateOdds(ix.oddsScaled, `${label}.oddsScaled`);
    validateMarketId(ix.marketId, `${label}.marketId`);
@@ -258,9 +258,9 @@ export function validateGetCashoutQuoteParlayIxData(
    }
 }
 
-export function validateFillCashoutQuoteParlayIxData(
-   ix: FillCashoutQuoteParlayIxData,
-   label = 'fillCashoutQuoteParlay',
+export function validateFillCashoutParlayQuoteIxData(
+   ix: FillCashoutParlayQuoteIxData,
+   label = 'fillCashoutParlayQuote',
 ): void {
    validatePositiveU64(ix.amount, `${label}.amount`);
    validateU64(ix.amountToSend, `${label}.amountToSend`);

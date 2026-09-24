@@ -2,30 +2,28 @@
 //!
 //! Accounts **(10)** — match aggregator:
 //! 0. `user` (readonly)
-//! 1. `mm_market_data_pda` (writable)
-//! 2. `mm_event_state_pda` (writable)
-//! 3. `mm_config_pda` (writable)
-//! 4. `mm_quote_buffer` (writable)
-//! 5. `mm_token_account` (writable)
-//! 6. `payment_dest` (writable)
-//! 7. `mint` (readonly)
-//! 8. `token_program` (readonly)
-//! 9. `instructions_sysvar` (readonly)
+//! 1. `config_pda` — aggregator config (readonly signer)
+//! 2. `mm_market_data_pda` (writable)
+//! 3. `mm_event_state_pda` (writable)
+//! 4. `mm_config_pda` (writable)
+//! 5. `mm_quote_buffer` (writable)
+//! 6. `mm_token_account` (writable)
+//! 7. `payment_dest` (writable)
+//! 8. `mint` (readonly)
+//! 9. `token_program` (readonly)
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::{likely, unlikely},
+   AccountView, Address, ProgramResult, error::ProgramError, hint::{likely, unlikely},
 };
 use pinocchio_log::log;
 
 use crate::{
-   constants::{MM_CONFIG_PDA, QUOTE_BUFFER_PDA},
    instructions::token_transfer::transfer_mm_config_signed,
-   mm_helpers::check_quote_matches,
+   mm_helpers::{check_quote_matches, mm_config_address_ok, quote_buffer_address_ok},
    state::FillCashoutQuoteIxPayload,
 };
 use spamm_aggregator::{
    helpers::verify_invoked_via_aggregator,
-   instructions::FILL_CASHOUT_IX_DISCRIMINATOR,
    writers::write_u8_unchecked,
    state::{
       MMQuoteBuffer, MM_QUOTE_BUFFER_LEN,
@@ -33,9 +31,10 @@ use spamm_aggregator::{
    },
 };
 
-pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       user,
+      config_pda,
       _mm_market_data,
       _mm_event_state,
       mm_config_pda,
@@ -44,22 +43,17 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       payment_dest,
       _mint,
       _token_program,
-      instructions_sysvar,
    ] = accounts else {
       log!("fill_cashout_quote: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   let parent_disc = verify_invoked_via_aggregator(instructions_sysvar)?;
-   if unlikely(parent_disc != FILL_CASHOUT_IX_DISCRIMINATOR) {
-      log!("fill_cashout_quote: parent must be fill_cashout");
-      return Err(ProgramError::InvalidInstructionData);
-   }
+   verify_invoked_via_aggregator(config_pda)?;
 
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
+   if unlikely(!mm_config_address_ok(mm_config_pda, program_id)) {
       return Err(ProgramError::InvalidSeeds);
    }
-   if unlikely(!address_eq(mm_quote_buffer.address(), &QUOTE_BUFFER_PDA)) {
+   if unlikely(!quote_buffer_address_ok(mm_quote_buffer, program_id)) {
       return Err(ProgramError::InvalidAccountData);
    }
    if unlikely(mm_quote_buffer.data_len() != MM_QUOTE_BUFFER_LEN) {

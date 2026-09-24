@@ -1,9 +1,9 @@
 //! Loop over the MMs and get their quotes for the bet then fill the bet from best to worst
-//! CPI into the fill_quote function and update the outstanding liability amount for each MM and create the bet PDA
+//! CPI into the fill_bet_quote function and update the outstanding liability amount for each MM and create the bet PDA
 //!
-//! Accounts: **13** then **9 × N** per MM (`N` = number of market makers).
+//! Accounts: **12** then **9 × N** per MM (`N` = number of market makers).
 //!
-//! **(13)**
+//! **(12)**
 //! 0. `feepayer` (writable signer) — pays netting PDA rent if a fill inserts a new line
 //! 1. `user` (readonly signer)
 //! 2. `user_ata` (writable)
@@ -15,8 +15,7 @@
 //! 8. `associated_token_program` (readonly)
 //! 9. `rent_sysvar` (readonly)
 //! 10. `system_program` (readonly)
-//! 11. `instructions_sysvar` (readonly)
-//! 12. `clock_sysvar` (readonly)
+//! 11. `clock_sysvar` (readonly)
 //!
 //! **Per MM (9 each)**
 //! 0. `mm_program` (readonly)
@@ -41,25 +40,17 @@
 use core::mem::MaybeUninit;
 
 use pinocchio::{
-   AccountView, Address, 
-   ProgramResult, 
-   cpi::invoke, 
-   error::ProgramError, hint::unlikely, 
-   instruction::{InstructionAccount, InstructionView},
+   AccountView, Address, ProgramResult, cpi::{Signer, invoke, invoke_signed}, error::ProgramError, hint::unlikely, instruction::{InstructionAccount, InstructionView},
 };
 
 use pinocchio_log::log;
 use crate::{
    constants::{MAX_NUMBER_OF_MMS, MIN_FILLER_AMOUNT}, errors::SpammError, helpers::{
-      calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, reject_duplicate_mm_programs, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state, verify_instructions_sysvar, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_netting_pda_or_placeholder, verify_quote_buffer, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
-      fill_helpers::{
-         AuctionLiabilityRefund, compute_liability_shortfall, try_auction_liability_deposit,
-         create_single_bet_account, parse_quote_return_for_mm,
-      },
-      freebet_helpers::{odds_in_freebet_range, require_freebet_operator_allowed, verify_freebet_for_fill},
-      get_encumbrance, get_token_account_balance,
+      calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, fill_helpers::{
+         AuctionLiabilityRefund, compute_liability_shortfall, create_single_bet_account, parse_quote_return_for_mm, try_auction_liability_deposit,
+      }, freebet_helpers::{odds_in_freebet_range, require_freebet_operator_allowed, verify_freebet_for_fill}, get_encumbrance, get_token_account_balance, reject_duplicate_mm_programs, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_netting_pda_or_placeholder, verify_quote_buffer, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
    }, state::{
-      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_QUOTE_IX_DISCRIMINATOR, FillBetIxData, FillQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, FreebetAccountData, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, event_id_wire_from_market_wire, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET
+      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_QUOTE_IX_DISCRIMINATOR, FillBetIxData, FillBetQuoteIxData, FreebetAccountData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, event_id_wire_from_market_wire, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds}
    }, writers::write_u64_le_unchecked,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
@@ -88,7 +79,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       mm_accounts @ ..,
    ] = accounts else {
@@ -107,7 +97,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       mm_accounts,
       parsed,
@@ -133,7 +122,6 @@ pub(crate) fn run_fill_bet(
    associated_token_program: &AccountView,
    rent_sysvar: &AccountView,
    system_program: &AccountView,
-   instructions_sysvar: &AccountView,
    clock_sysvar: &AccountView,
    mm_accounts: &mut [AccountView],
    parsed_data: FillBetIxData,
@@ -158,7 +146,6 @@ pub(crate) fn run_fill_bet(
    verify_associated_token_program(associated_token_program)?;
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
-   verify_instructions_sysvar(instructions_sysvar)?;
    verify_clock_sysvar(clock_sysvar)?;
    verify_mint(mint)?;
    verify_token_account(true, stake.token_account, stake.authority, mint, token_program)?;
@@ -509,8 +496,8 @@ pub(crate) fn run_fill_bet(
          continue;
       };
 
-      let fill_quote_ix_data = FillQuoteIxData {
-         instruction_discriminator: FILL_QUOTE_IX_DISCRIMINATOR,
+      let fill_bet_quote_ix_data = FillBetQuoteIxData {
+         instruction_discriminator: FILL_BET_QUOTE_IX_DISCRIMINATOR,
          side,
          event_state_sequence,
          amount_to_fill,
@@ -519,13 +506,14 @@ pub(crate) fn run_fill_bet(
          event_game_state,
          amount_to_send,
       };
-      let mut fill_quote_ix_buf = [0u8; FillQuoteIxData::WIRE_LEN];
-      let Ok(()) = fill_quote_ix_data.write_wire(&mut fill_quote_ix_buf) else {
+      let mut fill_bet_quote_ix_buf = [0u8; FillBetQuoteIxData::WIRE_LEN];
+      let Ok(()) = fill_bet_quote_ix_data.write_wire(&mut fill_bet_quote_ix_buf) else {
          continue;
       };
 
-      let fill_quote_ix_account_metas = [
+      let fill_bet_quote_ix_account_metas = [
          InstructionAccount::new(user.address(), false, false),
+         InstructionAccount::new(config_pda.address(), false, true),
          InstructionAccount::new(quote.mm_market_data_pda.address(), true, false),
          InstructionAccount::new(quote.mm_event_state_pda.address(), true, false),
          InstructionAccount::new(quote.mm_config_pda.address(), true, false),
@@ -534,11 +522,11 @@ pub(crate) fn run_fill_bet(
          InstructionAccount::new(quote.mm_liability_token_account.address(), true, false),
          InstructionAccount::new(mint.address(), false, false),
          InstructionAccount::new(token_program.address(), false, false),
-         InstructionAccount::new(instructions_sysvar.address(), false, false),
       ];
 
-      let fill_quote_invoke_accounts = [
+      let fill_bet_quote_invoke_accounts = [
          user.as_ref(),
+         config_pda.as_ref(),
          quote.mm_market_data_pda.as_ref(),
          quote.mm_event_state_pda.as_ref(),
          quote.mm_config_pda.as_ref(),
@@ -547,17 +535,19 @@ pub(crate) fn run_fill_bet(
          quote.mm_liability_token_account.as_ref(),
          mint.as_ref(),
          token_program.as_ref(),
-         instructions_sysvar.as_ref(),
       ];
 
-      let fill_quote_ix = InstructionView {
+      let fill_bet_quote_ix = InstructionView {
          program_id: quote.mm_address,
-         accounts: &fill_quote_ix_account_metas,
-         data: &fill_quote_ix_buf,
+         accounts: &fill_bet_quote_ix_account_metas,
+         data: &fill_bet_quote_ix_buf,
       };
-      let Ok(()) = invoke(
-         &fill_quote_ix,
-         &fill_quote_invoke_accounts,
+
+      let seeds = config_signer_seeds();
+      let Ok(()) = invoke_signed(
+         &fill_bet_quote_ix,
+         &fill_bet_quote_invoke_accounts,
+         &[Signer::from(&seeds)],
       ) else {
          continue;
       };

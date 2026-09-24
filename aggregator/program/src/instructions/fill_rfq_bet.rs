@@ -1,7 +1,7 @@
 //! Signed-quote RFQ fill for a single bet (one MM, no quote buffer).
 //!
-//! Accounts: **13** fixed + **8** MM (same fixed prefix as [`super::fill_bet`]).
-//! **Fixed (13)**
+//! Accounts: **12** fixed + **8** MM (same fixed prefix as [`super::fill_bet`]).
+//! **Fixed (12)**
 //! 0. `feepayer` (writable signer) — pays netting PDA rent if a fill inserts a new line
 //! 1. `user` (readonly signer)
 //! 2. `user_ata` (writable)
@@ -13,8 +13,7 @@
 //! 8. `associated_token_program` (readonly)
 //! 9. `rent_sysvar` (readonly)
 //! 10. `system_program` (readonly)
-//! 11. `instructions_sysvar` (readonly)
-//! 12. `clock_sysvar` (readonly)
+//! 11. `clock_sysvar` (readonly)
 //!
 //! **MM (8)**
 //! 0. `mm_program` (readonly)
@@ -27,7 +26,7 @@
 //! 7. `mm_netting_pda` (writable) — real netting PDA, or system program if none
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, cpi::invoke,
+   AccountView, Address, ProgramResult, cpi::{Signer, invoke_signed},
    error::ProgramError, hint::unlikely,
    instruction::{InstructionAccount, InstructionView},
 };
@@ -35,11 +34,11 @@ use pinocchio_log::log;
 
 use crate::{
    errors::SpammError, helpers::{
-      calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, get_encumbrance, get_token_account_balance, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state, verify_instructions_sysvar, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_netting_pda_or_placeholder, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
+      calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, get_encumbrance, get_token_account_balance, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_netting_pda_or_placeholder, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
       fill_helpers::{compute_liability_shortfall, create_single_bet_account, require_exact_token_increase},
       freebet_helpers::{odds_in_freebet_range, require_freebet_mm_allowed, require_freebet_operator_allowed, verify_freebet_for_fill},
    }, instructions::fill_bet::FillBetStake, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
-      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_RFQ_IX_DISCRIMINATOR, FillRfqBetIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, build_rfq_bet_message, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, rfq_message::RFQ_BET_MESSAGE_LEN,
+      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_RFQ_IX_DISCRIMINATOR, FillRfqBetIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, build_rfq_bet_message, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds}, rfq_message::RFQ_BET_MESSAGE_LEN,
    }, writers::write_u64_le_unchecked,
 };
 
@@ -87,7 +86,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       mm_accounts @ ..,
    ] = accounts else {
@@ -106,7 +104,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       mm_accounts,
       parsed,
@@ -133,7 +130,6 @@ pub(crate) fn run_fill_rfq_bet(
    associated_token_program: &AccountView,
    rent_sysvar: &AccountView,
    system_program: &AccountView,
-   instructions_sysvar: &AccountView,
    clock_sysvar: &AccountView,
    mm_accounts: &mut [AccountView],
    parsed: FillRfqBetIxData,
@@ -160,7 +156,6 @@ pub(crate) fn run_fill_rfq_bet(
    verify_associated_token_program(associated_token_program)?;
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
-   verify_instructions_sysvar(instructions_sysvar)?;
    verify_clock_sysvar(clock_sysvar)?;
    verify_mint(mint)?;
    verify_token_account(true, stake.token_account, stake.authority, mint, token_program)?;
@@ -305,6 +300,7 @@ pub(crate) fn run_fill_rfq_bet(
 
    let fill_rfq_ix_account_metas = [
       InstructionAccount::new(user.address(), false, false),
+      InstructionAccount::new(config_pda.address(), false, true),
       InstructionAccount::new(mm_market_data_pda.address(), true, false),
       InstructionAccount::new(mm_event_state_pda.address(), true, false),
       InstructionAccount::new(mm_config_pda.address(), true, false),
@@ -312,10 +308,10 @@ pub(crate) fn run_fill_rfq_bet(
       InstructionAccount::new(mm_liability_token_account.address(), true, false),
       InstructionAccount::new(mint.address(), false, false),
       InstructionAccount::new(token_program.address(), false, false),
-      InstructionAccount::new(instructions_sysvar.address(), false, false),
    ];
    let fill_rfq_invoke_accounts = [
       user.as_ref(),
+      config_pda.as_ref(),
       mm_market_data_pda.as_ref(),
       mm_event_state_pda.as_ref(),
       mm_config_pda.as_ref(),
@@ -323,15 +319,16 @@ pub(crate) fn run_fill_rfq_bet(
       mm_liability_token_account.as_ref(),
       mint.as_ref(),
       token_program.as_ref(),
-      instructions_sysvar.as_ref(),
    ];
-   invoke(
+   let seeds = config_signer_seeds();
+   invoke_signed(
       &InstructionView {
          program_id: mm_program_account.address(),
          accounts: &fill_rfq_ix_account_metas,
          data: &fill_ix_buf,
       },
       &fill_rfq_invoke_accounts,
+      &[Signer::from(&seeds)],
    )?;
 
    require_exact_token_increase(

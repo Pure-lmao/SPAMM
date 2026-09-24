@@ -558,5 +558,5 @@ fn settle_bet_netted_rejects_system_placeholder() {
    let bat = bet_token_ata(&bet);
    assert!(decode_bet(&env, &bet).fillers[0].is_potentially_netted);
    let r = env.run_ix(settle_bet_instruction(bet, bat, bet_id));
-   assert!(r.program_result.is_err(), "netted filler needs real netting PDA");
+   crate::common::assert_program_err(&r, solana_program_error::ProgramError::InvalidAccountData);
 }

@@ -15,7 +15,7 @@ use crate::instructions::{
 
 mod close_event;
 mod close_market;
-mod fill_quote;
+mod fill_bet_quote;
 mod fill_bet_rfq;
 mod fill_parlay_rfq;
 mod token_transfer;
@@ -28,9 +28,9 @@ mod get_quote_parlay;
 mod get_cashout_quote;
 mod fill_cashout_quote;
 mod get_cashout_quote_parlay;
-mod fill_cashout_quote_parlay;
+mod fill_cashout_parlay_quote;
 mod fill_cashout_rfq;
-mod fill_parlay_cashout_rfq;
+mod fill_cashout_parlay_rfq;
 mod init_event;
 mod init_market;
 mod init_program;
@@ -44,11 +44,11 @@ use spamm_aggregator::{
    state::{
       FILL_BET_RFQ_IX_DISCRIMINATOR,
       FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR,
-      FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+      FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
       FILL_CASHOUT_RFQ_IX_DISCRIMINATOR,
-      FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR,
+      FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR,
       FILL_PARLAY_RFQ_IX_DISCRIMINATOR,
-      FILL_QUOTE_IX_DISCRIMINATOR,
+      FILL_BET_QUOTE_IX_DISCRIMINATOR,
       FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
       GET_CASHOUT_QUOTE_IX_DISCRIMINATOR,
       GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
@@ -73,7 +73,7 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
 
       // auction CPI — 120–123
       GET_QUOTE_IX_DISCRIMINATOR => quote_ok(get_quote::process(program_id, accounts, data)),
-      FILL_QUOTE_IX_DISCRIMINATOR => fill_quote::process(program_id, accounts, data),
+      FILL_BET_QUOTE_IX_DISCRIMINATOR => fill_bet_quote::process(program_id, accounts, data),
       GET_QUOTE_PARLAY_IX_DISCRIMINATOR => quote_ok(get_quote_parlay::process(program_id, accounts, data)),
       FILL_QUOTE_PARLAY_IX_DISCRIMINATOR => fill_parlay_quote::process(program_id, accounts, data),
 
@@ -89,12 +89,12 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
       GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR => {
          quote_ok(get_cashout_quote_parlay::process(program_id, accounts, data))
       }
-      FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR => {
-         fill_cashout_quote_parlay::process(program_id, accounts, data)
+      FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR => {
+         fill_cashout_parlay_quote::process(program_id, accounts, data)
       }
       FILL_CASHOUT_RFQ_IX_DISCRIMINATOR => fill_cashout_rfq::process(program_id, accounts, data),
-      FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR => {
-         fill_parlay_cashout_rfq::process(program_id, accounts, data)
+      FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR => {
+         fill_cashout_parlay_rfq::process(program_id, accounts, data)
       }
 
       // funds — 150

@@ -2,7 +2,7 @@ use core::mem::MaybeUninit;
 
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::unlikely, sysvars::{
-      clock::CLOCK_ID, instructions::INSTRUCTIONS_ID, rent::RENT_ID,
+      clock::CLOCK_ID, rent::RENT_ID,
    },
 };
 use pinocchio_associated_token_account::ID as ASSOCIATED_TOKEN_PROGRAM_ID;
@@ -175,15 +175,6 @@ pub fn verify_system_program(system_program: &AccountView) -> ProgramResult {
 pub fn verify_rent_sysvar(rent_acc: &AccountView) -> ProgramResult {
    if unlikely(!address_eq(rent_acc.address(), &RENT_ID)) {
       log!("verify_rent: rent account must be the rent account");
-      return Err(ProgramError::UnsupportedSysvar);
-   }
-   Ok(())
-}
-
-#[inline(always)]
-pub fn verify_instructions_sysvar(instructions_sysvar: &AccountView) -> ProgramResult {
-   if unlikely(!address_eq(instructions_sysvar.address(), &INSTRUCTIONS_ID)) {
-      log!("verify_instructions_sysvar: must be instructions sysvar");
       return Err(ProgramError::UnsupportedSysvar);
    }
    Ok(())

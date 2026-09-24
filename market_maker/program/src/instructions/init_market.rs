@@ -53,7 +53,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    verify_signer(feepayer)?;
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
-   verify_mm_config_auth(feepayer, config_pda)?;
+   verify_mm_config_auth(feepayer, config_pda, program_id)?;
 
    if unlikely(
       mm_market_data_pda.lamports() > 0 || mm_market_data_pda.data_len() > 0,

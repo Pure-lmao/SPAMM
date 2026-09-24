@@ -67,9 +67,9 @@ import {
    type RfqParlayMessageInput,
    type FillParlayIxData,
    type FillParlayQuoteIxData,
-   type FillQuoteIxData,
+   type FillBetQuoteIxData,
    type FillCashoutQuoteIxData,
-   type FillCashoutQuoteParlayIxData,
+   type FillCashoutParlayQuoteIxData,
    type GetQuoteIxData,
    type GetCashoutQuoteIxData,
    type GetCashoutQuoteParlayIxData,
@@ -135,13 +135,13 @@ import {
    RFQ_CASHOUT_PARLAY_MESSAGE_KIND,
    RFQ_PARLAY_MESSAGE_KIND,
    RFQ_SIGNATURE_LEN,
-   FILL_QUOTE_IX_WIRE_LEN,
+   FILL_BET_QUOTE_IX_WIRE_LEN,
    FILL_QUOTE_PARLAY_IX_WIRE_LEN,
    GET_CASHOUT_QUOTE_IX_WIRE_LEN,
    FILL_CASHOUT_QUOTE_IX_WIRE_LEN,
    GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN,
    getCashoutQuoteParlayIxWireLen,
-   FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN,
+   FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN,
    GET_QUOTE_IX_WIRE_LEN,
    GET_QUOTE_PARLAY_IX_HEADER_LEN,
    MM_CONFIG_PDA_HEADER_LEN,
@@ -207,7 +207,7 @@ import {
    MM_GET_CASHOUT_QUOTE_IX_DISCRIMINATOR,
    MM_FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR,
    MM_GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
-   MM_FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
 } from './constants.js';
 
 /** Rust `EventGameState.game_phase`: up to 4 ASCII bytes, NUL-padded (`other.rs`). Space is encoded as `0` on the wire. */
@@ -1874,7 +1874,7 @@ export const getGetQuoteIxDataDecoder = (): Decoder<GetQuoteIxData> =>
       ['eventStateSequence', getU16Decoder()],
    ]);
 
-export const getFillQuoteIxDataEncoder = (): Encoder<FillQuoteIxData> =>
+export const getFillBetQuoteIxDataEncoder = (): Encoder<FillBetQuoteIxData> =>
    getStructEncoder([
       ['instructionDiscriminator', getU8Encoder()],
       ['amountToFill', getU64Encoder()],
@@ -1886,7 +1886,7 @@ export const getFillQuoteIxDataEncoder = (): Encoder<FillQuoteIxData> =>
       ['amountToSend', getU64Encoder()],
    ]);
 
-export const getFillQuoteIxDataDecoder = (): Decoder<FillQuoteIxData> =>
+export const getFillBetQuoteIxDataDecoder = (): Decoder<FillBetQuoteIxData> =>
    getStructDecoder([
       ['instructionDiscriminator', getU8Decoder()],
       ['amountToFill', getU64Decoder()],
@@ -1944,14 +1944,14 @@ export const getFillCashoutQuoteIxDataDecoder = (): Decoder<FillCashoutQuoteIxDa
       ['eventStateSequence', getU16Decoder()],
    ]);
 
-export const getFillCashoutQuoteParlayIxDataEncoder = (): Encoder<FillCashoutQuoteParlayIxData> =>
+export const getFillCashoutParlayQuoteIxDataEncoder = (): Encoder<FillCashoutParlayQuoteIxData> =>
    getStructEncoder([
       ['instructionDiscriminator', getU8Encoder()],
       ['amount', getU64Encoder()],
       ['amountToSend', getU64Encoder()],
    ]);
 
-export const getFillCashoutQuoteParlayIxDataDecoder = (): Decoder<FillCashoutQuoteParlayIxData> =>
+export const getFillCashoutParlayQuoteIxDataDecoder = (): Decoder<FillCashoutParlayQuoteIxData> =>
    getStructDecoder([
       ['instructionDiscriminator', getU8Decoder()],
       ['amount', getU64Decoder()],
@@ -2324,20 +2324,20 @@ export function decodeGetParlayQuoteReturnWire(data: ReadonlyUint8Array): GetPar
    return getGetParlayQuoteReturnWireDecoder().decode(new Uint8Array(data));
 }
 
-/** Full CPI payload to SPAMM `fill_quote` (first byte = `MM_FILL_QUOTE_IX_DISCRIMINATOR` in `instructions.ts`). */
-export function encodeFillQuoteIxData(ix: FillQuoteIxData): Uint8Array {
-   const out = getFillQuoteIxDataEncoder().encode(ix);
-   if (out.length !== FILL_QUOTE_IX_WIRE_LEN) {
-      throw new RangeError(`fill_quote wire len ${out.length}`);
+/** Full CPI payload to SPAMM `fill_bet_quote` (first byte = `MM_FILL_BET_QUOTE_IX_DISCRIMINATOR` in `instructions.ts`). */
+export function encodeFillBetQuoteIxData(ix: FillBetQuoteIxData): Uint8Array {
+   const out = getFillBetQuoteIxDataEncoder().encode(ix);
+   if (out.length !== FILL_BET_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_bet_quote wire len ${out.length}`);
    }
    return new Uint8Array(out);
 }
 
-export function decodeFillQuoteIxData(data: ReadonlyUint8Array): FillQuoteIxData {
-   if (data.length !== FILL_QUOTE_IX_WIRE_LEN) {
-      throw new RangeError(`fill_quote wire len ${data.length}`);
+export function decodeFillBetQuoteIxData(data: ReadonlyUint8Array): FillBetQuoteIxData {
+   if (data.length !== FILL_BET_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_bet_quote wire len ${data.length}`);
    }
-   return getFillQuoteIxDataDecoder().decode(new Uint8Array(data));
+   return getFillBetQuoteIxDataDecoder().decode(new Uint8Array(data));
 }
 
 /** Full CPI payload to MM `get_cashout_quote` (`MM_GET_CASHOUT_QUOTE_IX_DISCRIMINATOR` = 140). */
@@ -2428,25 +2428,25 @@ export function decodeGetCashoutQuoteParlayIxData(data: ReadonlyUint8Array): Get
    return { instructionDiscriminator, amount, payout, minPayout, numLegs, legs };
 }
 
-/** Full CPI payload to MM `fill_cashout_quote_parlay` (`MM_FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR` = 143). */
-export function encodeFillCashoutQuoteParlayIxData(ix: FillCashoutQuoteParlayIxData): Uint8Array {
-   if (ix.instructionDiscriminator !== MM_FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR) {
+/** Full CPI payload to MM `fill_cashout_parlay_quote` (`MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR` = 143). */
+export function encodeFillCashoutParlayQuoteIxData(ix: FillCashoutParlayQuoteIxData): Uint8Array {
+   if (ix.instructionDiscriminator !== MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR) {
       throw new RangeError(
-         `fill_cashout_quote_parlay instructionDiscriminator must be ${MM_FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR}`,
+         `fill_cashout_parlay_quote instructionDiscriminator must be ${MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR}`,
       );
    }
-   const out = getFillCashoutQuoteParlayIxDataEncoder().encode(ix);
-   if (out.length !== FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN) {
-      throw new RangeError(`fill_cashout_quote_parlay wire len ${out.length}`);
+   const out = getFillCashoutParlayQuoteIxDataEncoder().encode(ix);
+   if (out.length !== FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_cashout_parlay_quote wire len ${out.length}`);
    }
    return new Uint8Array(out);
 }
 
-export function decodeFillCashoutQuoteParlayIxData(data: ReadonlyUint8Array): FillCashoutQuoteParlayIxData {
-   if (data.length !== FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN) {
-      throw new RangeError(`fill_cashout_quote_parlay wire len ${data.length}`);
+export function decodeFillCashoutParlayQuoteIxData(data: ReadonlyUint8Array): FillCashoutParlayQuoteIxData {
+   if (data.length !== FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_cashout_parlay_quote wire len ${data.length}`);
    }
-   return getFillCashoutQuoteParlayIxDataDecoder().decode(new Uint8Array(data));
+   return getFillCashoutParlayQuoteIxDataDecoder().decode(new Uint8Array(data));
 }
 
 export const decodeMmQuoteBuffer = (data: ReadonlyUint8Array): MmQuoteBuffer => {

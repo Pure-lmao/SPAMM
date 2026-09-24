@@ -39,6 +39,9 @@ fn get_quote_proxy_one_mm_success() {
    assert_eq!(quotes[0].0, mm_program_id());
    assert!(quotes[0].1 > 0, "max_amount");
    assert!(quotes[0].2 > 15_000, "odds_scaled");
+   let buf = env.get_account(&mm_quote_buffer_pda()).expect("quote buffer");
+   assert_eq!(buf.data[0], spamm_aggregator::state::MM_QUOTE_BUFFER_DISCRIMINATOR);
+   assert!(buf.data.len() > 1);
    record_cu_success("get_quote_proxy/1_mm", &r);
 }
 
@@ -88,14 +91,3 @@ fn get_quote_proxy_duplicate_mm_rejected() {
    assert_program_err(&r, ProgramError::InvalidInstructionData);
 }
 
-#[test]
-fn get_quote_proxy_writes_quote_buffer() {
-   let mut env = Env::new();
-   env.bootstrap_default_mm_spread();
-   let market = market_spread_pregame(event_id_soccer());
-   let r = env.run_ix(get_quote_proxy_instruction(&quote_ix_data(market, 15_000), &market));
-   assert!(r.program_result.is_ok(), "{:?}", r);
-   let buf = env.get_account(&mm_quote_buffer_pda()).expect("quote buffer");
-   assert_eq!(buf.data[0], spamm_aggregator::state::MM_QUOTE_BUFFER_DISCRIMINATOR);
-   assert!(buf.data.len() > 1);
-}

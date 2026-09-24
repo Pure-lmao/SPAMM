@@ -3,13 +3,13 @@
 //!
 //! Accounts **(8)** (aggregator order):
 //! 0. `user`
-//! 1. `mm_config_pda`
-//! 2. `mm_parlay_quote_buffer`
-//! 3. `mm_token_account`
-//! 4. `liability_account`
-//! 5. `mint` (readonly)
-//! 6. `token_program` (readonly)
-//! 7. `instructions_sysvar` (readonly) — introspect parent `fill_parlay`
+//! 1. `config_pda` — aggregator config (readonly signer)
+//! 2. `mm_config_pda`
+//! 3. `mm_parlay_quote_buffer`
+//! 4. `mm_token_account`
+//! 5. `liability_account`
+//! 6. `mint` (readonly)
+//! 7. `token_program` (readonly)
 
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::{likely, unlikely},
@@ -17,46 +17,41 @@ use pinocchio::{
 use pinocchio_log::log;
 
 use crate::{
-   constants::{MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA},
    instructions::token_transfer::transfer_mm_config_signed,
+   mm_helpers::{mm_config_address_ok, parlay_quote_buffer_address_ok},
    state::FillParlayQuoteIxPayload,
 };
 use spamm_aggregator::{
    helpers::verify_invoked_via_aggregator,
-   instructions::{FILL_PARLAY_IX_DISCRIMINATOR, FREEBET_FILL_PARLAY_IX_DISCRIMINATOR},
    writers::write_u8_unchecked,
    state::{
       MMParlayQuoteBuffer, MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR, MM_PARLAY_QUOTE_BUFFER_LEN,
    },
 };
 
-pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       user,
+      config_pda,
       mm_config_pda,
       mm_parlay_quote_buffer,
       mm_token_account,
       liability_account,
       _mint,
       _token_program,
-      instructions_sysvar,
    ] = accounts else {
       log!("fill_parlay_quote: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   let parent_disc = verify_invoked_via_aggregator(instructions_sysvar)?;
-   if unlikely(parent_disc != FILL_PARLAY_IX_DISCRIMINATOR && parent_disc != FREEBET_FILL_PARLAY_IX_DISCRIMINATOR) {
-      log!("fill_parlay_quote: parent must be fill_parlay or freebet_fill_parlay");
-      return Err(ProgramError::InvalidInstructionData);
-   }
+   verify_invoked_via_aggregator(config_pda)?;
 
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
+   if unlikely(!mm_config_address_ok(mm_config_pda, program_id)) {
       log!("fill_parlay_quote: mm config pda invalid");
       return Err(ProgramError::InvalidSeeds);
    }
 
-   if unlikely(!address_eq(mm_parlay_quote_buffer.address(), &PARLAY_QUOTE_BUFFER_PDA)) {
+   if unlikely(!parlay_quote_buffer_address_ok(mm_parlay_quote_buffer, program_id)) {
       log!("fill_parlay_quote: parlay quote buffer invalid");
       return Err(ProgramError::InvalidAccountData);
    }

@@ -368,7 +368,7 @@ fn create_netting_after_force_close_records_cu() {
       ],
    );
    let r = env.run_ix(create_ix);
-   assert_ok_record_cu("init_program/post_force_close_reinit", &r);
+   assert_ok_record_cu("create_netting_account/post_force_close_recreate", &r);
    assert_netting_pda_initialized(&env, &np, &event_id_soccer());
 }
 

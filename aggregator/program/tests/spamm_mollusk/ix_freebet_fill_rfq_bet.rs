@@ -107,5 +107,5 @@ fn freebet_fill_rfq_bet_wrong_user() {
    );
    ix.accounts[1] = AccountMeta::new_readonly(wrong_signer(), true);
    let r = env.run_ix(ix);
-   assert!(r.program_result.is_err());
+   crate::common::assert_spamm_err(&r, spamm_aggregator::errors::SpammError::InvalidFreebet);
 }

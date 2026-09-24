@@ -8,7 +8,6 @@ use solana_instruction::{AccountMeta, Instruction};
 use solana_pubkey::Pubkey;
 
 use mollusk_svm_programs_token::{associated_token, token};
-use solana_sdk_ids::sysvar::instructions::ID as INSTRUCTIONS_SYSVAR_ID;
 
 use spamm_aggregator::constants::{MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS};
 use spamm_aggregator::instructions::{
@@ -26,7 +25,7 @@ use super::fill::bet_token_ata;
 use super::fixtures::*;
 
 /// Fixed accounts before the first MM group on `fill_cashout` (through `clock_sysvar`).
-pub const FILL_CASHOUT_MM_GROUP_OFFSET: usize = 18;
+pub const FILL_CASHOUT_MM_GROUP_OFFSET: usize = 17;
 /// `fill_cashout` accounts per MM after the fixed prefix.
 pub const FILL_CASHOUT_MM_ACCOUNTS: usize = 8;
 
@@ -77,7 +76,6 @@ pub fn fill_cashout_metas_one_mm(
       AccountMeta::new_readonly(associated_token::ID, false),
       AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
-      AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new(mm_config_pda(), false),
@@ -156,7 +154,6 @@ pub fn fill_parlay_cashout_metas(
       AccountMeta::new_readonly(associated_token::ID, false),
       AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
-      AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new(mm_config_pda(), false),
@@ -241,7 +238,6 @@ pub fn fill_rfq_cashout_metas(
       AccountMeta::new_readonly(associated_token::ID, false),
       AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
-      AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new(mm_config_pda(), false),
@@ -321,7 +317,6 @@ pub fn fill_rfq_parlay_cashout_metas(
       AccountMeta::new_readonly(associated_token::ID, false),
       AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
-      AccountMeta::new_readonly(INSTRUCTIONS_SYSVAR_ID, false),
       AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new(mm_config_pda(), false),
@@ -492,6 +487,39 @@ pub fn get_cashout_quote_proxy_instruction(
       agg_program_id(),
       &buf,
       get_cashout_quote_proxy_metas(bet_pda, market),
+   )
+}
+
+pub fn get_cashout_quote_proxy_metas_for(
+   bet_pda: Pubkey,
+   market: &MarketId,
+   mms: &[super::mm_keys::MmKeys],
+) -> Vec<AccountMeta> {
+   let mut m = vec![
+      AccountMeta::new_readonly(user(), false),
+      AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
+      AccountMeta::new_readonly(bet_pda, false),
+   ];
+   for keys in mms {
+      m.extend(keys.quote_proxy_group(market));
+   }
+   m
+}
+
+pub fn get_cashout_quote_proxy_instruction_for(
+   data: &FillCashoutIxData,
+   bet_pda: Pubkey,
+   market: &MarketId,
+   mms: &[super::mm_keys::MmKeys],
+) -> Instruction {
+   let mut buf = vec![GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR];
+   let mut payload = [0u8; FILL_CASHOUT_IX_DATA_LEN];
+   data.write_wire(&mut payload).expect("fill cashout wire");
+   buf.extend_from_slice(&payload);
+   Instruction::new_with_bytes(
+      agg_program_id(),
+      &buf,
+      get_cashout_quote_proxy_metas_for(bet_pda, market, mms),
    )
 }
 

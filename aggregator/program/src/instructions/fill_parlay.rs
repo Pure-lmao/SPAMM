@@ -1,8 +1,8 @@
 ﻿//! Single MM: CPI `get_quote_parlay`, require odds ≥ `min_odds_scaled`, CPI `fill_parlay_quote`, then create parlay bet PDA + ATA.
 //!
-//! Accounts: **13** fixed, then **6 + 2 × L** for one MM (`L` = `num_legs`).
+//! Accounts: **12** fixed, then **6 + 2 × L** for one MM (`L` = `num_legs`).
 //!
-//! **Fixed (13)**
+//! **Fixed (12)**
 //! 0. `feepayer` (writable signer)
 //! 1. `user` (readonly signer)
 //! 2. `user_ata` (writable)
@@ -14,8 +14,7 @@
 //! 8. `associated_token_program` (readonly)
 //! 9. `rent_sysvar` (readonly)
 //! 10. `system_program` (readonly)
-//! 11. `instructions_sysvar` (readonly)
-//! 12. `clock_sysvar` (readonly)
+//! 11. `clock_sysvar` (readonly)
 //!
 //! **MM (6 + 2 × L)**
 //! 0. `mm_program` (readonly)
@@ -31,7 +30,7 @@
 //! + [`ParlayLegSel`] × `num_legs` only (no padding; max [`MAX_PARLAY_LEGS`]).
 
 use pinocchio::{
-   AccountView, ProgramResult, cpi::invoke,
+   AccountView, ProgramResult, cpi::{Signer, invoke_signed},
    error::ProgramError, hint::unlikely, instruction::{InstructionAccount, InstructionView},
 };
 #[cfg(feature = "log")]
@@ -39,7 +38,7 @@ use pinocchio_log::log;
 
 use crate::{
    constants::{MAX_PARLAY_LEGS}, errors::SpammError, helpers::{
-      calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, get_encumbrance, get_token_account_balance, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_instructions_sysvar, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_program_executable, verify_parlay_quote_buffer, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
+      calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, get_encumbrance, get_token_account_balance, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_program_executable, verify_parlay_quote_buffer, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
       fill_helpers::{
          compute_liability_shortfall, create_parlay_bet_account, require_exact_token_increase,
          invoke_mm_get_quote_parlay, parse_parlay_quote_return_for_mm,
@@ -47,7 +46,7 @@ use crate::{
       freebet_helpers::{odds_in_freebet_range, require_freebet_mm_allowed, require_freebet_operator_allowed, verify_freebet_for_fill},
       parlay_helpers::{apply_leg_odds, ensure_parlay_odds_product_matches},
    }, instructions::fill_bet::FillBetStake, state::{
-      FILL_QUOTE_PARLAY_IX_DISCRIMINATOR, FillParlayIxData, FillParlayQuoteIxData, ParlayLegSel, ParlayLegWire, empty_parlay_leg_buf, other::MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET,
+      FILL_QUOTE_PARLAY_IX_DISCRIMINATOR, FillParlayIxData, FillParlayQuoteIxData, ParlayLegSel, ParlayLegWire, empty_parlay_leg_buf, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds},
    }, writers::write_u64_le_unchecked,
 };
 
@@ -190,7 +189,7 @@ fn cpi_fill_parlay_quote_apply(
    mm_encumbrance_pda: &mut AccountView,
    mm_liability_token_account: &AccountView,
    mm_token_account: &AccountView,
-   instructions_sysvar: &AccountView,
+   config_pda: &AccountView,
 ) -> Result<(u64, u64), ProgramError> {
    let amount_to_fill = if max_amount > amount { amount } else { max_amount };
 
@@ -225,32 +224,37 @@ fn cpi_fill_parlay_quote_apply(
       return Err(ProgramError::InvalidInstructionData);
    };
 
-   let fill_quote_ix_account_metas = [
+   let fill_parlay_quote_ix_account_metas = [
       InstructionAccount::new(user.address(), false, false),
+      InstructionAccount::new(config_pda.address(), false, true),
       InstructionAccount::new(mm_config_pda.address(), true, false),
       InstructionAccount::new(mm_parlay_quote_buffer.address(), true, false),
       InstructionAccount::new(mm_token_account.address(), true, false),
       InstructionAccount::new(mm_liability_token_account.address(), true, false),
       InstructionAccount::new(mint.address(), false, false),
       InstructionAccount::new(token_program.address(), false, false),
-      InstructionAccount::new(instructions_sysvar.address(), false, false),
    ];
-   let fill_quote_invoke_accounts = [
+   let fill_parlay_quote_invoke_accounts = [
       user.as_ref(),
+      config_pda.as_ref(),
       mm_config_pda.as_ref(),
       mm_parlay_quote_buffer.as_ref(),
       mm_token_account.as_ref(),
       mm_liability_token_account.as_ref(),
       mint.as_ref(),
       token_program.as_ref(),
-      instructions_sysvar.as_ref(),
    ];
-   let fill_quote_ix = InstructionView {
+   let fill_parlay_quote_ix = InstructionView {
       program_id: mm_program_account.address(),
-      accounts: &fill_quote_ix_account_metas,
+      accounts: &fill_parlay_quote_ix_account_metas,
       data: &fill_ix_buf,
    };
-   let Ok(()) = invoke(&fill_quote_ix, &fill_quote_invoke_accounts) else {
+   let seeds = config_signer_seeds();
+   let Ok(()) = invoke_signed(
+      &fill_parlay_quote_ix,
+      &fill_parlay_quote_invoke_accounts,
+      &[Signer::from(&seeds)],
+   ) else {
       return Err(ProgramError::InvalidInstructionData);
    };
 
@@ -288,7 +292,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       rest @ ..,
    ] = accounts else {
@@ -307,7 +310,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       rest,
       data,
@@ -335,7 +337,6 @@ pub(crate) fn decode_and_run_fill_parlay(
    associated_token_program: &AccountView,
    rent_sysvar: &AccountView,
    system_program: &AccountView,
-   instructions_sysvar: &AccountView,
    clock_sysvar: &AccountView,
    mm_and_legs: &mut [AccountView],
    data: &[u8],
@@ -353,7 +354,6 @@ pub(crate) fn decode_and_run_fill_parlay(
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       mm_and_legs,
       parsed,
@@ -373,7 +373,6 @@ pub(crate) fn run_fill_parlay(
    associated_token_program: &AccountView,
    rent_sysvar: &AccountView,
    system_program: &AccountView,
-   instructions_sysvar: &AccountView,
    clock_sysvar: &AccountView,
    mm_and_legs: &mut [AccountView],
    parsed: FillParlayIxData,
@@ -399,7 +398,6 @@ pub(crate) fn run_fill_parlay(
    verify_associated_token_program(associated_token_program)?;
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
-   verify_instructions_sysvar(instructions_sysvar)?;
    verify_clock_sysvar(clock_sysvar)?;
    verify_mint(mint)?;
    verify_token_account(true, stake.token_account, stake.authority, mint, token_program)?;
@@ -471,7 +469,7 @@ pub(crate) fn run_fill_parlay(
       mm_encumbrance_pda,
       mm_liability_token_account,
       mm_token_account,
-      instructions_sysvar,
+      config_pda,
    )?;
 
    if stake.freebet.is_some() && filled_amount != amount {

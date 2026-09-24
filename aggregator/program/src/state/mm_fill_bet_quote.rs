@@ -3,11 +3,11 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::state::{EventGameState, MarketId};
 
-pub const FILL_QUOTE_IX_DISCRIMINATOR: u8 = 121;
+pub const FILL_BET_QUOTE_IX_DISCRIMINATOR: u8 = 121;
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
-pub struct FillQuoteIxData {
+pub struct FillBetQuoteIxData {
    pub instruction_discriminator: u8,
    pub amount_to_fill: u64,
    pub odds_scaled: u32,
@@ -18,12 +18,12 @@ pub struct FillQuoteIxData {
    pub amount_to_send: u64
 }
 
-impl FillQuoteIxData {
+impl FillBetQuoteIxData {
    pub const WIRE_LEN: usize = <Self as ZeroPodFixed>::SIZE;
 
    #[inline(always)]
-   pub fn to_zc(&self) -> FillQuoteIxDataZc {
-      FillQuoteIxDataZc {
+   pub fn to_zc(&self) -> FillBetQuoteIxDataZc {
+      FillBetQuoteIxDataZc {
          instruction_discriminator: self.instruction_discriminator,
          amount_to_fill: self.amount_to_fill.into(),
          odds_scaled: self.odds_scaled.into(),
@@ -36,7 +36,7 @@ impl FillQuoteIxData {
    }
 
    #[inline(always)]
-   pub fn from_zc(z: &FillQuoteIxDataZc) -> Option<Self> {
+   pub fn from_zc(z: &FillBetQuoteIxDataZc) -> Option<Self> {
       Some(Self {
          instruction_discriminator: z.instruction_discriminator,
          amount_to_fill: z.amount_to_fill.into(),
@@ -66,7 +66,7 @@ impl FillQuoteIxData {
       if data.len() != Self::WIRE_LEN {
          return Err(ProgramError::InvalidInstructionData);
       }
-      if data[0] != FILL_QUOTE_IX_DISCRIMINATOR {
+      if data[0] != FILL_BET_QUOTE_IX_DISCRIMINATOR {
          return Err(ProgramError::InvalidInstructionData);
       }
       let z = <Self as ZeroPodFixed>::from_bytes(data).map_err(|_| ProgramError::InvalidInstructionData)?;

@@ -38,10 +38,10 @@ import {
 import {
    EVENT_ID_WIRE_SIZE,
    EVENT_STATE_HEADER_LEN,
-   FILL_QUOTE_IX_WIRE_LEN,
+   FILL_BET_QUOTE_IX_WIRE_LEN,
    FILL_QUOTE_PARLAY_IX_WIRE_LEN,
    FILL_CASHOUT_QUOTE_IX_WIRE_LEN,
-   FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN,
+   FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN,
    GET_QUOTE_IX_WIRE_LEN,
    GET_QUOTE_PARLAY_IX_HEADER_LEN,
    GET_CASHOUT_QUOTE_IX_WIRE_LEN,
@@ -66,9 +66,9 @@ import {
    type EventId,
    type EventStateData,
    type FillParlayQuoteIxData,
-   type FillQuoteIxData,
+   type FillBetQuoteIxData,
    type FillCashoutQuoteIxData,
-   type FillCashoutQuoteParlayIxData,
+   type FillCashoutParlayQuoteIxData,
    type FillRfqIxData,
    type GetCashoutQuoteIxData,
    type GetCashoutQuoteParlayIxData,
@@ -105,7 +105,7 @@ export const CLOSE_MARKET_IX_DISCRIMINATOR = 113;
 export const UPDATE_EVENT_STATE_IX_DISCRIMINATOR = 114;
 // auction CPI — 120–123
 export const GET_QUOTE_IX_DISCRIMINATOR = 120;
-export const FILL_QUOTE_IX_DISCRIMINATOR = 121;
+export const FILL_BET_QUOTE_IX_DISCRIMINATOR = 121;
 export const GET_QUOTE_PARLAY_IX_DISCRIMINATOR = 122;
 export const FILL_QUOTE_PARLAY_IX_DISCRIMINATOR = 123;
 // RFQ CPI — 130–131
@@ -115,9 +115,9 @@ export const MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR = 131;
 export const GET_CASHOUT_QUOTE_IX_DISCRIMINATOR = 140;
 export const FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR = 141;
 export const GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR = 142;
-export const FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR = 143;
+export const FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR = 143;
 export const FILL_CASHOUT_RFQ_IX_DISCRIMINATOR = 144;
-export const FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR = 145;
+export const FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR = 145;
 // funds — 150
 export const WITHDRAW_FROM_TOKEN_ACCOUNT_IX_DISCRIMINATOR = 150;
 // dev tooling
@@ -356,7 +356,7 @@ export const getGetQuoteIxDataDecoder = (): Decoder<GetQuoteIxData> =>
       ['eventStateSequence', getU16Decoder()],
    ]);
 
-export const getFillQuoteIxDataEncoder = (): Encoder<FillQuoteIxData> =>
+export const getFillBetQuoteIxDataEncoder = (): Encoder<FillBetQuoteIxData> =>
    getStructEncoder([
       ['instructionDiscriminator', getU8Encoder()],
       ['amountToFill', getU64Encoder()],
@@ -368,7 +368,7 @@ export const getFillQuoteIxDataEncoder = (): Encoder<FillQuoteIxData> =>
       ['amountToSend', getU64Encoder()],
    ]);
 
-export const getFillQuoteIxDataDecoder = (): Decoder<FillQuoteIxData> =>
+export const getFillBetQuoteIxDataDecoder = (): Decoder<FillBetQuoteIxData> =>
    getStructDecoder([
       ['instructionDiscriminator', getU8Decoder()],
       ['amountToFill', getU64Decoder()],
@@ -426,14 +426,14 @@ export const getFillCashoutQuoteIxDataDecoder = (): Decoder<FillCashoutQuoteIxDa
       ['eventStateSequence', getU16Decoder()],
    ]);
 
-export const getFillCashoutQuoteParlayIxDataEncoder = (): Encoder<FillCashoutQuoteParlayIxData> =>
+export const getFillCashoutParlayQuoteIxDataEncoder = (): Encoder<FillCashoutParlayQuoteIxData> =>
    getStructEncoder([
       ['instructionDiscriminator', getU8Encoder()],
       ['amount', getU64Encoder()],
       ['amountToSend', getU64Encoder()],
    ]);
 
-export const getFillCashoutQuoteParlayIxDataDecoder = (): Decoder<FillCashoutQuoteParlayIxData> =>
+export const getFillCashoutParlayQuoteIxDataDecoder = (): Decoder<FillCashoutParlayQuoteIxData> =>
    getStructDecoder([
       ['instructionDiscriminator', getU8Decoder()],
       ['amount', getU64Decoder()],
@@ -621,22 +621,22 @@ export function decodeFillParlayQuoteIxData(data: ReadonlyUint8Array): FillParla
    };
 }
 
-export function encodeFillQuoteIxData(ix: FillQuoteIxData): Uint8Array {
-   if (ix.instructionDiscriminator !== FILL_QUOTE_IX_DISCRIMINATOR) {
-      throw new RangeError(`fill_quote instructionDiscriminator must be ${FILL_QUOTE_IX_DISCRIMINATOR}`);
+export function encodeFillBetQuoteIxData(ix: FillBetQuoteIxData): Uint8Array {
+   if (ix.instructionDiscriminator !== FILL_BET_QUOTE_IX_DISCRIMINATOR) {
+      throw new RangeError(`fill_bet_quote instructionDiscriminator must be ${FILL_BET_QUOTE_IX_DISCRIMINATOR}`);
    }
-   const out = getFillQuoteIxDataEncoder().encode(ix);
-   if (out.length !== FILL_QUOTE_IX_WIRE_LEN) {
-      throw new RangeError(`fill_quote wire len ${out.length}`);
+   const out = getFillBetQuoteIxDataEncoder().encode(ix);
+   if (out.length !== FILL_BET_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_bet_quote wire len ${out.length}`);
    }
    return new Uint8Array(out);
 }
 
-export function decodeFillQuoteIxData(data: ReadonlyUint8Array): FillQuoteIxData {
-   if (data.length !== FILL_QUOTE_IX_WIRE_LEN) {
-      throw new RangeError(`fill_quote wire len ${data.length}`);
+export function decodeFillBetQuoteIxData(data: ReadonlyUint8Array): FillBetQuoteIxData {
+   if (data.length !== FILL_BET_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_bet_quote wire len ${data.length}`);
    }
-   return getFillQuoteIxDataDecoder().decode(new Uint8Array(data));
+   return getFillBetQuoteIxDataDecoder().decode(new Uint8Array(data));
 }
 
 export function encodeGetCashoutQuoteIxData(ix: GetCashoutQuoteIxData): Uint8Array {
@@ -720,24 +720,24 @@ export function decodeGetCashoutQuoteParlayIxData(data: ReadonlyUint8Array): Get
    return { instructionDiscriminator, amount, payout, minPayout, numLegs, legs };
 }
 
-export function encodeFillCashoutQuoteParlayIxData(ix: FillCashoutQuoteParlayIxData): Uint8Array {
-   if (ix.instructionDiscriminator !== FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR) {
+export function encodeFillCashoutParlayQuoteIxData(ix: FillCashoutParlayQuoteIxData): Uint8Array {
+   if (ix.instructionDiscriminator !== FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR) {
       throw new RangeError(
-         `fill_cashout_quote_parlay instructionDiscriminator must be ${FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR}`,
+         `fill_cashout_parlay_quote instructionDiscriminator must be ${FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR}`,
       );
    }
-   const out = getFillCashoutQuoteParlayIxDataEncoder().encode(ix);
-   if (out.length !== FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN) {
-      throw new RangeError(`fill_cashout_quote_parlay wire len ${out.length}`);
+   const out = getFillCashoutParlayQuoteIxDataEncoder().encode(ix);
+   if (out.length !== FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_cashout_parlay_quote wire len ${out.length}`);
    }
    return new Uint8Array(out);
 }
 
-export function decodeFillCashoutQuoteParlayIxData(data: ReadonlyUint8Array): FillCashoutQuoteParlayIxData {
-   if (data.length !== FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN) {
-      throw new RangeError(`fill_cashout_quote_parlay wire len ${data.length}`);
+export function decodeFillCashoutParlayQuoteIxData(data: ReadonlyUint8Array): FillCashoutParlayQuoteIxData {
+   if (data.length !== FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN) {
+      throw new RangeError(`fill_cashout_parlay_quote wire len ${data.length}`);
    }
-   return getFillCashoutQuoteParlayIxDataDecoder().decode(new Uint8Array(data));
+   return getFillCashoutParlayQuoteIxDataDecoder().decode(new Uint8Array(data));
 }
 
 export function decodeMmParlayQuoteBuffer(data: ReadonlyUint8Array): MmParlayQuoteBuffer {
@@ -881,8 +881,8 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
          }
          return new Uint8Array(out);
       }
-      case 'fillQuote': {
-         return encodeFillQuoteIxData(ix.data);
+      case 'fillBetQuote': {
+         return encodeFillBetQuoteIxData(ix.data);
       }
       case 'getQuoteParlay': {
          const out = encodeGetQuoteParlayIxData(ix.data);
@@ -908,8 +908,8 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
       case 'getCashoutQuoteParlay': {
          return encodeGetCashoutQuoteParlayIxData(ix.data);
       }
-      case 'fillCashoutQuoteParlay': {
-         return encodeFillCashoutQuoteParlayIxData(ix.data);
+      case 'fillCashoutParlayQuote': {
+         return encodeFillCashoutParlayQuoteIxData(ix.data);
       }
       case 'fillCashoutRfq': {
          const out = encodeFillRfqIxData(ix.data);
@@ -921,13 +921,13 @@ export function encodeMarketMakerInstructionData(ix: DecodedMarketMakerInstructi
          }
          return new Uint8Array(out);
       }
-      case 'fillParlayCashoutRfq': {
+      case 'fillCashoutParlayRfq': {
          const out = encodeFillRfqIxData(ix.data);
-         if (out[0] !== FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR) {
-            throw new RangeError(`fillParlayCashoutRfq disc ${out[0]}; expected ${FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR}`);
+         if (out[0] !== FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR) {
+            throw new RangeError(`fillCashoutParlayRfq disc ${out[0]}; expected ${FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR}`);
          }
          if (out.length !== FILL_RFQ_IX_WIRE_LEN) {
-            throw new RangeError(`fillParlayCashoutRfq wire len ${out.length}`);
+            throw new RangeError(`fillCashoutParlayRfq wire len ${out.length}`);
          }
          return new Uint8Array(out);
       }
@@ -1048,11 +1048,11 @@ export function decodeMarketMakerInstructionData(data: ReadonlyUint8Array): Deco
             throw new RangeError(`getQuote: expected ${GET_QUOTE_IX_WIRE_LEN} bytes`);
          }
          return { kind: 'getQuote', data: getGetQuoteIxDataDecoder().decode(new Uint8Array(data)) };
-      case FILL_QUOTE_IX_DISCRIMINATOR:
-         if (data.length !== FILL_QUOTE_IX_WIRE_LEN) {
-            throw new RangeError(`fillQuote: expected ${FILL_QUOTE_IX_WIRE_LEN} bytes`);
+      case FILL_BET_QUOTE_IX_DISCRIMINATOR:
+         if (data.length !== FILL_BET_QUOTE_IX_WIRE_LEN) {
+            throw new RangeError(`fillBetQuote: expected ${FILL_BET_QUOTE_IX_WIRE_LEN} bytes`);
          }
-         return { kind: 'fillQuote', data: decodeFillQuoteIxData(new Uint8Array(data)) };
+         return { kind: 'fillBetQuote', data: decodeFillBetQuoteIxData(new Uint8Array(data)) };
       case GET_QUOTE_PARLAY_IX_DISCRIMINATOR: {
          if (data.length < GET_QUOTE_PARLAY_IX_HEADER_LEN) {
             throw new RangeError(`getQuoteParlay: wire len ${data.length} < header ${GET_QUOTE_PARLAY_IX_HEADER_LEN}`);
@@ -1094,21 +1094,21 @@ export function decodeMarketMakerInstructionData(data: ReadonlyUint8Array): Deco
          }
          return { kind: 'getCashoutQuoteParlay', data: decodeGetCashoutQuoteParlayIxData(new Uint8Array(data)) };
       }
-      case FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR:
-         if (data.length !== FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN) {
-            throw new RangeError(`fillCashoutQuoteParlay: expected ${FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN} bytes`);
+      case FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR:
+         if (data.length !== FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN) {
+            throw new RangeError(`fillCashoutParlayQuote: expected ${FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN} bytes`);
          }
-         return { kind: 'fillCashoutQuoteParlay', data: decodeFillCashoutQuoteParlayIxData(new Uint8Array(data)) };
+         return { kind: 'fillCashoutParlayQuote', data: decodeFillCashoutParlayQuoteIxData(new Uint8Array(data)) };
       case FILL_CASHOUT_RFQ_IX_DISCRIMINATOR:
          if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
             throw new RangeError(`fillCashoutRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);
          }
          return { kind: 'fillCashoutRfq', data: decodeFillRfqIxData(new Uint8Array(data)) };
-      case FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR:
+      case FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR:
          if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
-            throw new RangeError(`fillParlayCashoutRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);
+            throw new RangeError(`fillCashoutParlayRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);
          }
-         return { kind: 'fillParlayCashoutRfq', data: decodeFillRfqIxData(new Uint8Array(data)) };
+         return { kind: 'fillCashoutParlayRfq', data: decodeFillRfqIxData(new Uint8Array(data)) };
       case MM_FILL_BET_RFQ_IX_DISCRIMINATOR:
          if (data.length !== FILL_RFQ_IX_WIRE_LEN) {
             throw new RangeError(`fillBetRfq: expected ${FILL_RFQ_IX_WIRE_LEN} bytes`);

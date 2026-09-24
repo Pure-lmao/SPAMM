@@ -3,7 +3,7 @@ use pinocchio_log::log;
 
 use crate::instructions::{
    init_program::INIT_PROGRAM_IX_DISCRIMINATOR,
-   fill_quote::FILL_QUOTE_IX_DISCRIMINATOR,
+   fill_bet_quote::FILL_BET_QUOTE_IX_DISCRIMINATOR,
    fill_parlay_quote::FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
    get_quote::GET_QUOTE_IX_DISCRIMINATOR,
    get_quote_parlay::GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
@@ -23,7 +23,7 @@ use crate::instructions::{
 
 mod close_event;
 mod close_market;
-mod fill_quote;
+mod fill_bet_quote;
 mod fill_parlay_quote;
 mod get_quote;
 mod get_quote_parlay;
@@ -52,7 +52,7 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
       SET_CONFIG_VALUES_IX_DISCRIMINATOR => set_config_values::process(program_id, accounts, data),
 
       GET_QUOTE_IX_DISCRIMINATOR => get_quote::process(program_id, accounts, data),
-      FILL_QUOTE_IX_DISCRIMINATOR => fill_quote::process(program_id, accounts, data),
+      FILL_BET_QUOTE_IX_DISCRIMINATOR => fill_bet_quote::process(program_id, accounts, data),
       GET_QUOTE_PARLAY_IX_DISCRIMINATOR => get_quote_parlay::process(program_id, accounts, data),
       FILL_QUOTE_PARLAY_IX_DISCRIMINATOR => fill_parlay_quote::process(program_id, accounts, data),
 

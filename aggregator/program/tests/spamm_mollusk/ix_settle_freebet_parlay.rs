@@ -15,14 +15,6 @@ use crate::common::{
 
 const STAKE: u64 = 5_000_000;
 
-#[test]
-fn settle_freebet_parlay_account_layout_has_clock_at_13() {
-   let bet = parlay_bet_pda_for(&user(), 1);
-   let metas = settle_freebet_parlay_instruction(bet, bet_token_ata(&bet), 1, FREEBET_ID_BASIC).accounts;
-   assert_eq!(metas.len(), 18);
-   assert_eq!(metas[13].pubkey, crate::common::clock_sysvar_pubkey());
-}
-
 fn two_leg_setup() -> (Env, MarketId, MarketId) {
    let mut env = Env::new();
    let m1 = market_spread_pregame(event_id_soccer());

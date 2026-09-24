@@ -39,9 +39,35 @@ pub fn sign_rfq_bet_quote(
    odds_scaled: u32,
    offer_expiry: u32,
 ) -> [u8; 64] {
+   sign_rfq_bet_quote_for_mm(
+      user,
+      &mm_program_id(),
+      bet_id,
+      market_id,
+      event_game_state,
+      event_state_sequence,
+      side,
+      max_stake,
+      odds_scaled,
+      offer_expiry,
+   )
+}
+
+pub fn sign_rfq_bet_quote_for_mm(
+   user: &Pubkey,
+   mm: &Pubkey,
+   bet_id: u64,
+   market_id: &MarketId,
+   event_game_state: &EventGameState,
+   event_state_sequence: u16,
+   side: u8,
+   max_stake: u64,
+   odds_scaled: u32,
+   offer_expiry: u32,
+) -> [u8; 64] {
    let mut message = [0u8; RFQ_BET_MESSAGE_LEN];
    let user_addr = Address::new_from_array(user.to_bytes());
-   let mm_program = Address::new_from_array(mm_program_id().to_bytes());
+   let mm_program = Address::new_from_array(mm.to_bytes());
    build_rfq_bet_message(
       &mut message,
       &user_addr,

@@ -3,30 +3,28 @@
 //!
 //! Accounts **(10)** (aggregator order):
 //! 0. `user`
-//! 1. `mm_market_data_pda` — writable; unused here (MM may write on fill)
-//! 2. `mm_event_state_pda` — writable, unverified; unused here (MM may write the tail on fill)
-//! 3. `mm_config_pda`
-//! 4. `mm_quote_buffer`
-//! 5. `mm_token_account` — SPL authority must be the config PDA (`init_program`)
-//! 6. `liability_account`
-//! 7. `mint` (readonly)
-//! 8. `token_program` (readonly)
-//! 9. `instructions_sysvar` (readonly) — introspect parent `fill_bet`
+//! 1. `config_pda` — aggregator config (readonly signer)
+//! 2. `mm_market_data_pda` — writable; unused here (MM may write on fill)
+//! 3. `mm_event_state_pda` — writable, unverified; unused here (MM may write the tail on fill)
+//! 4. `mm_config_pda`
+//! 5. `mm_quote_buffer`
+//! 6. `mm_token_account` — SPL authority must be the config PDA (`init_program`)
+//! 7. `liability_account`
+//! 8. `mint` (readonly)
+//! 9. `token_program` (readonly)
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::{likely, unlikely},
+   AccountView, Address, ProgramResult, error::ProgramError, hint::{likely, unlikely},
 };
 use pinocchio_log::log;
 
 use crate::{
-   constants::{MM_CONFIG_PDA, QUOTE_BUFFER_PDA},
    instructions::token_transfer::transfer_mm_config_signed,
-   mm_helpers::check_quote_matches,
-   state::FillQuoteIxPayload,
+   mm_helpers::{check_quote_matches, mm_config_address_ok, quote_buffer_address_ok},
+   state::FillBetQuoteIxPayload,
 };
 use spamm_aggregator::{
    helpers::verify_invoked_via_aggregator,
-   instructions::{FILL_BET_IX_DISCRIMINATOR, FREEBET_FILL_BET_IX_DISCRIMINATOR},
    writers::write_u8_unchecked,
    state::{
       MMQuoteBuffer, MM_QUOTE_BUFFER_LEN,
@@ -34,9 +32,10 @@ use spamm_aggregator::{
    },
 };
 
-pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       user,
+      config_pda,
       _mm_market_data_pda,
       _mm_event_state_pda,
       mm_config_pda,
@@ -45,34 +44,29 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8])
       liability_account,
       _mint,
       _token_program,
-      instructions_sysvar,
    ] = accounts else {
-      log!("fill_quote: accounts mismatch");
+      log!("fill_bet_quote: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   let parent_disc = verify_invoked_via_aggregator(instructions_sysvar)?;
-   if unlikely(parent_disc != FILL_BET_IX_DISCRIMINATOR && parent_disc != FREEBET_FILL_BET_IX_DISCRIMINATOR) {
-      log!("fill_quote: parent must be fill_bet or freebet_fill_bet");
-      return Err(ProgramError::InvalidInstructionData);
-   }
+   verify_invoked_via_aggregator(config_pda)?;
 
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
-      log!("fill_quote: mm config pda invalid");
+   if unlikely(!mm_config_address_ok(mm_config_pda, program_id)) {
+      log!("fill_bet_quote: mm config pda invalid");
       return Err(ProgramError::InvalidSeeds);
    }
 
-   if unlikely(!address_eq(mm_quote_buffer.address(), &QUOTE_BUFFER_PDA)) {
-      log!("fill_quote: quote buffer invalid");
+   if unlikely(!quote_buffer_address_ok(mm_quote_buffer, program_id)) {
+      log!("fill_bet_quote: quote buffer invalid");
       return Err(ProgramError::InvalidAccountData);
    }
 
    if unlikely(mm_quote_buffer.data_len() != MM_QUOTE_BUFFER_LEN) {
-      log!("fill_quote: quote buffer len mismatch");
+      log!("fill_bet_quote: quote buffer len mismatch");
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let ix_data = FillQuoteIxPayload::decode(data)?;
+   let ix_data = FillBetQuoteIxPayload::decode(data)?;
 
    let expected = MMQuoteBuffer {
       discriminator: MM_QUOTE_BUFFER_DISCRIMINATOR,

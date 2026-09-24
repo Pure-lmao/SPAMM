@@ -15,14 +15,14 @@
 //!
 //! Return data (`sol_set_return_data`): packed `max_amount` (u64 LE) + `odds_scaled` (u32 LE).
 
-use pinocchio::{AccountView, Address, address::address_eq, hint::unlikely};
+use pinocchio::{AccountView, Address, hint::unlikely};
 use pinocchio_log::log;
 use zeropod::ZeroPodFixed;
 
 use crate::{
-   constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, QUOTE_BUFFER_PDA},
+   constants::MAX_QUOTE_STAKE_UNITS,
    instructions::quote_helpers::{odds_from_market_data_body, validate_quote_leg_context},
-   mm_helpers::{mm_market_data_pda_ok, verify_event_state},
+   mm_helpers::{mm_config_address_ok, mm_market_data_pda_ok, quote_buffer_address_ok, verify_event_state},
    state::{GetQuoteIxPayload, GetQuoteReturnWire},
 };
 use spamm_aggregator::{
@@ -75,13 +75,13 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    let event_state_sequence = parsed_data.event_state_sequence;
    let event_game_state = parsed_data.event_game_state;
 
-   if unlikely(!address_eq(mm_quote_buffer.address(), &QUOTE_BUFFER_PDA)) {
+   if unlikely(!quote_buffer_address_ok(mm_quote_buffer, program_id)) {
       log!("get_quote: quote buffer invalid");
       set_get_quote_return_data(0, 0)?;
       return Ok(());
    }
 
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
+   if unlikely(!mm_config_address_ok(mm_config_pda, program_id)) {
       log!("get_quote: mm config pda invalid");
       set_get_quote_return_data(0, 0)?;
       return Ok(());

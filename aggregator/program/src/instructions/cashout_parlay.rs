@@ -1,8 +1,8 @@
 //! Single-MM cashout of a parlay ticket.
 //!
-//! Accounts: **18** then **6 + 2 × L** (`L` = `num_legs`, 2..=20).
+//! Accounts: **17** then **6 + 2 × L** (`L` = `num_legs`, 2..=20).
 //!
-//! **Fixed (18)**
+//! **Fixed (17)**
 //! 0. `feepayer` (writable signer)
 //! 1. `ticket_feepayer` (writable) — original ticket `feepayer`; rent dest on full pregame close
 //! 2. `user` (readonly signer)
@@ -19,8 +19,7 @@
 //! 13. `associated_token_program` (readonly)
 //! 14. `rent_sysvar` (readonly)
 //! 15. `system_program` (readonly)
-//! 16. `instructions_sysvar` (readonly)
-//! 17. `clock_sysvar` (readonly)
+//! 16. `clock_sysvar` (readonly)
 //!
 //! **MM (6 + 2 × L)**
 //! 0. `mm_program` (readonly)
@@ -33,7 +32,7 @@
 //!    `mm_event_state` (readonly) per leg *i*
 
 use pinocchio::{
-   AccountView, ProgramResult, cpi::invoke,
+   AccountView, ProgramResult, cpi::{Signer, invoke_signed},
    error::ProgramError, instruction::{InstructionAccount, InstructionView},
 };
 use pinocchio_log::log;
@@ -56,10 +55,11 @@ use crate::{
    state::{
       account_bet::BetResult,
       mm_parlay_quote::ParlayLegWire,
-      FillCashoutQuoteParlayIxData, FillParlayCashoutIxData, PARLAY_LEG_SEL_LEN,
-      FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR, GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN,
+      FillCashoutParlayQuoteIxData, FillParlayCashoutIxData, PARLAY_LEG_SEL_LEN,
+      FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR, GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN,
       empty_parlay_leg_sel_buf,
       get_cashout_quote_parlay_ix_wire_len, write_get_cashout_quote_parlay_ix,
+      other::config_signer_seeds,
    },
 };
 
@@ -76,8 +76,8 @@ struct ParlayCashoutIxMeta {
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
-   // Fixed prefix is 18; MM accounts follow (checked later).
-   if accounts.len() < 18 {
+   // Fixed prefix is 17; MM accounts follow (checked later).
+   if accounts.len() < 17 {
       log!("fill_parlay_cashout: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    }
@@ -92,8 +92,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       &accounts[13], // associated_token_program
       &accounts[14], // rent_sysvar
       &accounts[15], // system_program
-      &accounts[16], // instructions_sysvar
-      &accounts[17], // clock_sysvar
+      &accounts[16], // clock_sysvar
       "fill_parlay_cashout",
    )?;
    run_fill_parlay_cashout(accounts, data)
@@ -115,7 +114,7 @@ fn validate_mm_and_ticket_for_parlay_cashout(
    data: &[u8],
    ticket: &mut ParlayCashoutOrigTicket,
 ) -> Result<(u8, ParlayCashoutIxMeta), ProgramError> {
-   let (fixed, mm_accounts) = accounts.split_at_mut(18);
+   let (fixed, mm_accounts) = accounts.split_at_mut(17);
    let ticket_feepayer = &fixed[1];
    let user = &fixed[2];
    let bet_pda = &fixed[4];
@@ -187,8 +186,8 @@ fn finish_fill_parlay_cashout_after_ticket(
    encumbrance_pda_bump: u8,
    ix_data_meta: ParlayCashoutIxMeta,
 ) -> ProgramResult {
-   let (fixed, mm_accounts) = accounts.split_at_mut(18);
-   // Exact fixed layout (18). `config_pda` / `associated_token_program` already checked in preamble.
+   let (fixed, mm_accounts) = accounts.split_at_mut(17);
+   // Exact fixed layout (17). `config_pda` / `associated_token_program` already checked in preamble.
    #[allow(unused_variables)]
    let [
       feepayer,
@@ -207,7 +206,6 @@ fn finish_fill_parlay_cashout_after_ticket(
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
    ] = fixed else {
       return Err(ProgramError::NotEnoughAccountKeys);
@@ -279,7 +277,7 @@ fn finish_fill_parlay_cashout_after_ticket(
       payment_dest,
       max_payment,
    )?;
-   invoke_fill_cashout_quote_parlay(
+   invoke_fill_cashout_parlay_quote(
       user,
       mm_program,
       mm_config,
@@ -288,7 +286,7 @@ fn finish_fill_parlay_cashout_after_ticket(
       payment_dest,
       mint,
       token_program,
-      instructions_sysvar,
+      config_pda,
       ix_data_meta.amount,
       amount_to_send,
    )?;
@@ -393,7 +391,7 @@ fn pack_cashout_quote_parlay_ix(
 }
 
 #[inline(never)]
-fn invoke_fill_cashout_quote_parlay(
+fn invoke_fill_cashout_parlay_quote(
    user: &AccountView,
    mm_program: &AccountView,
    mm_config: &AccountView,
@@ -402,28 +400,29 @@ fn invoke_fill_cashout_quote_parlay(
    payment_dest: &AccountView,
    mint: &AccountView,
    token_program: &AccountView,
-   instructions_sysvar: &AccountView,
+   config_pda: &AccountView,
    amount: u64,
    amount_to_send: u64,
 ) -> ProgramResult {
-   let fill_ix = FillCashoutQuoteParlayIxData {
-      instruction_discriminator: FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   let fill_ix = FillCashoutParlayQuoteIxData {
+      instruction_discriminator: FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
       amount,
       amount_to_send,
    };
-   let mut fill_buf = [0u8; FillCashoutQuoteParlayIxData::WIRE_LEN];
+   let mut fill_buf = [0u8; FillCashoutParlayQuoteIxData::WIRE_LEN];
    fill_ix.write_wire(&mut fill_buf)?;
    let fill_metas = [
       InstructionAccount::new(user.address(), false, false),
+      InstructionAccount::new(config_pda.address(), false, true),
       InstructionAccount::new(mm_config.address(), false, false),
       InstructionAccount::new(mm_buf.address(), true, false),
       InstructionAccount::new(mm_token_account.address(), true, false),
       InstructionAccount::new(payment_dest.address(), true, false),
       InstructionAccount::new(mint.address(), false, false),
       InstructionAccount::new(token_program.address(), false, false),
-      InstructionAccount::new(instructions_sysvar.address(), false, false),
    ];
-   invoke(
+   let seeds = config_signer_seeds();
+   invoke_signed(
       &InstructionView {
          program_id: mm_program.address(),
          accounts: &fill_metas,
@@ -431,14 +430,15 @@ fn invoke_fill_cashout_quote_parlay(
       },
       &[
          user.as_ref(),
+         config_pda.as_ref(),
          mm_config.as_ref(),
          mm_buf.as_ref(),
          mm_token_account.as_ref(),
          payment_dest.as_ref(),
          mint.as_ref(),
          token_program.as_ref(),
-         instructions_sysvar.as_ref(),
       ],
+      &[Signer::from(&seeds)],
    )
 }
 

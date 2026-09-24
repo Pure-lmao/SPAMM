@@ -28,7 +28,7 @@ use crate::{
       calc_potential_payout, calc_potential_profit, close_pda_return_rent, ensure_pda_unused,
       get_encumbrance, get_rent, get_token_account_balance, safe_close_ata,
       verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state,
-      verify_instructions_sysvar, verify_mint, verify_mm_encumbrance_pda, verify_mm_market_data_pda,
+      verify_mint, verify_mm_encumbrance_pda, verify_mm_market_data_pda,
       verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account,
       verify_token_program,
    },
@@ -233,7 +233,6 @@ pub fn verify_cashout_fill_preamble(
    associated_token_program: &AccountView,
    rent_sysvar: &AccountView,
    system_program: &AccountView,
-   instructions_sysvar: &AccountView,
    clock_sysvar: &AccountView,
    label: &str,
 ) -> ProgramResult {
@@ -243,7 +242,6 @@ pub fn verify_cashout_fill_preamble(
    verify_associated_token_program(associated_token_program)?;
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
-   verify_instructions_sysvar(instructions_sysvar)?;
    verify_clock_sysvar(clock_sysvar)?;
    verify_mint(mint)?;
    verify_token_account(true, user_ata, user, mint, token_program)?;
@@ -1090,4 +1088,82 @@ pub fn finish_cashout_parlay(
       )?;
    }
    Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+   use super::*;
+   use core::mem::MaybeUninit;
+   use pinocchio::Address;
+   use pinocchio::error::ProgramError;
+   use crate::constants::MAX_NUMBER_OF_MMS;
+   use crate::errors::SpammError;
+   use crate::helpers::calc_potential_profit;
+   use crate::state::account_bet::BetFiller;
+
+   #[test]
+   fn proportional_payout_exact_and_floor() {
+      assert_eq!(proportional_payout(100, 190, 50).unwrap(), 95);
+      assert_eq!(proportional_payout(3, 10, 1).unwrap(), 3);
+   }
+
+   #[test]
+   fn validate_cashout_size_zero_and_over() {
+      assert!(validate_cashout_size(10, 1).is_ok());
+      assert!(validate_cashout_size(10, 10).is_ok());
+      assert_eq!(
+         validate_cashout_size(10, 0).unwrap_err(),
+         ProgramError::Custom(SpammError::InvalidCashout as u32)
+      );
+      assert_eq!(
+         validate_cashout_size(10, 11).unwrap_err(),
+         ProgramError::Custom(SpammError::InvalidCashout as u32)
+      );
+   }
+
+   #[test]
+   fn accept_cashout_payment_bounds() {
+      assert!(!accept_cashout_payment(0, 1, 10));
+      assert!(accept_cashout_payment(5, 5, 10));
+      assert!(accept_cashout_payment(10, 1, 10));
+      assert!(!accept_cashout_payment(11, 1, 10));
+      assert!(!accept_cashout_payment(4, 5, 10));
+   }
+
+   #[test]
+   fn split_fillers_redistributes_last_slot_and_conserves_reserved() {
+      let mm = Address::new_from_array([7u8; 32]);
+      let amounts = [25u64, 25, 25, 25, 1];
+      let orig_amount: u64 = 101;
+      let cashout: u64 = 100;
+      let mut orig = [BetFiller {
+         mm_address: mm,
+         amount: 0,
+         reserved_profit: 0,
+         odds_scaled: 13_000,
+         is_potentially_netted: false,
+      }; MAX_NUMBER_OF_MMS];
+      let mut reserved_sum = 0u64;
+      for i in 0..5 {
+         let p = calc_potential_profit(amounts[i], 13_000).unwrap();
+         orig[i].amount = amounts[i];
+         orig[i].reserved_profit = p;
+         reserved_sum += p;
+      }
+      let mut remaining = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
+      let mut cashed = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
+      let payout = split_fillers(&orig, 5, orig_amount, cashout, &mut remaining, &mut cashed)
+         .expect("split_fillers");
+      assert!(payout > 0);
+      let rem = unsafe { core::slice::from_raw_parts(remaining.as_ptr().cast::<BetFiller>(), 5) };
+      let cas = unsafe { core::slice::from_raw_parts(cashed.as_ptr().cast::<BetFiller>(), 5) };
+      assert_eq!(cas.iter().map(|f| f.amount).sum::<u64>(), cashout);
+      assert_eq!(rem.iter().map(|f| f.amount).sum::<u64>(), orig_amount - cashout);
+      assert_eq!(
+         rem.iter().map(|f| f.reserved_profit).sum::<u64>()
+            + cas.iter().map(|f| f.reserved_profit).sum::<u64>(),
+         reserved_sum
+      );
+      assert!(cas[4].amount <= 1);
+   }
 }

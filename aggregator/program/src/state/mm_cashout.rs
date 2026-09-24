@@ -12,7 +12,7 @@ use crate::{
 pub const GET_CASHOUT_QUOTE_IX_DISCRIMINATOR: u8 = 140;
 pub const FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR: u8 = 141;
 pub const GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR: u8 = 142;
-pub const FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR: u8 = 143;
+pub const FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR: u8 = 143;
 
 /// Packed MM cashout-quote CPI return (`u64` max payment).
 #[repr(C)]
@@ -194,13 +194,13 @@ pub const GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN: usize =
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
-pub struct FillCashoutQuoteParlayIxData {
+pub struct FillCashoutParlayQuoteIxData {
    pub instruction_discriminator: u8,
    pub amount: u64,
    pub amount_to_send: u64,
 }
 
-impl FillCashoutQuoteParlayIxData {
+impl FillCashoutParlayQuoteIxData {
    pub const WIRE_LEN: usize = <Self as ZeroPodFixed>::SIZE;
 
    #[inline(always)]
@@ -208,7 +208,7 @@ impl FillCashoutQuoteParlayIxData {
       if out.len() != Self::WIRE_LEN {
          return Err(ProgramError::InvalidInstructionData);
       }
-      let zc = FillCashoutQuoteParlayIxDataZc {
+      let zc = FillCashoutParlayQuoteIxDataZc {
          instruction_discriminator: self.instruction_discriminator,
          amount: self.amount.into(),
          amount_to_send: self.amount_to_send.into(),
@@ -224,7 +224,7 @@ impl FillCashoutQuoteParlayIxData {
       if data.len() != Self::WIRE_LEN {
          return Err(ProgramError::InvalidInstructionData);
       }
-      if data[0] != FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR {
+      if data[0] != FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR {
          return Err(ProgramError::InvalidInstructionData);
       }
       let z = <Self as ZeroPodFixed>::from_bytes(data)

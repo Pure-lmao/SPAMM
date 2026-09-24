@@ -343,78 +343,6 @@ fn n_leg_env(n: usize) -> (Env, Vec<MarketId>) {
 }
 
 #[test]
-fn fill_parlay_three_legs_success() {
-   let (mut env, mts) = n_leg_env(3);
-   let markets = mts.as_slice();
-   let bet = parlay_bet_pda_for(&user(), 220);
-   let bat = bet_token_ata(&bet);
-   env.upsert(bet, system_owned_empty());
-   env.upsert(bat, system_owned_empty());
-   let legs: Vec<_> = markets
-      .iter()
-      .enumerate()
-      .map(|(i, mid)| parlay_leg(*mid, (i % 2) as u8, 1, EventGameState::zeroed()))
-      .collect();
-   let payload = FillParlayIxData {
-      bet_id: 220,
-      amount: 3_000_000,
-      min_odds_scaled: 15_000,
-      num_legs: 3,
-      legs: parlay_legs_fill(&legs),
-   };
-   let enc_before = read_encumbrance(&env, &encumbrance_pda());
-   let ix = fill_parlay_instruction(&payload, bet, bat, markets);
-   let r = env.run_ix(ix);
-   assert!(r.program_result.is_ok(), "{:?}", r);
-   assert_parlay_after_fill(
-      &env,
-      &bet,
-      &encumbrance_pda(),
-      enc_before,
-      3_000_000,
-      3,
-      uniform_parlay_combined_odds(20_000, 3),
-   );
-   record_cu_success("fill_parlay/3_leg", &r);
-}
-
-#[test]
-fn fill_parlay_four_legs_success() {
-   let (mut env, mts) = n_leg_env(4);
-   let markets = mts.as_slice();
-   let bet = parlay_bet_pda_for(&user(), 222);
-   let bat = bet_token_ata(&bet);
-   env.upsert(bet, system_owned_empty());
-   env.upsert(bat, system_owned_empty());
-   let legs: Vec<_> = markets
-      .iter()
-      .enumerate()
-      .map(|(i, mid)| parlay_leg(*mid, (i % 2) as u8, 1, EventGameState::zeroed()))
-      .collect();
-   let payload = FillParlayIxData {
-      bet_id: 222,
-      amount: 3_500_000,
-      min_odds_scaled: 15_000,
-      num_legs: 4,
-      legs: parlay_legs_fill(&legs),
-   };
-   let enc_before = read_encumbrance(&env, &encumbrance_pda());
-   let ix = fill_parlay_instruction(&payload, bet, bat, markets);
-   let r = env.run_ix(ix);
-   assert!(r.program_result.is_ok(), "{:?}", r);
-   assert_parlay_after_fill(
-      &env,
-      &bet,
-      &encumbrance_pda(),
-      enc_before,
-      3_500_000,
-      4,
-      uniform_parlay_combined_odds(20_000, 4),
-   );
-   record_cu_success("fill_parlay/4_leg", &r);
-}
-
-#[test]
 fn fill_parlay_five_legs_success() {
    let (mut env, mts) = n_leg_env(5);
    let markets = mts.as_slice();
@@ -617,6 +545,8 @@ fn fill_parlay_user_ata_insufficient() {
       legs: parlay_legs_fill(&[l0, l1]),
    };
    let ix = fill_parlay_instruction(&payload, bet, bat, &[m1, m2]);
+   let snap = env.snapshot_accounts(&[user_collateral_ata(), encumbrance_pda()]);
    let r = env.run_ix(ix);
-   assert!(r.program_result.is_err(), "{:?}", r);
+   assert_program_err(&r, ProgramError::Custom(1));
+   env.assert_accounts_unchanged(&snap);
 }

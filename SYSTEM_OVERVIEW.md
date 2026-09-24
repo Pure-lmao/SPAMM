@@ -91,7 +91,7 @@ User stake → **bet ATA** (authority = bet PDA). MM profit collateral → **lia
 
 ## Flows (what happens, not account metas)
 
-**Auction single** → simulate proxies optional → `fill_bet` (re-quote → sort → `fill_quote` CPI → stake in → netting?) → `grade_bets` → `settle_bet`.
+**Auction single** → simulate proxies optional → `fill_bet` (re-quote → sort → `fill_bet_quote` CPI → stake in → netting?) → `grade_bets` → `settle_bet`.
 
 **Auction parlay** → same with `fill_parlay` / one MM / **no netting** / legs 2..=20.
 

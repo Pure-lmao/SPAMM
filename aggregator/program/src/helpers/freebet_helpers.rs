@@ -330,6 +330,32 @@ pub fn apply_freebet_settle_state(
    }
 }
 
+#[cfg(test)]
+mod tests {
+   use super::*;
+   use pinocchio::error::ProgramError;
+
+   #[test]
+   fn reinstate_window_overflows_near_u32_max() {
+      assert_eq!(u32::MAX.checked_add(FREEBET_REINSTATE_SECS), None);
+      assert_eq!(
+         1u32.checked_add(FREEBET_REINSTATE_SECS),
+         Some(1 + FREEBET_REINSTATE_SECS)
+      );
+   }
+
+   #[test]
+   fn cashed_out_ticket_is_invalid_cashout() {
+      assert_eq!(
+         match BetResult::CashedOut {
+            BetResult::CashedOut => Err(SpammError::InvalidCashout.into()),
+            _ => Ok(()),
+         },
+         Err(ProgramError::Custom(SpammError::InvalidCashout as u32))
+      );
+   }
+}
+
 #[inline(always)]
 pub fn freebet_space(num_mms: usize, num_operators: usize) -> usize {
    freebet_account_len(num_mms, num_operators)

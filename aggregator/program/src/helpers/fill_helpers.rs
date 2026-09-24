@@ -467,3 +467,38 @@ pub fn create_single_bet_account(
    transfer_stake(stake_from, bet_ata, stake_authority, header.amount, issuer_sign)?;
    Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+   use super::compute_liability_shortfall;
+   use pinocchio::error::ProgramError;
+
+   #[test]
+   fn shortfall_zero_when_free_covers_all() {
+      let (send, outstanding) = compute_liability_shortfall(100, 40, 30).unwrap();
+      assert_eq!(send, 0);
+      assert_eq!(outstanding, 70);
+   }
+
+   #[test]
+   fn shortfall_partial_when_free_covers_part() {
+      let (send, outstanding) = compute_liability_shortfall(100, 40, 80).unwrap();
+      assert_eq!(send, 20);
+      assert_eq!(outstanding, 120);
+   }
+
+   #[test]
+   fn shortfall_all_when_no_free() {
+      let (send, outstanding) = compute_liability_shortfall(40, 40, 10).unwrap();
+      assert_eq!(send, 10);
+      assert_eq!(outstanding, 50);
+   }
+
+   #[test]
+   fn shortfall_underflow_when_encumbrance_exceeds_balance() {
+      assert_eq!(
+         compute_liability_shortfall(30, 40, 10).unwrap_err(),
+         ProgramError::ArithmeticOverflow
+      );
+   }
+}

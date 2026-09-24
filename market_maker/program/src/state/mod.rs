@@ -1,9 +1,9 @@
 
 pub mod ix_fill_rfq;
-pub mod ix_fill_quote;
+pub mod ix_fill_bet_quote;
 pub mod ix_fill_quote_parlay;
 pub mod ix_fill_cashout_quote;
-pub mod ix_fill_cashout_quote_parlay;
+pub mod ix_fill_cashout_parlay_quote;
 pub mod ix_get_quote;
 pub mod ix_get_quote_parlay;
 pub mod ix_get_cashout_quote;
@@ -16,11 +16,11 @@ pub mod ix_init_market;
 pub mod ix_init_program;
 pub mod wire;
 
-pub use ix_fill_quote::{FillQuoteIxPayload, FILL_QUOTE_IX_PAYLOAD_LEN};
+pub use ix_fill_bet_quote::{FillBetQuoteIxPayload, FILL_BET_QUOTE_IX_PAYLOAD_LEN};
 pub use ix_fill_quote_parlay::{FillParlayQuoteIxPayload, FILL_QUOTE_PARLAY_IX_PAYLOAD_LEN};
 pub use ix_fill_cashout_quote::{FillCashoutQuoteIxPayload, FILL_CASHOUT_QUOTE_IX_PAYLOAD_LEN};
-pub use ix_fill_cashout_quote_parlay::{
-   FillCashoutQuoteParlayIxPayload, FILL_CASHOUT_QUOTE_PARLAY_IX_PAYLOAD_LEN,
+pub use ix_fill_cashout_parlay_quote::{
+   FillCashoutParlayQuoteIxPayload, FILL_CASHOUT_PARLAY_QUOTE_IX_PAYLOAD_LEN,
 };
 pub use ix_fill_rfq::{FillRfqIxPayload, FILL_RFQ_IX_PAYLOAD_LEN};
 pub use ix_get_quote::{GetQuoteIxPayload, GET_QUOTE_IX_PAYLOAD_LEN};

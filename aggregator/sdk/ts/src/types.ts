@@ -110,7 +110,8 @@ export const GET_QUOTE_PARLAY_IX_HEADER_LEN = 1 + U64_LEN + U32_LEN + 1;
 export const GET_QUOTE_PARLAY_IX_WIRE_LEN = GET_QUOTE_PARLAY_IX_HEADER_LEN + MAX_PARLAY_LEGS * PARLAY_LEG_SEL_LEN;
 export const getQuoteParlayIxWireLen = (numLegs: number): number =>
    GET_QUOTE_PARLAY_IX_HEADER_LEN + numLegs * PARLAY_LEG_SEL_LEN;
-export const FILL_QUOTE_IX_WIRE_LEN =
+/** Full MM `fill_bet_quote` ix data (includes leading discriminator `121`). */
+export const FILL_BET_QUOTE_IX_WIRE_LEN =
    1 + U64_LEN + U32_LEN + MARKET_ID_WIRE_SIZE + 1 + EVENT_GAME_STATE_LEN + 2 + U64_LEN;
 /** Full MM `fill_parlay_quote` ix data (includes leading discriminator `123`). */
 export const FILL_QUOTE_PARLAY_IX_WIRE_LEN = 1 + U64_LEN + U32_LEN + U64_LEN;
@@ -513,7 +514,7 @@ export const FILL_CASHOUT_QUOTE_IX_WIRE_LEN =
 export const GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN = 1 + U64_LEN + U64_LEN + U64_LEN + 1;
 export const getCashoutQuoteParlayIxWireLen = (numLegs: number): number =>
    GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN + numLegs * PARLAY_LEG_SEL_LEN;
-export const FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN = 1 + U64_LEN + U64_LEN;
+export const FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN = 1 + U64_LEN + U64_LEN;
 export const CASHOUT_QUOTE_RETURN_LEN = U64_LEN;
 
 export const FREEBET_ISSUER_DISCRIMINATOR = 10;
@@ -899,7 +900,7 @@ export type GetQuoteIxData = {
    eventStateSequence: number;
 };
 
-export type FillQuoteIxData = {
+export type FillBetQuoteIxData = {
    instructionDiscriminator: number;
    amountToFill: bigint;
    oddsScaled: bigint;
@@ -973,7 +974,7 @@ export type GetCashoutQuoteParlayIxData = {
    legs: ParlayLegSel[];
 };
 
-export type FillCashoutQuoteParlayIxData = {
+export type FillCashoutParlayQuoteIxData = {
    instructionDiscriminator: number;
    amount: bigint;
    amountToSend: bigint;

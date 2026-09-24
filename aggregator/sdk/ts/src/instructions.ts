@@ -15,8 +15,8 @@ import {
    MAX_PARLAY_LEGS,
    MINT_ID,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
+   CONFIG_PDA,
    SPL_TOKEN_PROGRAM_ID,
-   SYSVAR_INSTRUCTIONS_ID,
    SYSVAR_RENT_ID,
    SYSTEM_PROGRAM_ID,
    CLOCK_ID,
@@ -43,7 +43,7 @@ import {
    encodeGetCashoutQuoteIxData,
    encodeFillCashoutQuoteIxData,
    encodeGetCashoutQuoteParlayIxData,
-   encodeFillCashoutQuoteParlayIxData,
+   encodeFillCashoutParlayQuoteIxData,
    encodeGetQuoteIxData,
    encodeGetQuoteParlayIxData,
    encodeIssueFreebetIxData,
@@ -96,7 +96,7 @@ import {
    type FillRfqParlayIxData,
    type FillParlayIxData,
    type FillCashoutQuoteIxData,
-   type FillCashoutQuoteParlayIxData,
+   type FillCashoutParlayQuoteIxData,
    type IssueFreebetIxData,
    type MarketId,
    type MmGetQuote,
@@ -135,7 +135,7 @@ import {
    validateFillRfqParlayIxData,
    validateFillParlayIxData,
    validateFillCashoutQuoteIxData,
-   validateFillCashoutQuoteParlayIxData,
+   validateFillCashoutParlayQuoteIxData,
    validateGetQuoteParlayIxData,
    validateGetCashoutQuoteParlayIxData,
    validateMmGetCashoutQuote,
@@ -228,7 +228,7 @@ export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
 
 import {
    MM_FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR,
-   MM_FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
    MM_GET_CASHOUT_QUOTE_IX_DISCRIMINATOR,
    MM_GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
    MM_GET_QUOTE_IX_DISCRIMINATOR,
@@ -930,7 +930,7 @@ async function cashoutEscrowAccountMetas(
 }
 
 /**
- * **`fill_bet`** — CPI MM `get_quote` / `fill_quote`, open bet PDA + bet ATA, move collateral per best quotes (up to {@link MAX_NUMBER_OF_MMS} MMs).
+ * **`fill_bet`** — CPI MM `get_quote` / `fill_bet_quote`, open bet PDA + bet ATA, move collateral per best quotes (up to {@link MAX_NUMBER_OF_MMS} MMs).
  *
  * **Rust:** `aggregator::instructions::fill_bet::fill_bet` (`FILL_BET_IX_DISCRIMINATOR` = 10). Parsed body: `bet_id: u64`, `MarketId`, `side: u8`, `amount: u64`, `min_odds_scaled: u32`, `event_state_sequence: u16`, `event_game_state: EventGameState`.
  *
@@ -939,7 +939,7 @@ async function cashoutEscrowAccountMetas(
  * @param user - **TS:** `Address` — bet owner (readonly signer). **Rust:** `user` (readonly signer).
  * @param mmPrograms - **TS:** `readonly Address[]` — one MM program id per quote leg (1..=MAX_NUMBER_OF_MMS). **Rust:** repeated 9-account MM slice per program (`mm_program` … `mm_netting_pda`). Quote buffer PDA derived per MM in TS (`mm_quote_buffer` seed on MM program).
  * @param hasActiveNetting - **TS:** `boolean` — `true` derives each MM’s netting PDA; `false` passes the system program as the netting slot.
- * @returns **`Promise<Instruction>`** — base 13 accounts + 9×N MM accounts; `data` = router discriminator + encoded `fill`. **Note:** mint / token / rent / system program addresses are taken from constants in TS builders.
+ * @returns **`Promise<Instruction>`** — base 12 accounts + 9×N MM accounts; `data` = router discriminator + encoded `fill`. **Note:** mint / token / rent / system program addresses are taken from constants in TS builders.
  */
 export async function getFillBetIx(
    fill: FillBetIxData,
@@ -969,7 +969,6 @@ export async function getFillBetIx(
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
       ro(SYSTEM_PROGRAM_ID),
-      ro(SYSVAR_INSTRUCTIONS_ID),
       ro(CLOCK_ID)
    ];
    accounts.push(...baseAccounts);
@@ -1056,7 +1055,6 @@ export async function getFillRfqBetIx(
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
          ro(mmProgram),
          rw(mmConfigPda),
@@ -1112,7 +1110,6 @@ export async function getFillRfqParlayIx(
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
          ro(mmProgram),
          rw(mmConfigPda),
@@ -1175,7 +1172,6 @@ export async function getFreebetFillBetIx(
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
       ro(SYSTEM_PROGRAM_ID),
-      ro(SYSVAR_INSTRUCTIONS_ID),
       ro(CLOCK_ID),
    ];
    for (const mmProgram of mmPrograms) {
@@ -1260,7 +1256,6 @@ export async function getFreebetFillParlayIx(
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
       ro(SYSTEM_PROGRAM_ID),
-      ro(SYSVAR_INSTRUCTIONS_ID),
       ro(CLOCK_ID),
       ro(mmProgram),
       rw(mmConfigPda),
@@ -1336,7 +1331,6 @@ export async function getFreebetFillRfqBetIx(
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
          ro(mmProgram),
          rw(mmConfigPda),
@@ -1399,7 +1393,6 @@ export async function getFreebetFillRfqParlayIx(
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
          ro(mmProgram),
          rw(mmConfigPda),
@@ -1414,7 +1407,7 @@ export async function getFreebetFillRfqParlayIx(
 /**
  * **`fill_cashout`** — auction cashout of a single bet; creates cashout ticket (+ optional live escrow).
  * `fillingMm` must be the expected winning MM (cashout PDA seeds); requote via proxy if unsure.
- * Fixed accounts: **18** (`ticket_feepayer` at index 1). Delay is derived from the ticket + quoted
+ * Fixed accounts: **17** (`ticket_feepayer` at index 1). Delay is derived from the ticket + quoted
  * sequence (`cashoutRequiresDelay`). Quoted `eventStateSequence` must be ≥ the ticket sequence.
  * The aggregator spends free liability toward the quoted payment, then CPIs the MM with
  * `amount_to_send` remainder (still CPIs when remainder is 0 so the quote buffer is marked used).
@@ -1480,7 +1473,6 @@ export async function getFillCashoutIx(
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
       ro(SYSTEM_PROGRAM_ID),
-      ro(SYSVAR_INSTRUCTIONS_ID),
       ro(CLOCK_ID),
    ];
    for (const mmProgram of mmPrograms) {
@@ -1511,7 +1503,7 @@ export async function getFillCashoutIx(
 
 /**
  * **`fill_parlay_cashout`** — single-MM auction cashout of a parlay ticket.
- * Same first **18** accounts as {@link getFillCashoutIx}, then 6 MM accounts + 2 per leg.
+ * Same first **17** accounts as {@link getFillCashoutIx}, then 6 MM accounts + 2 per leg.
  * Free liability covers as much of the quoted payment as possible; the MM CPI sends the remainder.
  *
  * @param parlay - **TS:** {@link ParlayBetAccountData} — original ticket; `parlay.feepayer` is the rent dest on full pregame close.
@@ -1581,7 +1573,6 @@ export async function getFillParlayCashoutIx(
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
          ro(fillingMm),
          rw(mmConfigPda),
@@ -1661,7 +1652,6 @@ export async function getFillRfqCashoutIx(
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
          ro(mmProgram),
          rw(mmConfigPda),
@@ -1678,7 +1668,7 @@ export async function getFillRfqCashoutIx(
 /**
  * **`fill_rfq_parlay_cashout`** — RFQ cashout of a parlay ticket (one MM).
  *
- * Same first **18** accounts as {@link getFillCashoutIx}, then **exactly 5** MM
+ * Same first **17** accounts as {@link getFillCashoutIx}, then **exactly 5** MM
  * accounts (program, config, encumbrance, liability ATA, MM ATA). No per-leg
  * market-data / event-state accounts — legs are in the signed RFQ message.
  * Signed `maxPayment` is the full cash; the MM CPI `amount_to_send` is the remainder after free liability.
@@ -1744,7 +1734,6 @@ export async function getFillRfqParlayCashoutIx(
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
          ro(CLOCK_ID),
          ro(fillingMm),
          rw(mmConfigPda),
@@ -2206,7 +2195,6 @@ export async function getFillParlayIx(
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
       ro(SYSTEM_PROGRAM_ID),
-      ro(SYSVAR_INSTRUCTIONS_ID),
       ro(CLOCK_ID),
       ro(mmProgram),
       rw(mmConfigPda),
@@ -2402,6 +2390,7 @@ export async function getMmFillCashoutQuoteIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(CONFIG_PDA),
          rw(marketDataPda),
          rw(eventStatePda),
          rw(mmConfigPda),
@@ -2410,7 +2399,6 @@ export async function getMmFillCashoutQuoteIx(
          rw(paymentDest),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: ixData,
    };
@@ -2467,23 +2455,23 @@ export async function getMmGetCashoutQuoteParlayIx(
 }
 
 /**
- * Build a **market-maker `fill_cashout_quote_parlay`** instruction (`programAddress` = MM program).
+ * Build a **market-maker `fill_cashout_parlay_quote`** instruction (`programAddress` = MM program).
  *
- * **Rust:** MM `fill_cashout_quote_parlay::process` (`MM_FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR` = 143).
+ * **Rust:** MM `fill_cashout_parlay_quote::process` (`MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR` = 143).
  * Transfers `amountToSend` from MM ATA to `paymentDest`; marks parlay quote buffer used.
  */
-export async function getMmFillCashoutQuoteParlayIx(
-   params: Omit<FillCashoutQuoteParlayIxData, 'instructionDiscriminator'>,
+export async function getMmFillCashoutParlayQuoteIx(
+   params: Omit<FillCashoutParlayQuoteIxData, 'instructionDiscriminator'>,
    mmProgram: Address,
    user: Address,
    paymentDest: Address,
 ): Promise<Instruction> {
-   const full: FillCashoutQuoteParlayIxData = {
-      instructionDiscriminator: MM_FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   const full: FillCashoutParlayQuoteIxData = {
+      instructionDiscriminator: MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
       ...params,
    };
-   validateFillCashoutQuoteParlayIxData(full);
-   const ixData = encodeFillCashoutQuoteParlayIxData(full);
+   validateFillCashoutParlayQuoteIxData(full);
+   const ixData = encodeFillCashoutParlayQuoteIxData(full);
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
    const mmTokenAta = await getAta(mmConfigPda);
@@ -2491,13 +2479,13 @@ export async function getMmFillCashoutQuoteParlayIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(CONFIG_PDA),
          rw(mmConfigPda),
          rw(mmParlayQuoteBufferPda),
          rw(mmTokenAta),
          rw(paymentDest),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: ixData,
    };

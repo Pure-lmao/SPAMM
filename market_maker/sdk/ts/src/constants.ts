@@ -16,6 +16,10 @@ export const AGGREGATOR_PROGRAM_ID: Address = address(
    '5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H',
 );
 
+export const AGGREGATOR_CONFIG_PDA: Address = address(
+   'ZcXq4zwiRPUwHXm1mLtnDDyo2R1QbFzDYQS6BUD97FQ',
+);
+
 export const SYSTEM_PROGRAM_ID: Address = address(
    '11111111111111111111111111111111',
 );

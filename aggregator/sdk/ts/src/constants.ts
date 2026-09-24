@@ -153,7 +153,7 @@ export const MM_PARLAY_QUOTE_BUFFER_SEED = 'mm_parlay_quote_buffer' as const;
 
 /** MM CPI instruction discriminators (shared by `instructions.ts` and `codex.ts`). */
 export const MM_GET_QUOTE_IX_DISCRIMINATOR = 120;
-export const MM_FILL_QUOTE_IX_DISCRIMINATOR = 121;
+export const MM_FILL_BET_QUOTE_IX_DISCRIMINATOR = 121;
 export const MM_GET_QUOTE_PARLAY_IX_DISCRIMINATOR = 122;
 export const MM_FILL_QUOTE_PARLAY_IX_DISCRIMINATOR = 123;
 export const MM_FILL_BET_RFQ_IX_DISCRIMINATOR = 130;
@@ -161,9 +161,9 @@ export const MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR = 131;
 export const MM_GET_CASHOUT_QUOTE_IX_DISCRIMINATOR = 140;
 export const MM_FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR = 141;
 export const MM_GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR = 142;
-export const MM_FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR = 143;
+export const MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR = 143;
 export const MM_FILL_CASHOUT_RFQ_IX_DISCRIMINATOR = 144;
-export const MM_FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR = 145;
+export const MM_FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR = 145;
 
 /** Live cashout delay escrow PDA (`account_cashout_escrow::CASHOUT_ESCROW_SEED`). */
 export const CASHOUT_ESCROW_SEED = 'cashout_escrow' as const;

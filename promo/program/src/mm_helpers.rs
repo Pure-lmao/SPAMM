@@ -7,8 +7,6 @@ use pinocchio::{
    hint::unlikely,
    address::{Address, address_eq},
 };
-use pinocchio_log::log;
-use solana_define_syscall::definitions::sol_get_stack_height;
 use spamm_aggregator::helpers::verify_invoked_via_aggregator;
 use spamm_aggregator::readers::read_u8_unchecked;
 use spamm_aggregator::state::mm_account_config::MM_CONFIG_PDA_ADMIN_OFFSET;
@@ -21,22 +19,10 @@ use spamm_aggregator::state::other::{MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_D
 use zeropod::ZeroPodFixed;
 use crate::constants::{find_config_pda, MM_MARKET_DATA_PDA_SEED};
 
-/// Must be a CPI from the aggregator (not a top-level MM call).
-/// `allowed_parent` is the aggregator instruction discriminator (`fill_bet`, etc.).
-#[inline(never)]
-pub fn verify_aggregator_cpi(
-   instructions_sysvar: &AccountView,
-   allowed_parent: &[u8],
-) -> Result<(), ProgramError> {
-   if unlikely(unsafe { sol_get_stack_height() } <= 1) {
-      log!("verify_aggregator_cpi: must be invoked via CPI");
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   let discriminator = verify_invoked_via_aggregator(instructions_sysvar)?;
-   if unlikely(!allowed_parent.iter().any(|&d| d == discriminator)) {
-      return Err(ProgramError::InvalidInstructionData);
-   }
-   Ok(())
+/// Fill CPI must present the aggregator config PDA as a signer.
+#[inline(always)]
+pub fn verify_aggregator_cpi(config_pda: &AccountView) -> ProgramResult {
+   verify_invoked_via_aggregator(config_pda)
 }
 
 /// MM config PDA `["config"]` under `program_id`; `feepayer` must match `admin`.

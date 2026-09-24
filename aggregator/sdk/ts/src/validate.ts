@@ -16,7 +16,7 @@ import {
    type FillRfqParlayIxData,
    type FillParlayIxData,
    type FillCashoutQuoteIxData,
-   type FillCashoutQuoteParlayIxData,
+   type FillCashoutParlayQuoteIxData,
    type GetCashoutQuoteIxData,
    type IssueFreebetIxData,
    type MarketId,
@@ -847,9 +847,9 @@ export function validateGetCashoutQuoteParlayIxData(
    validateUniqueParlayMarketIds(ix.legs, label);
 }
 
-export function validateFillCashoutQuoteParlayIxData(
-   ix: FillCashoutQuoteParlayIxData,
-   label = 'fillCashoutQuoteParlay',
+export function validateFillCashoutParlayQuoteIxData(
+   ix: FillCashoutParlayQuoteIxData,
+   label = 'fillCashoutParlayQuote',
 ): void {
    validatePositiveU64(ix.amount, `${label}.amount`);
    validateU64(ix.amountToSend, `${label}.amountToSend`);

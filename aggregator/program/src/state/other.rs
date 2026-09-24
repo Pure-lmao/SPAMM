@@ -1,9 +1,10 @@
 use core::mem::offset_of;
 
+use pinocchio::cpi::{Seed};
 use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
-use crate::constants::ADDRESS_LEN;
+use crate::constants::{ADDRESS_LEN, CONFIG_PDA_BUMP, CONFIG_PDA_SEED};
 use crate::state::EventId;
 
 
@@ -20,6 +21,14 @@ pub const CONFIG_PDA_DISCRIMINATOR: u8 = 4;
 pub const CONFIG_PDA_LEN: usize = <ConfigPdaData as ZeroPodFixed>::SIZE;
 pub const CONFIG_PDA_STATUS_OFFSET: usize = offset_of!(ConfigPdaDataZc, status);
 pub const CONFIG_PDA_AUTHORITY_OFFSET: usize = offset_of!(ConfigPdaDataZc, authority);
+
+pub const CONFIG_PDA_BUMP_SEED: [u8; 1] = [CONFIG_PDA_BUMP];
+pub fn config_signer_seeds() -> [Seed<'static>; 2] {
+   [
+      Seed::from(CONFIG_PDA_SEED),
+      Seed::from(&CONFIG_PDA_BUMP_SEED),
+   ]
+}
 
 
 #[derive(Copy, Clone, ZeroPod)]

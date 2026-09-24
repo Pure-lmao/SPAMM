@@ -1,8 +1,8 @@
 //! RFQ cashout of a parlay ticket.
 //!
-//! Accounts: **18** then **exactly 5** MM accounts (no per-leg PDAs).
+//! Accounts: **17** then **exactly 5** MM accounts (no per-leg PDAs).
 //!
-//! **Fixed (18)**
+//! **Fixed (17)**
 //! 0. `feepayer` (writable signer)
 //! 1. `ticket_feepayer` (writable) — original ticket `feepayer`; rent dest on full pregame close
 //! 2. `user` (readonly signer)
@@ -19,8 +19,7 @@
 //! 13. `associated_token_program` (readonly)
 //! 14. `rent_sysvar` (readonly)
 //! 15. `system_program` (readonly)
-//! 16. `instructions_sysvar` (readonly)
-//! 17. `clock_sysvar` (readonly)
+//! 16. `clock_sysvar` (readonly)
 //!
 //! **MM (5)**
 //! 0. `mm_program` (readonly)
@@ -30,7 +29,7 @@
 //! 4. `mm_token_account` (writable)
 
 use pinocchio::{
-   AccountView, ProgramResult, cpi::invoke,
+   AccountView, ProgramResult, cpi::{Signer, invoke_signed},
    error::ProgramError, instruction::{InstructionAccount, InstructionView},
 };
 use pinocchio_log::log;
@@ -44,7 +43,7 @@ use crate::{
          verify_ticket_feepayer, ParlayCashoutOrigTicket,
       },
    }, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
-      FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR, FillRfqIxData, FillRfqParlayCashoutIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, RFQ_CASHOUT_PARLAY_MESSAGE_LEN, build_rfq_cashout_parlay_message, rfq_cashout_parlay_message_len,
+      FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR, FillRfqIxData, FillRfqParlayCashoutIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, RFQ_CASHOUT_PARLAY_MESSAGE_LEN, build_rfq_cashout_parlay_message, other::config_signer_seeds, rfq_cashout_parlay_message_len,
    },
 };
 
@@ -61,7 +60,7 @@ struct RfqParlayCashoutIxMeta {
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
-   if accounts.len() < 18 {
+   if accounts.len() < 17 {
       log!("fill_rfq_parlay_cashout: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    }
@@ -77,7 +76,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       &accounts[14],
       &accounts[15],
       &accounts[16],
-      &accounts[17],
       "fill_rfq_parlay_cashout",
    )?;
    run_fill_rfq_parlay_cashout(accounts, data)
@@ -87,7 +85,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 #[inline(never)]
 fn run_fill_rfq_parlay_cashout(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let now = {
-      let clock_sysvar = accounts.get(17).ok_or(ProgramError::NotEnoughAccountKeys)?;
+      let clock_sysvar = accounts.get(16).ok_or(ProgramError::NotEnoughAccountKeys)?;
       clock_unix_timestamp_u32(clock_sysvar)?
    };
    let mut ticket = unsafe { core::mem::zeroed::<ParlayCashoutOrigTicket>() };
@@ -104,7 +102,7 @@ fn decode_validate_rfq_parlay_cashout(
    now: u32,
    ticket: &mut ParlayCashoutOrigTicket,
 ) -> Result<(u8, RfqParlayCashoutIxMeta), ProgramError> {
-   let (fixed, mm_rest) = accounts.split_at_mut(18);
+   let (fixed, mm_rest) = accounts.split_at_mut(17);
    let ticket_feepayer = &fixed[1];
    let user = &fixed[2];
    let bet_pda = &fixed[4];
@@ -177,7 +175,7 @@ fn finish_rfq_parlay_cashout_after_ticket(
    encumbrance_pda_bump: u8,
    meta: RfqParlayCashoutIxMeta,
 ) -> ProgramResult {
-   let (fixed, mm_rest) = accounts.split_at_mut(18);
+   let (fixed, mm_rest) = accounts.split_at_mut(17);
    // Exact fixed layout (18). Prefixed slots already checked in preamble / unused on this path.
    #[allow(unused_variables)]
    let [
@@ -197,7 +195,6 @@ fn finish_rfq_parlay_cashout_after_ticket(
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
    ] = fixed else {
       return Err(ProgramError::NotEnoughAccountKeys);
@@ -248,7 +245,7 @@ fn finish_rfq_parlay_cashout_after_ticket(
       payment_dest,
       mint,
       token_program,
-      instructions_sysvar,
+      config_pda,
       amount_to_send,
    )?;
    finish_cashout_parlay(
@@ -293,25 +290,26 @@ fn invoke_fill_rfq_parlay_cashout_mm(
    payment_dest: &AccountView,
    mint: &AccountView,
    token_program: &AccountView,
-   instructions_sysvar: &AccountView,
+   config_pda: &AccountView,
    amount_to_send: u64,
 ) -> ProgramResult {
    let cpi = FillRfqIxData {
-      instruction_discriminator: FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR,
+      instruction_discriminator: FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR,
       amount_to_send,
    };
    let mut cpi_buf = [0u8; FillRfqIxData::WIRE_LEN];
    cpi.write_wire(&mut cpi_buf)?;
    let metas = [
       InstructionAccount::new(user.address(), false, false),
+      InstructionAccount::new(config_pda.address(), false, true),
       InstructionAccount::new(mm_config.address(), false, false),
       InstructionAccount::new(mm_token_account.address(), true, false),
       InstructionAccount::new(payment_dest.address(), true, false),
       InstructionAccount::new(mint.address(), false, false),
       InstructionAccount::new(token_program.address(), false, false),
-      InstructionAccount::new(instructions_sysvar.address(), false, false),
    ];
-   invoke(
+   let seeds = config_signer_seeds();
+   invoke_signed(
       &InstructionView {
          program_id: mm_program.address(),
          accounts: &metas,
@@ -319,13 +317,14 @@ fn invoke_fill_rfq_parlay_cashout_mm(
       },
       &[
          user.as_ref(),
+         config_pda.as_ref(),
          mm_config.as_ref(),
          mm_token_account.as_ref(),
          payment_dest.as_ref(),
          mint.as_ref(),
          token_program.as_ref(),
-         instructions_sysvar.as_ref(),
       ],
+      &[Signer::from(&seeds)],
    )
 }
 

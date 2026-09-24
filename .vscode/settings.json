@@ -2,7 +2,10 @@
   "rust-analyzer.linkedProjects": [
     "aggregator/program/Cargo.toml",
     "market_maker/program/Cargo.toml",
-    "score_predict/program/Cargo.toml"
+    "score_predict/program/Cargo.toml",
+    "template_market_maker_pinocchio/program/Cargo.toml",
+    "template_market_maker_anchor/program/Cargo.toml",
+    "aggregator/program/tests/adversarial_mm/Cargo.toml"
   ],
   "rust-analyzer.cargo.cfgs": [
     "target_os=\"solana\""

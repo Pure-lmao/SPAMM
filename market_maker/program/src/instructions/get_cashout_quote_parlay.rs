@@ -12,15 +12,15 @@
 //! keep the BPF stack frame within the 4 KiB limit.
 //! Return data: 8-byte LE `max_payment` (0 = no quote).
 
-use pinocchio::{error::ProgramError, AccountView, Address, address::address_eq, hint::unlikely};
+use pinocchio::{error::ProgramError, AccountView, Address, hint::unlikely};
 use zeropod::ZeroPodFixed;
 
 use crate::{
-   constants::{MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA},
    instructions::quote_helpers::{
       fold_same_event_odds, product_parlay_odds, read_parlay_leg_market_odds, set_cashout_return,
       validate_quote_leg_context,
    },
+   mm_helpers::{mm_config_address_ok, parlay_quote_buffer_address_ok},
    state::{GetCashoutQuoteParlayIxHeaderPayload, GET_CASHOUT_QUOTE_PARLAY_IX_PAYLOAD_HEADER_LEN},
 };
 use spamm_aggregator::{
@@ -64,11 +64,11 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       set_cashout_return(0)?;
       return Ok(());
    }
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
+   if unlikely(!mm_config_address_ok(mm_config_pda, program_id)) {
       set_cashout_return(0)?;
       return Ok(());
    }
-   if unlikely(!address_eq(mm_parlay_quote_buffer.address(), &PARLAY_QUOTE_BUFFER_PDA)) {
+   if unlikely(!parlay_quote_buffer_address_ok(mm_parlay_quote_buffer, program_id)) {
       set_cashout_return(0)?;
       return Ok(());
    }

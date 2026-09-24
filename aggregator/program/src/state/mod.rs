@@ -10,7 +10,7 @@ pub mod mm_parlay_quote;
 pub mod mm_account_config;
 pub mod mm_get_quote;
 pub mod mm_fill_rfq;
-pub mod mm_fill_quote;
+pub mod mm_fill_bet_quote;
 pub mod mm_quote;
 pub mod mm_cashout;
 pub mod rfq_message;
@@ -81,7 +81,7 @@ pub use mm_account_config::{
 };
 pub use mm_fill_rfq::{
    FillRfqIxData, FILL_BET_RFQ_IX_DISCRIMINATOR, FILL_CASHOUT_RFQ_IX_DISCRIMINATOR,
-   FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR, FILL_PARLAY_RFQ_IX_DISCRIMINATOR,
+   FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR, FILL_PARLAY_RFQ_IX_DISCRIMINATOR,
 };
 pub use rfq_message::{
    build_rfq_bet_message, build_rfq_cashout_message, build_rfq_cashout_parlay_message,
@@ -108,12 +108,12 @@ pub use mm_quote::{
    PROXY_PARLAY_QUOTE_HEADER_LEN, ProxyParlayQuoteData,
 };
 pub use mm_get_quote::{GetQuoteIxData, GET_QUOTE_IX_DISCRIMINATOR, GET_QUOTE_IX_SIDE_OFFSET};
-pub use mm_fill_quote::{FillQuoteIxData, FILL_QUOTE_IX_DISCRIMINATOR};
+pub use mm_fill_bet_quote::{FillBetQuoteIxData, FILL_BET_QUOTE_IX_DISCRIMINATOR};
 pub use mm_cashout::{
    get_cashout_quote_parlay_ix_wire_len, write_get_cashout_quote_parlay_ix,
-   FillCashoutQuoteIxData, FillCashoutQuoteParlayIxData, GET_CASHOUT_QUOTE_IX_DISCRIMINATOR,
+   FillCashoutQuoteIxData, FillCashoutParlayQuoteIxData, GET_CASHOUT_QUOTE_IX_DISCRIMINATOR,
    GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR, GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN,
-   FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR, FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR, FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
    CASHOUT_QUOTE_RETURN_LEN, PROXY_CASHOUT_QUOTE_DATA_LEN, CashoutQuoteReturn, GetCashoutQuoteIxData,
    GetCashoutQuoteParlayIxHeader, ProxyCashoutQuoteData,
 };

@@ -7,11 +7,11 @@ The idea behind the framework could be further extended to binary or vanilla opt
 This is the **SPAMM Aggregator** program and framework. The framework defines what a **SPAMM** must do to be compliant with the aggregator and how to integrate with the aggregator.
 The **aggregator** is responsible for filling user bets with offers from the integrated SPAMMs. The **market operator API** is responsible for providing **event and market ids**. Each SPAMM is responsible for offering quotes on whatever markets they wish. Any client can call each SPAMM's `get_quote` function to get the offer, then build a tx to fill the bet with the **5 best** quotes. The aggregator will then call `get_quote` again to get the **best execution-time** offers and fill the bet with the quotes in order of **best to worst odds**.
 
-**Liability** for paying out winning bets is held in a token account whose **authority is the aggregator’s encumbrance PDA** for that MM (Token Program owns the ATA). This collateral must be transferred by the SPAMM during the `fill_quote` function.
+**Liability** for paying out winning bets is held in a token account whose **authority is the aggregator’s encumbrance PDA** for that MM (Token Program owns the ATA). This collateral must be transferred by the SPAMM during the `fill_bet_quote` function.
 
 Each market carries a **market operator** address on its `MarketId`; that operator (or the aggregator config `authority` when the operator is delinquent) grades outcomes via `grade_bets` / `grade_parlay`. Funds are transferred to the winners by calling `settle_bet` / `settle_parlay` on a graded bet.
 
-In addition to the competitive, onchain `get_quote` / `fill_quote` auction, a SPAMM can fill via **RFQ**: an off-chain ed25519-signed quote (keyed by the MM’s `rfq_signer`) that the user submits through `fill_rfq_bet` / `fill_rfq_parlay`.
+In addition to the competitive, onchain `get_quote` / `fill_bet_quote` auction, a SPAMM can fill via **RFQ**: an off-chain ed25519-signed quote (keyed by the MM’s `rfq_signer`) that the user submits through `fill_rfq_bet` / `fill_rfq_parlay`.
 
 The aggregator also supports **cashout** for bets and parlays. For single bets, an onchain auction takes place between the 5 best offchain quotes and the bet is purchased by the highest bidding SPAMM. For parlays, the frontend gets the best quote and the cashout is purchased by that SPAMM. An RFQ path is also available for cashout.
 
@@ -30,6 +30,8 @@ There are many ways SPAMMs could work:
 - one might be run by a frontend to offer to fill the freebets the frontend is giving out which are locked exclusively to their own SPAMM, so the wins and losses net out like a traditional sportsbook freebet.
 - one might simply pull orderbooks from other exchanges, dump them in the market data PDAs, and offer based on that.
 - since markets are not controlled by the actual SPAMM aggregator in any way (the API is really just "suggested" market ids so everyone is on the same page about them), a product could build on top of the framework for something niche and offer their own markets on their own SPAMM for their own frontend users (although I am always willing to add new things to the API because forcing SPAMMs to compete is what makes odds great for users)
+
+For some example code, see the template SPAMM [README.md](https://github.com/pure-lmao/spamm-aggregator/tree/main/template_market_maker_pinocchio/README.md).
 
 ## Roles
 
@@ -102,7 +104,7 @@ The function **MUST** take the following accounts:
 | 4 | MM Config PDA | readonly | |
 | 5 | MM Quote Buffer | writable | Written by `get_quote`; CPI destination for fill replay protection |
 
-Quote CPIs (`get_quote`, `get_quote_parlay`, `get_cashout_quote`, `get_cashout_quote_parlay`) **MUST NOT** write Market Data or Event State. Those PDAs are written by Doppler (market data), `update_event_state` (event header), and fill CPIs that include them (`fill_quote`, `fill_bet_rfq`, `fill_cashout_quote`, `fill_cashout_rfq`). The quote buffer **is** writable on quote.
+Quote CPIs (`get_quote`, `get_quote_parlay`, `get_cashout_quote`, `get_cashout_quote_parlay`) **MUST NOT** write Market Data or Event State. Those PDAs are written by Doppler (market data), `update_event_state` (event header), and fill CPIs that include them (`fill_bet_quote`, `fill_bet_rfq`, `fill_cashout_quote`, `fill_cashout_rfq`). The quote buffer **is** writable on quote.
 
 The function **MUST** return the following data for a valid quote:
 
@@ -134,20 +136,20 @@ struct MMQuoteBuffer {
 }
 ```
 
-This data is later used by your `fill_quote` function to validate the quote was actually offered by yourself and is **not spoofed**.
+This data is later used by your `fill_bet_quote` function to validate the quote was actually offered by yourself and is **not spoofed**.
 
 The user is passed as a courtesy to allow you to potentially offer better odds to some users. Your Config PDA data beyond the header can be used for storing any global data you want (user profiles, global risk limits, etc). Your Market Data PDA data beyond the header can be used for storing any market-specific data you want (odds, liquidity, etc). Your Event State PDA data beyond the header can be used for storing any event-specific data you want (start times, correlation data, event exposure, etc).
 
-## fill_quote function
+## fill_bet_quote function
 
 Discriminator: **121**
 
-The `fill_quote` function is called by the **aggregator** to fill the bet after receiving the quotes, **filtering valid quotes**, and sorting them **best to worst odds**. The function should verify that the caller is a CPI via the aggregator and that all accounts are as expected.
+The `fill_bet_quote` function is called by the **aggregator** to fill the bet after receiving the quotes, **filtering valid quotes**, and sorting them **best to worst odds**. The function should verify that the caller is a CPI via the aggregator and that all accounts are as expected.
 
 Data:
 
 ```rust
-struct FillQuoteIxData {
+struct FillBetQuoteIxData {
    instruction_discriminator: u8, // 121
    amount_to_fill: u64,
    odds_scaled: u32,
@@ -164,15 +166,15 @@ The function **MUST** take the following accounts:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | User | readonly | |
-| 1 | MM Market Data PDA | writable | |
-| 2 | MM Event State PDA | writable | |
-| 3 | MM Config PDA | writable | |
-| 4 | MM Quote Buffer | writable | |
-| 5 | MM Token Account | writable | |
-| 6 | MM Liability Token Account | writable | |
-| 7 | Mint | readonly | |
-| 8 | Token Program | readonly | |
-| 9 | Instructions sysvar | readonly | |
+| 1 | Aggregator config PDA | readonly, signer | |
+| 2 | MM Market Data PDA | writable | |
+| 3 | MM Event State PDA | writable | |
+| 4 | MM Config PDA | writable | |
+| 5 | MM Quote Buffer | writable | |
+| 6 | MM Token Account | writable | |
+| 7 | MM Liability Token Account | writable | |
+| 8 | Mint | readonly | |
+| 9 | Token Program | readonly | |
 
 The function **should** then validate the quote matches the quote buffer data as proof the call to the function is **not spoofed**—it must have been preceded by a valid `get_quote` invocation. This avoids having to do an expensive re-computation of the quote.
 
@@ -271,13 +273,13 @@ The function **MUST** take these accounts:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | User | readonly | |
-| 1 | MM Config PDA | writable | |
-| 2 | MM Parlay Quote Buffer | writable | |
-| 3 | MM Token Account | writable | MM collateral source |
-| 4 | MM Liability Token Account | writable | Aggregator-owned destination |
-| 5 | Mint | readonly | |
-| 6 | Token program | readonly | |
-| 7 | Instructions sysvar | readonly | Introspect parent `fill_parlay` |
+| 1 | Aggregator config PDA | readonly, signer | |
+| 2 | MM Config PDA | writable | |
+| 3 | MM Parlay Quote Buffer | writable | |
+| 4 | MM Token Account | writable | MM collateral source |
+| 5 | MM Liability Token Account | writable | Aggregator-owned destination |
+| 6 | Mint | readonly | |
+| 7 | Token program | readonly | |
 
 The MM should decode the parlay quote buffer, verify it matches the instruction (user, odds, amounts), transfer `amount_to_send` to the liability account, then **MUST** set `is_used` on the parlay buffer to **1** so the quote **cannot be replayed** without a fresh `get_quote_parlay`. The amount to send may be less than the calculated user profit (or 0) if you have free collateral in the MM liability account.
 
@@ -319,16 +321,16 @@ Accounts **(9)**:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | User | readonly | |
-| 1 | MM Market Data PDA | writable | reserved for MM market updates |
-| 2 | MM Event State PDA | writable | reserved for MM event updates |
-| 3 | MM Config PDA | writable | |
-| 4 | MM Token Account | writable | |
-| 5 | MM Liability Token Account | writable | |
-| 6 | Mint | readonly | |
-| 7 | Token Program | readonly | |
-| 8 | Instructions sysvar | readonly | |
+| 1 | Aggregator config PDA | readonly, signer | |
+| 2 | MM Market Data PDA | writable | reserved for MM market updates |
+| 3 | MM Event State PDA | writable | reserved for MM event updates |
+| 4 | MM Config PDA | writable | |
+| 5 | MM Token Account | writable | |
+| 6 | MM Liability Token Account | writable | |
+| 7 | Mint | readonly | |
+| 8 | Token Program | readonly | |
 
-The function **MUST** transfer `amount_to_send` from the MM token account to the liability account (config PDA as signer), same liability rules as `fill_quote`.
+The function **MUST** transfer `amount_to_send` from the MM token account to the liability account (config PDA as signer), same liability rules as `fill_bet_quote`.
 
 ## fill_parlay_rfq function
 
@@ -350,12 +352,12 @@ Accounts **(7)** — omits **both** `mm_market_data_pda` and `mm_event_state_pda
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | User | readonly | |
-| 1 | MM Config PDA | writable | |
-| 2 | MM Token Account | writable | |
-| 3 | MM Liability Token Account | writable | |
-| 4 | Mint | readonly | |
-| 5 | Token Program | readonly | |
-| 6 | Instructions sysvar | readonly | parent must be aggregator `fill_rfq_parlay` |
+| 1 | Aggregator config PDA | readonly, signer | |
+| 2 | MM Config PDA | writable | |
+| 3 | MM Token Account | writable | |
+| 4 | MM Liability Token Account | writable | |
+| 5 | Mint | readonly | |
+| 6 | Token Program | readonly | |
 
 ## get_cashout_quote function
 
@@ -443,15 +445,15 @@ The function **MUST** take the following accounts:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | User | readonly | |
-| 1 | MM Market Data PDA | writable | |
-| 2 | MM Event State PDA | writable | Unverified; MM may write the account tail on fill |
-| 3 | MM Config PDA | writable | |
-| 4 | MM Quote Buffer | writable | |
-| 5 | MM Token Account | writable | MM collateral source for remainder |
-| 6 | Payment dest | writable | User ATA (pregame) or escrow ATA (live delay) |
-| 7 | Mint | readonly | |
-| 8 | Token Program | readonly | |
-| 9 | Instructions sysvar | readonly | parent must be aggregator `fill_cashout` |
+| 1 | Aggregator config PDA | readonly, signer | |
+| 2 | MM Market Data PDA | writable | |
+| 3 | MM Event State PDA | writable | Unverified; MM may write the account tail on fill |
+| 4 | MM Config PDA | writable | |
+| 5 | MM Quote Buffer | writable | |
+| 6 | MM Token Account | writable | MM collateral source for remainder |
+| 7 | Payment dest | writable | User ATA (pregame) or escrow ATA (live delay) |
+| 8 | Mint | readonly | |
+| 9 | Token Program | readonly | |
 
 The function **should** then validate the quote matches the quote buffer data as proof the call is **not spoofed**—it must have been preceded by a valid `get_cashout_quote` invocation. `amount_to_send` **MUST** be ≤ the buffer’s `max_amount` (quoted payment).
 
@@ -480,14 +482,14 @@ Accounts **(9)**:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | User | readonly | |
-| 1 | MM Market Data PDA | writable | reserved for MM market updates |
-| 2 | MM Event State PDA | writable | Unverified; MM may write the account tail on fill |
-| 3 | MM Config PDA | writable | |
-| 4 | MM Token Account | writable | MM collateral source for remainder |
-| 5 | Payment dest | writable | User ATA (pregame) or escrow ATA (live delay) |
-| 6 | Mint | readonly | |
-| 7 | Token Program | readonly | |
-| 8 | Instructions sysvar | readonly | parent must be aggregator `fill_rfq_cashout` |
+| 1 | Aggregator config PDA | readonly, signer | |
+| 2 | MM Market Data PDA | writable | reserved for MM market updates |
+| 3 | MM Event State PDA | writable | Unverified; MM may write the account tail on fill |
+| 4 | MM Config PDA | writable | |
+| 5 | MM Token Account | writable | MM collateral source for remainder |
+| 6 | Payment dest | writable | User ATA (pregame) or escrow ATA (live delay) |
+| 7 | Mint | readonly | |
+| 8 | Token Program | readonly | |
 
 The function **MUST** transfer `amount_to_send` from the MM token account to the payment dest when `amount_to_send > 0` (config PDA as signer).
 
@@ -521,9 +523,9 @@ Accounts **(4 + 2×L)** where `L` is `num_legs` (2..=20):
 | 4+2*i | MM Market Data PDA | readonly | Per leg *i* |
 | 5+2*i | MM Event State PDA | readonly | Per leg *i* |
 
-Return data: 8-byte LE `max_payment` (`CashoutQuoteReturn`). Populate the **MM Parlay Quote Buffer** so `fill_cashout_quote_parlay` can prove the quote was issued.
+Return data: 8-byte LE `max_payment` (`CashoutQuoteReturn`). Populate the **MM Parlay Quote Buffer** so `fill_cashout_parlay_quote` can prove the quote was issued.
 
-## fill_cashout_quote_parlay function
+## fill_cashout_parlay_quote function
 
 Discriminator: **143**
 
@@ -532,7 +534,7 @@ Called by the aggregator under parent `fill_parlay_cashout` after selecting the 
 Data:
 
 ```rust
-struct FillCashoutQuoteParlayIxData {
+struct FillCashoutParlayQuoteIxData {
    instruction_discriminator: u8, // 143
    amount: u64,
    amount_to_send: u64,
@@ -544,15 +546,15 @@ Accounts **(8)**:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | User | readonly | |
-| 1 | MM Config PDA | writable | |
-| 2 | MM Parlay Quote Buffer | writable | |
-| 3 | MM Token Account | writable | |
-| 4 | Payment dest | writable | User ATA (pregame) or escrow ATA (live delay) |
-| 5 | Mint | readonly | |
-| 6 | Token Program | readonly | |
-| 7 | Instructions sysvar | readonly | parent must be aggregator `fill_parlay_cashout` |
+| 1 | Aggregator config PDA | readonly, signer | |
+| 2 | MM Config PDA | writable | |
+| 3 | MM Parlay Quote Buffer | writable | |
+| 4 | MM Token Account | writable | |
+| 5 | Payment dest | writable | User ATA (pregame) or escrow ATA (live delay) |
+| 6 | Mint | readonly | |
+| 7 | Token Program | readonly | |
 
-## fill_parlay_cashout_rfq function
+## fill_cashout_parlay_rfq function
 
 Discriminator: **145**
 
@@ -572,12 +574,12 @@ Accounts **(7)**:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | User | readonly | |
-| 1 | MM Config PDA | writable | |
-| 2 | MM Token Account | writable | |
-| 3 | Payment dest | writable | |
-| 4 | Mint | readonly | |
-| 5 | Token Program | readonly | |
-| 6 | Instructions sysvar | readonly | |
+| 1 | Aggregator config PDA | readonly, signer | |
+| 2 | MM Config PDA | writable | |
+| 3 | MM Token Account | writable | |
+| 4 | Payment dest | writable | |
+| 5 | Mint | readonly | |
+| 6 | Token Program | readonly | |
 
 ## Config PDA
 
@@ -594,7 +596,7 @@ struct Config {
    //...anything else you want
    // for example
    global_risk_limit: u64,
-   global_risk: u64, // updated on fill_quote
+   global_risk: u64, // updated on fill_bet_quote
    favourable_bettors: [Address; N], // read on get_quote to safely offer them a 5% bonus odds to increase chance of being filled, knowing they are losing bettors
    smart_bettors: [Address; N], // read on get_quote to reduce odds, knowing that fills are usually unfavourable from these bettors
 }
@@ -624,31 +626,31 @@ struct MarketData {
    last_update: i64, //ensure each new update is greater than the last so old txs cant land late
    odds0: u32, // updated in oracle hot path
    odds1: u32, // updated in oracle hot path
-   position0: i64, // updated on fill_quote
-   position1: i64 // updated on fill_quote
+   position0: i64, // updated on fill_bet_quote
+   position1: i64 // updated on fill_bet_quote
 
    // or skew from midpoint
    last_valid_timestamp: i64, // oracle hot path
    midpoint_odds: u32, // oracle hot path
-   liability: i64, // on fill_quote
+   liability: i64, // on fill_bet_quote
    market_risk_grade: u8 // set on init_market
 
    // or per-update inventory
    slot: u64, // oracle hot path
    odds0: u32, // oracle hot path
    odds1: u32, // oracle hot path
-   remaining0: // reset on oracle hot path then decrement on fill_quote
-   remaining1: // reset on oracle hot path then decrement on fill_quote
+   remaining0: // reset on oracle hot path then decrement on fill_bet_quote
+   remaining1: // reset on oracle hot path then decrement on fill_bet_quote
 }
 ```
 
 It **MUST** have the seeds `["market_data", market_id_body_wire, operator]`. The full on-wire `MarketId` includes an `operator` address (see Market Operators under the aggregator). Because Solana PDA seeds are capped at 32 bytes each, the market-id body (everything before `operator`) is one seed and `operator` is a second seed — helpers: `market_id_pda_seed_parts` / SDK `getMmMarketDataPda`. The account can contain any data that you want to store for the market. The **aggregator verifies** the Market Data PDA exists with the expected seed..
 
-It is recommended you use something like Doppler ([https://github.com/blueshift-gg/doppler](https://github.com/blueshift-gg/doppler)) for 21 CU updates and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_quote function.
+It is recommended you use something like Doppler ([https://github.com/blueshift-gg/doppler](https://github.com/blueshift-gg/doppler)) for 21 CU updates and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_bet_quote function.
 
 ## Event State PDA
 
-An **Event State PDA** **MUST** start with the on-wire header `EventStateData` (see `spamm_aggregator::state::EventStateData`). The account **may be longer**; bytes after the header are MM-chosen (exposure, clocks, bettor stats, …). The aggregator verifies **only the header** (discriminator, bump/PDA, `sequence`, `game_state`) on **quote** paths. Quote CPIs **MUST NOT** write this account. Write paths: `update_event_state` (header), fill CPIs that include event-state (`fill_quote`, `fill_bet_rfq`, `fill_cashout_quote`, `fill_cashout_rfq` — tail only; the aggregator does not re-verify on fill). `init_event` writes the header then any extra body supplied in the instruction. You can add an `update_event_body` instruction to update the bytes outside the header however you want.
+An **Event State PDA** **MUST** start with the on-wire header `EventStateData` (see `spamm_aggregator::state::EventStateData`). The account **may be longer**; bytes after the header are MM-chosen (exposure, clocks, bettor stats, …). The aggregator verifies **only the header** (discriminator, bump/PDA, `sequence`, `game_state`) on **quote** paths. Quote CPIs **MUST NOT** write this account. Write paths: `update_event_state` (header), fill CPIs that include event-state (`fill_bet_quote`, `fill_bet_rfq`, `fill_cashout_quote`, `fill_cashout_rfq` — tail only; the aggregator does not re-verify on fill). `init_event` writes the header then any extra body supplied in the instruction. You can add an `update_event_body` instruction to update the bytes outside the header however you want.
 
 ```rust
 struct EventStateDataHeader {
@@ -812,7 +814,7 @@ The first byte of instruction data routes the MM program (oracle hot-path **0** 
 | 113 | `close_market` | |
 | 114 | `update_event_state` | |
 | 120 | `get_quote` | Single market; CPI from aggregator `fill_bet` or RPC to build tx |
-| 121 | `fill_quote` | Single market; CPI from aggregator `fill_bet` |
+| 121 | `fill_bet_quote` | Single market; CPI from aggregator `fill_bet` |
 | 122 | `get_quote_parlay` | Multi-leg; CPI from aggregator `fill_parlay` or RPC to build tx |
 | 123 | `fill_parlay_quote` | Multi-leg; CPI from aggregator `fill_parlay` |
 | 130 | `fill_bet_rfq` | CPI from aggregator `fill_rfq_bet`; collateral transfer |
@@ -820,16 +822,16 @@ The first byte of instruction data routes the MM program (oracle hot-path **0** 
 | 140 | `get_cashout_quote` | Soft-fail; return 8-byte LE `max_payment`; CPI from `fill_cashout` / proxy |
 | 141 | `fill_cashout_quote` | Transfer `amount_to_send` remainder from MM ATA; set quote buffer `is_used`; CPI from aggregator `fill_cashout` |
 | 142 | `get_cashout_quote_parlay` | Soft-fail parlay cashout quote; return 8-byte LE `max_payment` |
-| 143 | `fill_cashout_quote_parlay` | Transfer `amount_to_send` remainder; set parlay quote buffer `is_used`; CPI from aggregator `fill_parlay_cashout` |
+| 143 | `fill_cashout_parlay_quote` | Transfer `amount_to_send` remainder; set parlay quote buffer `is_used`; CPI from aggregator `fill_parlay_cashout` |
 | 144 | `fill_cashout_rfq` | Transfer `amount_to_send` remainder; CPI from aggregator `fill_rfq_cashout` |
-| 145 | `fill_parlay_cashout_rfq` | Transfer `amount_to_send` remainder; CPI from aggregator `fill_rfq_parlay_cashout` |
+| 145 | `fill_cashout_parlay_rfq` | Transfer `amount_to_send` remainder; CPI from aggregator `fill_rfq_parlay_cashout` |
 | 150 | `withdraw_from_token_account` | Admin withdraw from MM collateral ATA |
 | 254 | `write_arbitrary_data` | Admin / dev tooling; may grow PDA |
 | 255 | `force_close_pda` | Admin / dev tooling |
 
 ## Integration Lifecycle
 
-1. Write your SPAMM program and ensure that account structs/headers match as expected and you have implemented `get_quote` / `fill_quote` and, if you support parlays, `get_quote_parlay` / `fill_parlay_quote` correctly. If you support RFQ, implement `fill_bet_rfq` / `fill_parlay_rfq` and set an `rfq_signer`. If you support cashout, implement `get_cashout_quote` / `fill_cashout_quote`, `get_cashout_quote_parlay` / `fill_cashout_quote_parlay`, and for RFQ cashout `fill_cashout_rfq` / `fill_parlay_cashout_rfq`.
+1. Write your SPAMM program and ensure that account structs/headers match as expected and you have implemented `get_quote` / `fill_bet_quote` and, if you support parlays, `get_quote_parlay` / `fill_parlay_quote` correctly. If you support RFQ, implement `fill_bet_rfq` / `fill_parlay_rfq` and set an `rfq_signer`. If you support cashout, implement `get_cashout_quote` / `fill_cashout_quote`, `get_cashout_quote_parlay` / `fill_cashout_parlay_quote`, and for RFQ cashout `fill_cashout_rfq` / `fill_cashout_parlay_rfq`.
 2. Deploy the SPAMM program.
 3. Init the required SPAMM-owned accounts.
 4. Register the SPAMM with the aggregator by calling register_mm.
@@ -840,7 +842,7 @@ The first byte of instruction data routes the MM program (oracle hot-path **0** 
 9. Update the Event State PDA (`game_state` and `sequence`) as the event progresses, at least to sequence 1 for pre-game (accounts are initialized to sequence 0 to signal preparation stage).
 10. Update the Market Data PDA as the market odds change.
 11. Clients can now call the get_quote function of your SPAMM to get quotes for markets you are quoting. You should verify accounts that are passed and calculate the odds you want to offer based on the Market Data PDA and any data you have stored in your Config PDA and Event State PDA. For RFQ, clients POST `/api/rfq` and your MM replies with a signed quote over the WebSocket.
-12. If your quote is in the top 5, the client will build a tx to attempt to fill the user bet. The aggregator will call the `get_quote` function again to get the best execution-time offers and then the `fill_quote` function if you are still offering the best odds. You can update the Config PDA, Market Data PDA, and Event State PDA tail here if you wish. RFQ fills use `fill_rfq_bet` /`fill_rfq_parlay` instead (one MM, signed quote, no quote buffer).
+12. If your quote is in the top 5, the client will build a tx to attempt to fill the user bet. The aggregator will call the `get_quote` function again to get the best execution-time offers and then the `fill_bet_quote` function if you are still offering the best odds. You can update the Config PDA, Market Data PDA, and Event State PDA tail here if you wish. RFQ fills use `fill_rfq_bet` /`fill_rfq_parlay` instead (one MM, signed quote, no quote buffer).
 13. You can close the netting account by calling close_netting_account once an event is over.
 14. You can manage your own Event State and Market Data PDAs as needed.
 
@@ -858,7 +860,7 @@ By offering **liability netting** on most markets, the aggregator massively impr
 
 Settling bets could be the responsibility of the SPAMM if netting was not involved, but I believe it is a major improvement to have. As it is, the aggregator already holds a lot of responsibility so settling bets fairly is a natural extension. The alternative is no netting, SPAMMs hold the bet accounts, and users specify which SPAMMs are allowed to fill the bet based on the user trust of the SPAMM (similar to users opting out of Singbet filling orders on Mollybet since they are known to cancel bets for no reason). Forcing the user to profile every SPAMM is not a good user experience and would hinder new SPAMMs joining the network.
 
-Parlays use two leg caps. **Auction / MM quote-buffer fills** (`fill_parlay`, `get_quote_parlay`) allow `MAX_PARLAY_LEGS = 20`: each leg still needs market-data + event-state accounts (packet size with ALTs is the practical limit). **RFQ parlays** (`fill_rfq_parlay`) allow `MAX_RFQ_PARLAY_LEGS = 40` since they pass **no** per-leg market/event PDAs (legs are covered by the MM’s ed25519-signed quote).
+Parlays use two leg caps. A transaction holds **64 accounts**. **Auction / MM quote-buffer fills** (`fill_parlay`) allow `MAX_PARLAY_LEGS = 20`. **RFQ parlays** (`fill_rfq_parlay`) allow `MAX_RFQ_PARLAY_LEGS = 40` because the instruction is a fixed **18** accounts at any leg count.
 
 Event start times are **not** published onchain as part of the Event Id despite it probably being useful. The reason for this is that event times can change, like tennis and esports where the schedule is flexible, or due to weather etc. Market makers are likely to use event start time (as minutes until event start) as part of the quoting and, if the event time was published onchain, the aggregator would be responsible for keeping this correct. It is beyond the scope of the aggregator responsibility to keep this up to date to manage market maker risk, so market makers should be responsible for managing their own understanding of the event start time by posting it in the event state or market data PDAs. The onchain aggregator program should be as minimal as possible. Event start times (of best effort) are provided in the API, along with any other non-essential metadata.
 
@@ -906,8 +908,8 @@ The **user bet flow** is as follows (single-leg `fill_bet`; parlay `fill_parlay`
 3. The user (or UI) uses these quotes to build a tx, including the 5 best quotes which fills the desired amount.
 4. The user signs the tx and sends it to the network.
 5. The aggregator checks the `get_quote` function of each SPAMM to ensure the user's fill is **as good as can be** at **execution-time**.
-6. The aggregator works through the **valid quotes** in order and calls the `fill_quote` function of each SPAMM to fill as much as possible of the bet amount at odds **no worse than requested**.
-7. The aggregator ensures that the `fill_quote` function was **successful** and the funds were transferred to the **mm liability token account**.
+6. The aggregator works through the **valid quotes** in order and calls the `fill_bet_quote` function of each SPAMM to fill as much as possible of the bet amount at odds **no worse than requested**.
+7. The aggregator ensures that the `fill_bet_quote` function was **successful** and the funds were transferred to the **mm liability token account**.
 8. If the market is FT/ML, total or spread (pre-game or live), the aggregator will net the liability on the market for each market maker if they have opted into position netting for the event by creating a netting account data PDA.
 9. The aggregator creates a bet PDA for the user and stores the stake funds in the bet ATA.
 10. After the result is known, the bet is graded (`grade_bets` for single bets; `grade_parlay` for parlays).
@@ -1310,8 +1312,7 @@ Accounts:
 | 8 | associated token program | readonly | |
 | 9 | rent sysvar | readonly | |
 | 10 | system program | readonly | |
-| 11 | instructions sysvar | readonly | Passed through to MM `fill_quote` CPI |
-| 12 | Clock sysvar | readonly | Passed through to MM `get_quote` CPI |
+| 11 | Clock sysvar | readonly | Passed through to MM `get_quote` CPI |
 
 Then for each MM:
 
@@ -1319,7 +1320,7 @@ Then for each MM:
 | --- | --- | --- | --- |
 | 0 | mm program | readonly | Must be executable (a program) |
 | 1 | mm config pda | writable | |
-| 2 | mm event state pda | writable | Forwarded to MM `fill_quote` (unverified on fill) |
+| 2 | mm event state pda | writable | Forwarded to MM `fill_bet_quote` (unverified on fill) |
 | 3 | mm market data pda | writable | |
 | 4 | mm quote buffer | writable | |
 | 5 | mm encumbrance pda | writable | |
@@ -1363,8 +1364,7 @@ Accounts:
 | 8 | associated token program | readonly | |
 | 9 | rent sysvar | readonly | |
 | 10 | system program | readonly | |
-| 11 | instructions sysvar | readonly | Passed through to MM `fill_parlay_quote` CPI |
-| 12 | Clock sysvar | readonly | Passed through to MM `get_quote_parlay` CPI |
+| 11 | Clock sysvar | readonly | Passed through to MM `get_quote_parlay` CPI |
 
 Then the MM:
 
@@ -1429,8 +1429,7 @@ Accounts (**13** fixed):
 | 8 | associated token program | readonly | |
 | 9 | rent sysvar | readonly | |
 | 10 | system program | readonly | |
-| 11 | instructions sysvar | readonly | Passed through to MM `fill_bet_rfq` CPI |
-| 12 | Clock sysvar | readonly | Offer expiry check; passed through to MM CPI |
+| 11 | Clock sysvar | readonly | Offer expiry check; passed through to MM CPI |
 
 Then the MM:
 
@@ -1487,8 +1486,7 @@ Accounts (**13** fixed — no quote buffer, netting, or per-leg PDAs):
 | 8 | associated token program | readonly | |
 | 9 | rent sysvar | readonly | |
 | 10 | system program | readonly | |
-| 11 | instructions sysvar | readonly | Passed through to MM `fill_parlay_rfq` CPI |
-| 12 | Clock sysvar | readonly | Offer expiry check; passed through to MM CPI |
+| 11 | Clock sysvar | readonly | Offer expiry check; passed through to MM CPI |
 
 Then the MM:
 
@@ -1543,8 +1541,7 @@ Accounts (**18** fixed, then **8 × N** MM blocks; `N` ≤ `MAX_NUMBER_OF_MMS` *
 | 13 | associated token program | readonly | |
 | 14 | rent sysvar | readonly | |
 | 15 | system program | readonly | |
-| 16 | instructions sysvar | readonly | |
-| 17 | clock sysvar | readonly | |
+| 16 | clock sysvar | readonly | |
 
 Then for each MM:
 
@@ -1603,8 +1600,7 @@ Accounts (**18** fixed):
 | 13 | associated token program | readonly | |
 | 14 | rent sysvar | readonly | |
 | 15 | system program | readonly | |
-| 16 | instructions sysvar | readonly | |
-| 17 | clock sysvar | readonly | |
+| 16 | clock sysvar | readonly | |
 
 Then the MM:
 
@@ -1668,8 +1664,7 @@ Accounts (**18** fixed):
 | 13 | associated token program | readonly | |
 | 14 | rent sysvar | readonly | |
 | 15 | system program | readonly | |
-| 16 | instructions sysvar | readonly | |
-| 17 | clock sysvar | readonly | |
+| 16 | clock sysvar | readonly | |
 
 Then the MM:
 
@@ -1687,7 +1682,7 @@ Then the MM:
 
 Discriminator: **73**
 
-Signed RFQ cashout of a parlay. CPIs MM `fill_parlay_cashout_rfq` with `amount_to_send` remainder after free liability. Signed `max_payment` is the full cash.
+Signed RFQ cashout of a parlay. CPIs MM `fill_cashout_parlay_rfq` with `amount_to_send` remainder after free liability. Signed `max_payment` is the full cash.
 
 Canonical message: `domain | kind=4 | user | orig_bet_id | cashout_id | amount | max_payment | offer_expiry | mm_program_id | num_legs | CashoutSnapshot×num_legs`.
 
@@ -1727,8 +1722,7 @@ Accounts (**18** fixed):
 | 13 | associated token program | readonly | |
 | 14 | rent sysvar | readonly | |
 | 15 | system program | readonly | |
-| 16 | instructions sysvar | readonly | |
-| 17 | clock sysvar | readonly | |
+| 16 | clock sysvar | readonly | |
 
 Then the MM (**5** — no per-leg PDAs):
 
@@ -2299,8 +2293,7 @@ Accounts (**15** fixed — replaces `user_ata` with issuer + freebet accounts):
 | 10 | associated token program | readonly | |
 | 11 | rent sysvar | readonly | |
 | 12 | system program | readonly | |
-| 13 | instructions sysvar | readonly | |
-| 14 | clock sysvar | readonly | |
+| 13 | clock sysvar | readonly | |
 
 Then for each MM:
 
@@ -2352,8 +2345,7 @@ Accounts (**15** fixed — replaces `user_ata` with issuer + freebet accounts):
 | 10 | associated token program | readonly | |
 | 11 | rent sysvar | readonly | |
 | 12 | system program | readonly | |
-| 13 | instructions sysvar | readonly | |
-| 14 | clock sysvar | readonly | |
+| 13 | clock sysvar | readonly | |
 
 Then the MM:
 
@@ -2414,8 +2406,7 @@ Accounts (**15** fixed — replaces `user_ata` with issuer + freebet accounts):
 | 10 | associated token program | readonly | |
 | 11 | rent sysvar | readonly | |
 | 12 | system program | readonly | |
-| 13 | instructions sysvar | readonly | |
-| 14 | clock sysvar | readonly | |
+| 13 | clock sysvar | readonly | |
 
 Then the MM:
 
@@ -2469,8 +2460,7 @@ Accounts (**15** fixed — replaces `user_ata` with issuer + freebet accounts):
 | 10 | associated token program | readonly | |
 | 11 | rent sysvar | readonly | |
 | 12 | system program | readonly | |
-| 13 | instructions sysvar | readonly | |
-| 14 | clock sysvar | readonly | |
+| 13 | clock sysvar | readonly | |
 
 Then the MM (**5** — no per-leg PDAs):
 

@@ -1,0 +1,27 @@
+[package]
+name = "spamm_adversarial_mm"
+version = "0.0.1"
+edition = "2021"
+license = "CC-BY-NC-4.0"
+description = "Mollusk-only MM that returns below-min quotes or short token transfers"
+autotests = false
+
+[lib]
+crate-type = ["cdylib", "lib"]
+
+[features]
+default = ["bpf-entrypoint"]
+bpf-entrypoint = []
+
+[dependencies]
+pinocchio = { version = "0.11.1", default-features = false, features = ["cpi", "copy"] }
+pinocchio-log = { version = "0.5.1", default-features = false, features = ["macro"] }
+pinocchio-token = { version = "0.6.0", default-features = false }
+solana-define-syscall = { version = "5.0", features = ["unstable-static-syscalls"] }
+spamm_aggregator = { path = "../..", default-features = false }
+zeropod = { version = "0.3.4", features = ["solana-address"] }
+
+[lints.rust]
+unexpected_cfgs = { level = "warn", check-cfg = [
+   'cfg(target_os, values("solana"))',
+] }

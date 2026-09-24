@@ -26,8 +26,8 @@ export const FILL_RFQ_IX_WIRE_LEN = 9;
 /** Full MM `get_quote` ix data (includes leading discriminator). */
 export const GET_QUOTE_IX_WIRE_LEN =
    1 + U64_LEN + U32_LEN + MARKET_ID_WIRE_SIZE + 1 + EVENT_GAME_STATE_LEN + 2;
-/** Full MM `fill_quote` ix data (includes leading discriminator `121`). */
-export const FILL_QUOTE_IX_WIRE_LEN =
+/** Full MM `fill_bet_quote` ix data (includes leading discriminator `121`). */
+export const FILL_BET_QUOTE_IX_WIRE_LEN =
    1 + U64_LEN + U32_LEN + MARKET_ID_WIRE_SIZE + 1 + EVENT_GAME_STATE_LEN + 2 + U64_LEN;
 export const GET_CASHOUT_QUOTE_IX_WIRE_LEN =
    1 + U64_LEN + U64_LEN + U64_LEN + MARKET_ID_WIRE_SIZE + 1 + EVENT_GAME_STATE_LEN + 2;
@@ -37,7 +37,7 @@ export const PARLAY_LEG_SEL_LEN = MARKET_ID_WIRE_SIZE + 1 + 2 + EVENT_GAME_STATE
 export const GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN = 1 + U64_LEN + U64_LEN + U64_LEN + 1;
 export const getCashoutQuoteParlayIxWireLen = (numLegs: number): number =>
    GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN + numLegs * PARLAY_LEG_SEL_LEN;
-export const FILL_CASHOUT_QUOTE_PARLAY_IX_WIRE_LEN = 1 + U64_LEN + U64_LEN;
+export const FILL_CASHOUT_PARLAY_QUOTE_IX_WIRE_LEN = 1 + U64_LEN + U64_LEN;
 export const PARLAY_LEG_QUOTED_LEN = PARLAY_LEG_SEL_LEN + U32_LEN;
 export const PARLAY_LEG_WIRE_LEN = PARLAY_LEG_QUOTED_LEN + 1;
 /** Fixed MM quote buffer table size (quoted legs, padded to MAX_PARLAY_LEGS). */
@@ -217,7 +217,7 @@ export type GetQuoteIxData = {
    eventStateSequence: number;
 };
 
-export type FillQuoteIxData = {
+export type FillBetQuoteIxData = {
    instructionDiscriminator: number;
    amountToFill: bigint;
    oddsScaled: bigint;
@@ -258,7 +258,7 @@ export type GetCashoutQuoteParlayIxData = {
    legs: ParlayLegSel[];
 };
 
-export type FillCashoutQuoteParlayIxData = {
+export type FillCashoutParlayQuoteIxData = {
    instructionDiscriminator: number;
    amount: bigint;
    amountToSend: bigint;
@@ -299,15 +299,15 @@ export type DecodedMarketMakerInstruction =
    | { kind: 'fillBetRfq'; data: FillRfqIxData }
    | { kind: 'fillParlayRfq'; data: FillRfqIxData }
    | { kind: 'getQuote'; data: GetQuoteIxData }
-   | { kind: 'fillQuote'; data: FillQuoteIxData }
+   | { kind: 'fillBetQuote'; data: FillBetQuoteIxData }
    | { kind: 'getQuoteParlay'; data: GetQuoteParlayIxData }
    | { kind: 'fillParlayQuote'; data: FillParlayQuoteIxData }
    | { kind: 'getCashoutQuote'; data: GetCashoutQuoteIxData }
    | { kind: 'fillCashoutQuote'; data: FillCashoutQuoteIxData }
    | { kind: 'getCashoutQuoteParlay'; data: GetCashoutQuoteParlayIxData }
-   | { kind: 'fillCashoutQuoteParlay'; data: FillCashoutQuoteParlayIxData }
+   | { kind: 'fillCashoutParlayQuote'; data: FillCashoutParlayQuoteIxData }
    | { kind: 'fillCashoutRfq'; data: FillRfqIxData }
-   | { kind: 'fillParlayCashoutRfq'; data: FillRfqIxData }
+   | { kind: 'fillCashoutParlayRfq'; data: FillRfqIxData }
    | { kind: 'initEvent'; eventId: EventId; eventBody?: Uint8Array }
    | { kind: 'initMarket'; marketId: MarketId; oracleBody: Uint8Array }
    | {

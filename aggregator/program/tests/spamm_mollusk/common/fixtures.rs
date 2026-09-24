@@ -4,7 +4,7 @@ use solana_instruction::AccountMeta;
 use solana_pubkey::Pubkey;
 use solana_sdk_ids::sysvar::clock;
 use solana_sdk_ids::sysvar::rent;
-use spamm_aggregator::state::{EventId, MarketId, Sport};
+use spamm_aggregator::state::{EventId, MarketId};
 
 /// Aggregator program id (`spamm_aggregator::constants::ID`).
 pub fn agg_program_id() -> Pubkey {
@@ -119,7 +119,15 @@ pub fn event_id_soccer() -> EventId {
    EventId {
       event: 1,
       league: 100,
-      sport: Sport::Soccer,
+      sport: 1,
+   }
+}
+
+pub fn event_id_soccer_n(n: u64) -> EventId {
+   EventId {
+      event: n,
+      league: 100,
+      sport: 1,
    }
 }
 
@@ -128,7 +136,7 @@ pub fn event_id_soccer_b() -> EventId {
    EventId {
       event: 3,
       league: 100,
-      sport: Sport::Soccer,
+      sport: 1,
    }
 }
 
@@ -136,7 +144,7 @@ pub fn event_id_soccer_c() -> EventId {
    EventId {
       event: 5,
       league: 100,
-      sport: Sport::Soccer,
+      sport: 1,
    }
 }
 
@@ -144,7 +152,7 @@ pub fn event_id_soccer_d() -> EventId {
    EventId {
       event: 7,
       league: 100,
-      sport: Sport::Soccer,
+      sport: 1,
    }
 }
 
@@ -152,7 +160,7 @@ pub fn event_id_soccer_e() -> EventId {
    EventId {
       event: 11,
       league: 100,
-      sport: Sport::Soccer,
+      sport: 1,
    }
 }
 
@@ -161,7 +169,7 @@ pub fn event_id_basketball() -> EventId {
    EventId {
       event: 42,
       league: 200,
-      sport: Sport::Basketball,
+      sport: 2,
    }
 }
 

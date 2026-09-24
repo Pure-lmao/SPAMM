@@ -1,8 +1,8 @@
 //! Freebet auction fill for a single bet (disc 15). Stake from issuer ATA.
 //!
-//! Accounts: **15** then **9 × N** (`N` = number of market makers).
+//! Accounts: **14** then **9 × N** (`N` = number of market makers).
 //!
-//! **Fixed (15)**
+//! **Fixed (14)**
 //! 0. `feepayer` (writable signer) — pays netting PDA rent if a fill inserts a new line
 //! 1. `user` (readonly signer)
 //! 2. `issuer_pda` (readonly) — PDA signer for the stake transfer
@@ -16,8 +16,7 @@
 //! 10. `associated_token_program` (readonly)
 //! 11. `rent_sysvar` (readonly)
 //! 12. `system_program` (readonly)
-//! 13. `instructions_sysvar` (readonly)
-//! 14. `clock_sysvar` (readonly)
+//! 13. `clock_sysvar` (readonly)
 //!
 //! **Per MM (9 each)**
 //! 0. `mm_program` (readonly)
@@ -61,7 +60,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       mm_accounts @ ..,
    ] = accounts else {
@@ -85,7 +83,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       mm_accounts,
       parsed,

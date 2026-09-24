@@ -16,6 +16,7 @@ use spamm_aggregator::state::{
 };
 
 use super::fixtures::*;
+use super::mm_keys::MmKeys;
 
 pub fn get_quote_proxy_metas(market: &MarketId) -> Vec<AccountMeta> {
    let eid = market.event_id;
@@ -38,6 +39,29 @@ pub fn get_quote_proxy_instruction(data: &FillBetIxData, market: &MarketId) -> I
    Instruction::new_with_bytes(agg_program_id(), &buf, get_quote_proxy_metas(market))
 }
 
+pub fn get_quote_proxy_metas_for(market: &MarketId, mms: &[MmKeys]) -> Vec<AccountMeta> {
+   let mut m = vec![
+      AccountMeta::new_readonly(user(), false),
+      AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
+   ];
+   for keys in mms {
+      m.extend(keys.quote_proxy_group(market));
+   }
+   m
+}
+
+pub fn get_quote_proxy_instruction_for(
+   data: &FillBetIxData,
+   market: &MarketId,
+   mms: &[MmKeys],
+) -> Instruction {
+   let mut buf = vec![GET_QUOTE_PROXY_IX_DISCRIMINATOR];
+   let mut payload = [0u8; FILL_BET_IX_DATA_LEN];
+   data.write_wire(&mut payload).expect("fill bet wire");
+   buf.extend_from_slice(&payload);
+   Instruction::new_with_bytes(agg_program_id(), &buf, get_quote_proxy_metas_for(market, mms))
+}
+
 pub fn get_parlay_quote_proxy_metas(markets: &[MarketId]) -> Vec<AccountMeta> {
    let mut m = vec![
       AccountMeta::new_readonly(user(), false),
@@ -51,6 +75,42 @@ pub fn get_parlay_quote_proxy_metas(markets: &[MarketId]) -> Vec<AccountMeta> {
       m.push(AccountMeta::new_readonly(event_state_pda(&mid.event_id), false));
    }
    m
+}
+
+pub fn get_parlay_quote_proxy_metas_for(
+   markets: &[MarketId],
+   mms: &[MmKeys],
+) -> Vec<AccountMeta> {
+   let mut m = vec![
+      AccountMeta::new_readonly(user(), false),
+      AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
+   ];
+   for keys in mms {
+      m.extend(keys.parlay_proxy_prefix());
+      for mid in markets {
+         m.push(AccountMeta::new_readonly(keys.market_data(mid), false));
+         m.push(AccountMeta::new_readonly(keys.event_state(&mid.event_id), false));
+      }
+   }
+   m
+}
+
+pub fn get_parlay_quote_proxy_instruction_for(
+   payload: &FillParlayIxData,
+   markets: &[MarketId],
+   mms: &[MmKeys],
+) -> Instruction {
+   let n = payload.num_legs as usize;
+   let wire_len = FillParlayIxData::wire_len(n);
+   let mut wire = vec![0u8; wire_len];
+   payload.write_wire(&mut wire).expect("parlay wire");
+   let mut buf = vec![GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR];
+   buf.extend_from_slice(&wire);
+   Instruction::new_with_bytes(
+      agg_program_id(),
+      &buf,
+      get_parlay_quote_proxy_metas_for(markets, mms),
+   )
 }
 
 pub fn get_parlay_quote_proxy_instruction(
@@ -164,7 +224,7 @@ pub fn decode_market_quotes_proxy_return(data: &[u8], num_sides: u8) -> Vec<(Pub
 }
 
 /// Distinct soccer event ids for RFQ max-leg fixtures (`event` = `1000 + i`).
-pub fn event_id_soccer_n(i: u16) -> spamm_aggregator::state::EventId {
+fn event_id_soccer_rfq_n(i: u16) -> spamm_aggregator::state::EventId {
    spamm_aggregator::state::EventId {
       event: 1000u64 + i as u64,
       league: 39,
@@ -174,17 +234,21 @@ pub fn event_id_soccer_n(i: u16) -> spamm_aggregator::state::EventId {
 
 /// Build N distinct two-outcome spread markets + three-outcome FT markets alternating.
 pub fn rfq_max_leg_markets(n: usize) -> Vec<(MarketId, Vec<u8>)> {
+   rfq_max_leg_markets_odds(n, 20_000)
+}
+
+pub fn rfq_max_leg_markets_odds(n: usize, odds: u32) -> Vec<(MarketId, Vec<u8>)> {
    assert!(n >= 2 && n <= MAX_RFQ_PARLAY_LEGS);
    let mut out = Vec::with_capacity(n);
    for i in 0..n {
-      let eid = event_id_soccer_n(i as u16);
+      let eid = event_id_soccer_rfq_n(i as u16);
       if i % 2 == 0 {
          let m = market_spread_pregame(eid);
-         let body = oracle_body_two_outcome(20_000, 20_000).to_vec();
+         let body = oracle_body_two_outcome(odds, odds).to_vec();
          out.push((m, body));
       } else {
          let m = market_soccer_ft_pregame(eid);
-         let body = oracle_body_three_outcome(20_000, 20_000, 20_000).to_vec();
+         let body = oracle_body_three_outcome(odds, odds, odds).to_vec();
          out.push((m, body));
       }
    }

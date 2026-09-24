@@ -55,6 +55,7 @@ import {
    withSlipEligibility,
    type SlipFreebet,
 } from "./freebets";
+import { subscribeFreebetRefresh } from "./freebetRefresh";
 import { requestRfqQuotes, rfqRequestBody, rfqFillFromResponse, rfqQuoteRejectReason, sortRfqQuotes } from "./rfqPlace";
 import { SIM_FEE_PAYER_ADDRESS } from "./chainIds";
 import { pickBetSide } from "./outcomeSide";
@@ -204,29 +205,27 @@ export function BetSlipTray(): ReactElement | null {
    const usingFreebet = selectedFreebetKey !== "";
    const anyEligibleFreebet = assessedFreebets.some((v) => v.eligible);
 
-   useEffect(() => {
+   const refreshFreebets = useCallback(async () => {
       if (!isConnected || account == null) {
          setFreebets([]);
          setSelectedFreebetKey("");
          return;
       }
-      let cancelled = false;
-      void (async () => {
-         try {
-            const list = await fetchAvailableFreebets(rpc, address(account));
-            if (!cancelled) {
-               setFreebets(list);
-            }
-         } catch {
-            if (!cancelled) {
-               setFreebets([]);
-            }
-         }
-      })();
-      return () => {
-         cancelled = true;
-      };
+      try {
+         const list = await fetchAvailableFreebets(rpc, address(account));
+         setFreebets(list);
+      } catch {
+         setFreebets([]);
+      }
    }, [account, isConnected, rpc]);
+
+   useEffect(() => {
+      void refreshFreebets();
+      const unsubscribe = subscribeFreebetRefresh(() => {
+         void refreshFreebets();
+      });
+      return unsubscribe;
+   }, [refreshFreebets]);
 
    useEffect(() => {
       if (selectedVoucher == null) {

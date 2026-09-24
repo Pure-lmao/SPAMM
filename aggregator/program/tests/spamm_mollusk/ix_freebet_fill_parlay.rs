@@ -79,7 +79,7 @@ fn freebet_fill_parlay_wrong_user() {
    let mut ix = freebet_fill_parlay_instruction(FREEBET_ID_BASIC, &payload, bet, bat, &[m1, m2]);
    ix.accounts[1] = AccountMeta::new_readonly(wrong_signer(), true);
    let r = env.run_ix(ix);
-   assert!(r.program_result.is_err());
+   crate::common::assert_spamm_err(&r, spamm_aggregator::errors::SpammError::InvalidFreebet);
 }
 
 #[test]

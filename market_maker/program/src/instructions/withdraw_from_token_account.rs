@@ -19,7 +19,7 @@ use crate::mm_helpers::verify_mm_config_auth;
 
 pub const WITHDRAW_FROM_TOKEN_ACCOUNT_IX_DISCRIMINATOR: u8 = 150;
 
-pub fn process(_program_id: &Address, accounts: &mut [AccountView], _data: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Address, accounts: &mut [AccountView], _data: &[u8]) -> ProgramResult {
    let [
       admin,
       config_pda,
@@ -33,7 +33,7 @@ pub fn process(_program_id: &Address, accounts: &mut [AccountView], _data: &[u8]
    };
 
    verify_signer(&admin)?;
-   verify_mm_config_auth(&admin, &config_pda)?;
+   verify_mm_config_auth(&admin, &config_pda, program_id)?;
    verify_token_account(true, token_account, config_pda, mint, token_program)?;
    verify_mint(&mint)?;
    verify_token_program(&token_program)?;

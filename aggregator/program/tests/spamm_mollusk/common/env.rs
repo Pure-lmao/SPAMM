@@ -21,6 +21,9 @@ use zeropod::ZeroPodFixed;
 
 use super::fixtures::*;
 use super::ledger::record_cu;
+use super::mm_keys::{
+   adversarial_mm_program_id, mm_alt_program_id, user_b, user_b_collateral_ata, MmKeys, EXTRA_MM_SLOTS,
+};
 
 /// Serialize `Env::new` so parallel tests do not copy over `spamm_market_maker.so` while Mollusk holds it open (Windows error 32).
 static ENV_DEPLOY_LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -31,7 +34,7 @@ pub const RICH_LAMPORTS: u64 = 500_000_000_000;
 /// User collateral ATA balance after aggregator + MM bootstrap (covers stakes in `fill_*` tests).
 pub const USER_COLLATERAL_TOKENS: u64 = 50_000_000_000_000;
 
-/// MM collateral ATA balance after `register_mm` — must cover `fill_quote` liability deposits.
+/// MM collateral ATA balance after `register_mm` — must cover `fill_bet_quote` liability deposits.
 pub const MM_COLLATERAL_TOKENS: u64 = 50_000_000_000_000;
 
 pub fn record_cu_success(name: &str, res: &InstructionResult) {
@@ -68,6 +71,16 @@ pub fn assert_program_err(res: &InstructionResult, expected: ProgramError) {
    }
 }
 
+/// Snapshot of lamports + SPL amount + raw data for failure-path accretion checks.
+#[derive(Clone)]
+pub struct AccountSnapshot {
+   pub key: Pubkey,
+   pub lamports: u64,
+   pub token_amount: Option<u64>,
+   pub data: Vec<u8>,
+   pub owner: Pubkey,
+}
+
 /// Assert a [`spamm_aggregator::errors::SpammError`] custom code.
 pub fn assert_spamm_err(res: &InstructionResult, err: spamm_aggregator::errors::SpammError) {
    assert_program_err(res, ProgramError::Custom(err as u32));
@@ -89,7 +102,15 @@ fn mm_so_path() -> PathBuf {
    newest_existing_path(&candidates).unwrap_or_else(|| deploy_dir().join("spamm_market_maker.so"))
 }
 
-/// Prefer the newest aggregator `.so` among workspace build outputs.
+fn adversarial_so_path() -> PathBuf {
+   let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+   let candidates = [
+      manifest.join("tests/adversarial_mm/target/deploy/spamm_adversarial_mm.so"),
+      manifest.join("tests/adversarial_mm/target/sbpfv3-solana-solana/release/spamm_adversarial_mm.so"),
+      manifest.join("target/deploy/spamm_adversarial_mm.so"),
+   ];
+   newest_existing_path(&candidates).unwrap_or_else(|| deploy_dir().join("spamm_adversarial_mm.so"))
+}
 fn agg_so_path() -> PathBuf {
    let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
    let candidates = [
@@ -156,22 +177,40 @@ impl Env {
             panic!("copy MM artifact {:?} -> {:?}: {}", mm_src, mm_deploy, e);
          });
       }
-      if !agg_so.exists() || !mm_deploy.exists() {
+      let adv_src = adversarial_so_path();
+      let adv_deploy = deploy.join("spamm_adversarial_mm.so");
+      if adv_src != adv_deploy && adv_src.exists() {
+         std::fs::copy(&adv_src, &adv_deploy).unwrap_or_else(|e| {
+            panic!("copy adversarial MM artifact {:?} -> {:?}: {}", adv_src, adv_deploy, e);
+         });
+      }
+      if !agg_so.exists() || !mm_deploy.exists() || !adv_deploy.exists() {
          panic!(
             "Missing SBF artifacts (Mollusk tests need compiled .so files; cargo check is not enough).\n\
              Expected aggregator:\n  {:?}\n\
              MM (after sync from {:?}):\n  {:?}\n\
-             From repo root, run both (pass `--features devnet` or `--features mainnet` for the aggregator):\n\
+             Adversarial MM:\n  {:?}\n\
+             From repo root, run:\n\
                cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet\n\
                cargo build-sbf --arch v3 --manifest-path market_maker/program/Cargo.toml\n\
+               cargo build-sbf --arch v3 --manifest-path aggregator/program/tests/adversarial_mm/Cargo.toml\n\
              Then: cd aggregator/program && cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --test-threads=1\n\
              See .cursor/rules/mollusk-tests.mdc",
-            agg_so, mm_src, mm_deploy
+            agg_so, mm_src, mm_deploy, adv_deploy
          );
       }
 
       let mut mollusk = Mollusk::new(&agg_program_id(), "spamm_aggregator");
       mollusk.add_program(&mm_program_id(), "spamm_market_maker");
+      for slot in 1..=EXTRA_MM_SLOTS {
+         let stem = format!("spamm_market_maker_alt_{slot}");
+         let alt_so = deploy.join(format!("{stem}.so"));
+         std::fs::copy(&mm_deploy, &alt_so).unwrap_or_else(|e| {
+            panic!("copy extra MM artifact {:?} -> {:?}: {}", mm_deploy, alt_so, e);
+         });
+         mollusk.add_program(&mm_alt_program_id(slot), &stem);
+      }
+      mollusk.add_program(&adversarial_mm_program_id(), "spamm_adversarial_mm");
       token::add_program(&mut mollusk);
       associated_token::add_program(&mut mollusk);
 
@@ -219,8 +258,17 @@ impl Env {
       if self.get_account(&mm_program_id()).is_none() {
          self.upsert(mm_program_id(), stub.clone());
       }
+      for slot in 1..=EXTRA_MM_SLOTS {
+         let pk = mm_alt_program_id(slot);
+         if self.get_account(&pk).is_none() {
+            self.upsert(pk, stub.clone());
+         }
+      }
       if self.get_account(&agg_program_id()).is_none() {
          self.upsert(agg_program_id(), stub.clone());
+      }
+      if self.get_account(&adversarial_mm_program_id()).is_none() {
+         self.upsert(adversarial_mm_program_id(), stub.clone());
       }
       let (ix_sysvar_pk, ix_sysvar_acct) =
          mollusk_svm::instructions_sysvar::keyed_account(core::iter::once(&ix));
@@ -254,9 +302,19 @@ impl Env {
    }
 
    pub fn mm_ix(&self, disc: u8, data: Vec<u8>, metas: Vec<AccountMeta>) -> Instruction {
+      self.mm_ix_for(mm_program_id(), disc, data, metas)
+   }
+
+   pub fn mm_ix_for(
+      &self,
+      program: Pubkey,
+      disc: u8,
+      data: Vec<u8>,
+      metas: Vec<AccountMeta>,
+   ) -> Instruction {
       let mut buf = vec![disc];
       buf.extend_from_slice(&data);
-      Instruction::new_with_bytes(mm_program_id(), &buf, metas)
+      Instruction::new_with_bytes(program, &buf, metas)
    }
 
    /// Minimal SPL + actors + mint + user ATA; aggregator `init_program` + unpause. No MM.
@@ -272,6 +330,7 @@ impl Env {
          (admin(), rich_signer_account()),
          (mm_admin(), rich_signer_account()),
          (user(), rich_signer_account()),
+         (user_b(), rich_signer_account()),
          (bet_feepayer(), rich_signer_account()),
          (wrong_signer(), rich_signer_account()),
       ];
@@ -297,6 +356,19 @@ impl Env {
          close_authority: COption::None,
       });
       self.upsert(user_ata_key, user_tok);
+
+      let user_b_ata = user_b_collateral_ata();
+      let user_b_tok = token::create_account_for_token_account(TokenAccount {
+         mint: mint_pubkey(),
+         owner: user_b(),
+         amount: USER_COLLATERAL_TOKENS,
+         delegate: COption::None,
+         state: AccountState::Initialized,
+         is_native: COption::None,
+         delegated_amount: 0,
+         close_authority: COption::None,
+      });
+      self.upsert(user_b_ata, user_b_tok);
 
       self.upsert(config_pda(), system_owned_empty());
       self.upsert(mm_list_pda(), system_owned_empty());
@@ -422,6 +494,7 @@ impl Env {
    /// After `register_mm`, fund user stake + MM collateral so `fill_bet` / `fill_parlay` can move tokens.
    pub fn seed_fill_token_balances(&mut self) {
       self.patch_spl_token_balance(user_collateral_ata(), USER_COLLATERAL_TOKENS);
+      self.patch_spl_token_balance(user_b_collateral_ata(), USER_COLLATERAL_TOKENS);
       self.patch_spl_token_balance(mm_collateral_ata(), MM_COLLATERAL_TOKENS);
    }
 
@@ -527,5 +600,397 @@ impl Env {
       );
       zc.sequence.set(sequence);
       self.upsert(pk, acct);
+   }
+
+   pub fn snapshot_accounts(&self, keys: &[Pubkey]) -> Vec<AccountSnapshot> {
+      keys
+         .iter()
+         .map(|key| {
+            let acct = self
+               .get_account(key)
+               .unwrap_or_else(|| panic!("snapshot missing {key}"))
+               .clone();
+            let token_amount = if acct.data.len() >= TokenAccount::LEN {
+               TokenAccount::unpack_from_slice(&acct.data).ok().map(|t| t.amount)
+            } else {
+               None
+            };
+            AccountSnapshot {
+               key: *key,
+               lamports: acct.lamports,
+               token_amount,
+               data: acct.data,
+               owner: acct.owner,
+            }
+         })
+         .collect()
+   }
+
+   pub fn assert_accounts_unchanged(&self, snap: &[AccountSnapshot]) {
+      for s in snap {
+         let acct = self
+            .get_account(&s.key)
+            .unwrap_or_else(|| panic!("missing after fail {}", s.key));
+         assert_eq!(acct.lamports, s.lamports, "lamports changed {}", s.key);
+         assert_eq!(acct.owner, s.owner, "owner changed {}", s.key);
+         assert_eq!(acct.data, s.data, "data changed {}", s.key);
+         if let Some(want) = s.token_amount {
+            let got = if acct.data.len() >= spl_token_interface::state::Account::LEN {
+               TokenAccount::unpack_from_slice(&acct.data)
+                  .map(|t| t.amount)
+                  .unwrap_or(want)
+            } else {
+               want
+            };
+            assert_eq!(got, want, "token amount changed {}", s.key);
+         }
+      }
+   }
+
+   /// Rewrite market-data oracle odds starting at byte 6 (`init_market` layout).
+   pub fn patch_market_odds(&mut self, keys: &MmKeys, mid: &MarketId, body: &[u8]) {
+      let pk = keys.market_data(mid);
+      let mut acct = self
+         .get_account(&pk)
+         .unwrap_or_else(|| panic!("patch_market_odds missing {pk}"))
+         .clone();
+      assert!(acct.data.len() >= 6 + body.len(), "market data too short");
+      acct.data[6..6 + body.len()].copy_from_slice(body);
+      self.upsert(pk, acct);
+   }
+
+   pub fn prepare_mm_keys(&mut self, keys: &MmKeys, markets: &[(MarketId, &[u8])]) {
+      let sys_pk = keyed_account_for_system_program().0;
+      let tok_pk = token::ID;
+      let ata_pk = associated_token::ID;
+
+      self.upsert(keys.admin, rich_signer_account());
+      self.upsert(keys.config, system_owned_empty());
+      self.upsert(keys.quote_buf, system_owned_empty());
+      self.upsert(keys.parlay_buf, system_owned_empty());
+      let mm_tok_ata = keys.collateral_ata();
+      self.upsert(mm_tok_ata, system_owned_empty());
+
+      let mut admin_bytes = [0u8; ADDRESS_LEN];
+      admin_bytes.copy_from_slice(keys.admin.as_ref());
+      let mut mm_init_data = Vec::with_capacity(2 * ADDRESS_LEN);
+      mm_init_data.extend_from_slice(&admin_bytes);
+      mm_init_data.extend_from_slice(super::rfq::rfq_signer_pubkey().as_ref());
+      let mm_init = self.mm_ix_for(
+         keys.program_id,
+         100,
+         mm_init_data,
+         vec![
+            AccountMeta::new(keys.admin, true),
+            AccountMeta::new(keys.config, false),
+            AccountMeta::new(keys.quote_buf, false),
+            AccountMeta::new(keys.parlay_buf, false),
+            AccountMeta::new(mm_tok_ata, false),
+            AccountMeta::new_readonly(mint_pubkey(), false),
+            AccountMeta::new_readonly(tok_pk, false),
+            AccountMeta::new_readonly(ata_pk, false),
+            AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
+            AccountMeta::new_readonly(sys_pk, false),
+         ],
+      );
+      let r = self.run_ix(mm_init);
+      assert!(r.program_result.is_ok(), "mm init_program {:?}", r);
+
+      if keys.slot != 0 {
+         self.clone_oracle_accounts_from_default(keys, markets);
+         return;
+      }
+
+      let mut seen_events = std::collections::HashSet::new();
+      for (mid, _body) in markets {
+         let eid = mid.event_id;
+         let key = (eid.event, eid.league, eid.sport as u8);
+         if seen_events.insert(key) {
+            let es = keys.event_state(&eid);
+            self.upsert(es, system_owned_empty());
+            let ev_wire = eid.as_wire_bytes().to_vec();
+            let ev_ix = self.mm_ix_for(
+               keys.program_id,
+               110,
+               ev_wire,
+               vec![
+                  AccountMeta::new(keys.admin, true),
+                  AccountMeta::new_readonly(keys.config, false),
+                  AccountMeta::new(es, false),
+                  AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
+                  AccountMeta::new_readonly(sys_pk, false),
+               ],
+            );
+            let re = self.run_ix(ev_ix);
+            assert!(re.program_result.is_ok(), "mm init_event {:?}", re);
+            self.patch_event_state_sequence_at(keys, &eid, 1);
+         }
+      }
+
+      for (mid, oracle_body) in markets {
+         let md = keys.market_data(mid);
+         self.upsert(md, system_owned_empty());
+         let mut data = Vec::with_capacity(MarketId::WIRE_SIZE + oracle_body.len());
+         data.extend_from_slice(&market_id_wire_bytes(mid));
+         data.extend_from_slice(oracle_body);
+         let m_ix = self.mm_ix_for(
+            keys.program_id,
+            111,
+            data,
+            vec![
+               AccountMeta::new(keys.admin, true),
+               AccountMeta::new_readonly(keys.config, false),
+               AccountMeta::new(md, false),
+               AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
+               AccountMeta::new_readonly(sys_pk, false),
+            ],
+         );
+         let rm = self.run_ix(m_ix);
+         assert!(rm.program_result.is_ok(), "mm init_market {:?}", rm);
+      }
+   }
+
+   /// Copy event/market PDA bytes from the default example MM and rewrite bumps/owner
+   /// for `keys`. Extra MM copies load the same ELF under a different program id; CPI
+   /// `init_event` then fails `InvalidSeeds` because the on-chain PDA check uses the
+   /// runtime `program_id` while the CreateAccount signer seeds still have to match
+   /// that copy. Cloning after a successful `init_program` is enough for quote/fill.
+   fn clone_oracle_accounts_from_default(
+      &mut self,
+      keys: &MmKeys,
+      markets: &[(MarketId, &[u8])],
+   ) {
+      use spamm_aggregator::state::other::MM_MARKET_DATA_PDA_BUMP_OFFSET;
+      use spamm_aggregator::state::EVENT_STATE_BUMP_OFFSET;
+      let honest = MmKeys::default_mm();
+      let mut seen = std::collections::HashSet::new();
+      for (mid, oracle_body) in markets {
+         let eid = mid.event_id;
+         let key = (eid.event, eid.league, eid.sport as u8);
+         if seen.insert(key) {
+            let e_wire = eid.as_wire_bytes();
+            let (es_pk, es_bump) =
+               Pubkey::find_program_address(&[b"event_state", e_wire.as_slice()], &keys.program_id);
+            let mut es_data = self
+               .get_account(&honest.event_state(&eid))
+               .expect("bootstrap default MM before extra MM copies")
+               .data
+               .clone();
+            es_data[EVENT_STATE_BUMP_OFFSET] = es_bump;
+            self.upsert(
+               es_pk,
+               Account {
+                  lamports: 10_000_000,
+                  data: es_data,
+                  owner: keys.program_id,
+                  executable: false,
+                  rent_epoch: 0,
+               },
+            );
+         }
+         let (md_pk, md_bump) = {
+            let w = market_id_wire_bytes(mid);
+            let (body, operator) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
+            Pubkey::find_program_address(&[b"market_data", body, operator], &keys.program_id)
+         };
+         let mut md = self
+            .get_account(&honest.market_data(mid))
+            .expect("bootstrap default MM before extra MM copies")
+            .data
+            .clone();
+         md[MM_MARKET_DATA_PDA_BUMP_OFFSET] = md_bump;
+         if md.len() >= 6 + oracle_body.len() {
+            md[6..6 + oracle_body.len()].copy_from_slice(oracle_body);
+         }
+         self.upsert(
+            md_pk,
+            Account {
+               lamports: 10_000_000,
+               data: md,
+               owner: keys.program_id,
+               executable: false,
+               rent_epoch: 0,
+            },
+         );
+      }
+   }
+
+   pub fn patch_event_state_sequence_at(&mut self, keys: &MmKeys, eid: &EventId, sequence: u16) {
+      let pk = keys.event_state(eid);
+      let mut acct = self
+         .get_account(&pk)
+         .unwrap_or_else(|| panic!("patch_event_state_sequence: missing event state {pk}"))
+         .clone();
+      if acct.data.len() < EVENT_STATE_HEADER_LEN {
+         panic!(
+            "patch_event_state_sequence: event_state len {} < header {}",
+            acct.data.len(),
+            EVENT_STATE_HEADER_LEN
+         );
+      }
+      let header = &mut acct.data[..EVENT_STATE_HEADER_LEN];
+      let zc = <EventStateData as ZeroPodFixed>::from_bytes_mut(header).unwrap_or_else(
+         |e| panic!("patch_event_state_sequence: invalid event_state wire {e:?}"),
+      );
+      zc.sequence.set(sequence);
+      self.upsert(pk, acct);
+   }
+
+   pub fn register_mm_metas_for(keys: &MmKeys) -> Vec<AccountMeta> {
+      let sys_pk = keyed_account_for_system_program().0;
+      vec![
+         AccountMeta::new(keys.admin, true),
+         AccountMeta::new_readonly(keys.program_id, false),
+         AccountMeta::new_readonly(keys.config, false),
+         AccountMeta::new(keys.encumbrance(), false),
+         AccountMeta::new(keys.liability_ata(), false),
+         AccountMeta::new_readonly(config_pda(), false),
+         AccountMeta::new(mm_list_pda(), false),
+         AccountMeta::new_readonly(mint_pubkey(), false),
+         AccountMeta::new_readonly(token::ID, false),
+         AccountMeta::new_readonly(associated_token::ID, false),
+         AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
+         AccountMeta::new_readonly(sys_pk, false),
+         AccountMeta::new_readonly(keys.collateral_ata(), false),
+         AccountMeta::new_readonly(keys.quote_buf, false),
+         AccountMeta::new_readonly(keys.parlay_buf, false),
+      ]
+   }
+
+   pub fn register_mm_execute_for(&mut self, keys: &MmKeys) -> InstructionResult {
+      self.upsert(keys.encumbrance(), system_owned_empty());
+      self.upsert(keys.liability_ata(), system_owned_empty());
+      let reg = self.agg_ix(2, vec![], Self::register_mm_metas_for(keys));
+      self.run_ix(reg)
+   }
+
+   /// Init + register an extra copy of the example MM (aggregator already bootstrapped).
+   pub fn bootstrap_extra_mm(&mut self, keys: &MmKeys, markets: &[(MarketId, &[u8])]) {
+      self.prepare_mm_keys(keys, markets);
+      let rr = self.register_mm_execute_for(keys);
+      assert!(rr.program_result.is_ok(), "register extra mm {:?}", rr);
+      self.patch_spl_token_balance(keys.collateral_ata(), MM_COLLATERAL_TOKENS);
+   }
+
+   /// Fabricate config / buffers / oracle PDAs for the adversarial MM, then register.
+   /// Copies layout from the already-bootstrapped example MM (call `bootstrap_*` first).
+   pub fn bootstrap_adversarial_mm(&mut self, markets: &[(MarketId, &[u8])]) {
+      use spamm_aggregator::state::mm_account_config::{
+         MM_ACCOUNT_CONFIG_DISCRIMINATOR, MM_CONFIG_PDA_ADMIN_OFFSET, MM_CONFIG_PDA_BUMP_OFFSET,
+      };
+      use spamm_aggregator::state::other::MM_MARKET_DATA_PDA_BUMP_OFFSET;
+      use spamm_aggregator::state::{
+         MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR, MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_DISCRIMINATOR,
+         MM_QUOTE_BUFFER_LEN, EVENT_STATE_BUMP_OFFSET,
+      };
+      let keys = MmKeys::adversarial();
+      let honest = MmKeys::default_mm();
+      self.upsert(keys.admin, rich_signer_account());
+      let (cfg_pk, cfg_bump) = Pubkey::find_program_address(&[b"config"], &keys.program_id);
+      assert_eq!(cfg_pk, keys.config);
+      let mut cfg_data = self
+         .get_account(&honest.config)
+         .expect("bootstrap example MM before adversarial")
+         .data
+         .clone();
+      cfg_data[0] = MM_ACCOUNT_CONFIG_DISCRIMINATOR;
+      cfg_data[MM_CONFIG_PDA_BUMP_OFFSET] = cfg_bump;
+      let admin_off = MM_CONFIG_PDA_ADMIN_OFFSET;
+      cfg_data[admin_off..admin_off + 32].copy_from_slice(keys.admin.as_ref());
+      self.upsert(
+         keys.config,
+         Account {
+            lamports: 10_000_000,
+            data: cfg_data,
+            owner: keys.program_id,
+            executable: false,
+            rent_epoch: 0,
+         },
+      );
+      let mut q = vec![0u8; MM_QUOTE_BUFFER_LEN];
+      q[0] = MM_QUOTE_BUFFER_DISCRIMINATOR;
+      self.upsert(
+         keys.quote_buf,
+         Account {
+            lamports: 10_000_000,
+            data: q,
+            owner: keys.program_id,
+            executable: false,
+            rent_epoch: 0,
+         },
+      );
+      let mut p = vec![0u8; MM_PARLAY_QUOTE_BUFFER_LEN];
+      p[0] = MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR;
+      self.upsert(
+         keys.parlay_buf,
+         Account {
+            lamports: 10_000_000,
+            data: p,
+            owner: keys.program_id,
+            executable: false,
+            rent_epoch: 0,
+         },
+      );
+      let tok = token::create_account_for_token_account(TokenAccount {
+         mint: mint_pubkey(),
+         owner: keys.config,
+         amount: MM_COLLATERAL_TOKENS,
+         delegate: COption::None,
+         state: AccountState::Initialized,
+         is_native: COption::None,
+         delegated_amount: 0,
+         close_authority: COption::None,
+      });
+      self.upsert(keys.collateral_ata(), tok);
+
+      let mut seen = std::collections::HashSet::new();
+      for (mid, _) in markets {
+         let eid = mid.event_id;
+         let key = (eid.event, eid.league, eid.sport as u8);
+         if seen.insert(key) {
+            let e_wire = eid.as_wire_bytes();
+            let (es_pk, es_bump) =
+               Pubkey::find_program_address(&[b"event_state", e_wire.as_slice()], &keys.program_id);
+            let mut es_data = self
+               .get_account(&honest.event_state(&eid))
+               .expect("honest event_state")
+               .data
+               .clone();
+            es_data[EVENT_STATE_BUMP_OFFSET] = es_bump;
+            self.upsert(
+               es_pk,
+               Account {
+                  lamports: 10_000_000,
+                  data: es_data,
+                  owner: keys.program_id,
+                  executable: false,
+                  rent_epoch: 0,
+               },
+            );
+         }
+         let (md_pk, md_bump) = {
+            let w = market_id_wire_bytes(mid);
+            let (body, operator) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
+            Pubkey::find_program_address(&[b"market_data", body, operator], &keys.program_id)
+         };
+         let mut md = self
+            .get_account(&honest.market_data(mid))
+            .expect("honest market_data")
+            .data
+            .clone();
+         md[MM_MARKET_DATA_PDA_BUMP_OFFSET] = md_bump;
+         self.upsert(
+            md_pk,
+            Account {
+               lamports: 10_000_000,
+               data: md,
+               owner: keys.program_id,
+               executable: false,
+               rent_epoch: 0,
+            },
+         );
+      }
+      let rr = self.register_mm_execute_for(&keys);
+      assert!(rr.program_result.is_ok(), "register adversarial mm {:?}", rr);
    }
 }

@@ -6,7 +6,8 @@ use pinocchio::{
 };
 use pinocchio_token::instructions::Transfer;
 
-use crate::constants::MM_CONFIG_PDA;
+use pinocchio::Address;
+
 use spamm_aggregator::{
    readers::read_u8_unchecked,
    state::{
@@ -22,12 +23,13 @@ pub fn transfer_mm_config_signed(
    to: &AccountView,
    amount: u64,
 ) -> ProgramResult {
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
+   let bump = unsafe { read_u8_unchecked(mm_config_pda.data_ptr(), MM_CONFIG_PDA_BUMP_OFFSET) };
+   let expected = Address::derive_address(&[MM_ACCOUNT_CONFIG_SEED], Some(bump), mm_config_pda.owner());
+   if unlikely(!address_eq(mm_config_pda.address(), &expected)) {
       return Err(ProgramError::InvalidSeeds);
    }
    if likely(amount > 0) {
-      let config_bump = unsafe { read_u8_unchecked(mm_config_pda.data_ptr(), MM_CONFIG_PDA_BUMP_OFFSET) };
-      let bump_ref = [config_bump];
+      let bump_ref = [bump];
       let signer_seeds = [
          Seed::from(MM_ACCOUNT_CONFIG_SEED),
          Seed::from(&bump_ref as &[u8]),

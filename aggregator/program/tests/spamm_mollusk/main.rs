@@ -1,8 +1,9 @@
 ﻿//! Mollusk SBF integration tests for `spamm_aggregator`.
 //!
-//! **Requires two `cargo build-sbf --arch v3` artifacts** (see `.cursor/rules/mollusk-tests.mdc`):
+//! **Requires three `cargo build-sbf --arch v3` artifacts** (see `.cursor/rules/mollusk-tests.mdc`):
 //! - `aggregator/program/target/deploy/spamm_aggregator.so`
-//! - `market_maker/program/target/deploy/spamm_market_maker.so` (copied into aggregator deploy dir by `Env::new`)
+//! - `market_maker/program/target/deploy/spamm_market_maker.so` (copied into aggregator deploy dir by `Env::new`; also loaded under extra program ids)
+//! - `aggregator/program/tests/adversarial_mm/target/deploy/spamm_adversarial_mm.so`
 //!
 //! `cargo check` and `cargo test` without `--features test-sbf` do **not** run these tests.
 //!
@@ -48,3 +49,6 @@ mod ix_settle_freebet;
 mod ix_settle_freebet_parlay;
 mod ix_settle_parlay;
 mod ix_withdraw;
+mod ix_account_budget;
+mod ix_business_rules;
+mod ix_adversarial;

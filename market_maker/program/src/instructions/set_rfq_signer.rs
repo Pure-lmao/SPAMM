@@ -18,14 +18,14 @@ use spamm_aggregator::{
 
 pub const SET_RFQ_SIGNER_IX_DISCRIMINATOR: u8 = 101;
 
-pub fn process(_program_id: &pinocchio::Address, accounts: &mut [AccountView]) -> ProgramResult {
+pub fn process(program_id: &pinocchio::Address, accounts: &mut [AccountView]) -> ProgramResult {
    let [admin, config_pda, rfq_signer] = accounts else {
       log!("set_rfq_signer: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
    verify_signer(admin)?;
-   verify_mm_config_auth(admin, config_pda)?;
+   verify_mm_config_auth(admin, config_pda, program_id)?;
 
    if unlikely(config_pda.data_len() < MM_CONFIG_PDA_RFQ_SIGNER_OFFSET + ADDRESS_LEN) {
       return Err(ProgramError::InvalidAccountData);

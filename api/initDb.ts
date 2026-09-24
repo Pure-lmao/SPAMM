@@ -133,7 +133,18 @@ const leagues: DbLeague[] = [
       country_name: "United States",
       abbr: "NFL",
       api_id: "nfl",
-   }
+   },
+   {
+      id: Number(`${5}${1}${901}`),
+      name: "UEFA Nations League",
+      sport_id: 1,
+      country_rank: 5,
+      variation: 1,
+      country_code: "901",
+      country_name: "Europe",
+      abbr: "UNL",
+      api_id: "uefa.nations",
+   },
 ];
 
 // initLocalDb()

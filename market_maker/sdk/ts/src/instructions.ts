@@ -2,29 +2,29 @@ import { AccountRole, type Instruction } from '@solana/instructions';
 import type { Address } from '@solana/kit';
 
 import {
+   AGGREGATOR_CONFIG_PDA,
    CLOCK_ID,
    MINT_ID,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    SPL_TOKEN_PROGRAM_ID,
-   SYSVAR_INSTRUCTIONS_ID,
    SYSVAR_RENT_ID,
    SYSTEM_PROGRAM_ID,
 } from './constants.js';
 import {
    encodeFillCashoutQuoteIxData,
-   encodeFillCashoutQuoteParlayIxData,
+   encodeFillCashoutParlayQuoteIxData,
    encodeFillParlayQuoteIxData,
-   encodeFillQuoteIxData,
+   encodeFillBetQuoteIxData,
    encodeGetCashoutQuoteIxData,
    encodeGetCashoutQuoteParlayIxData,
    encodeGetQuoteIxData,
    encodeGetQuoteParlayIxData,
    encodeMarketMakerInstructionData,
    FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR,
-   FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
    FILL_CASHOUT_RFQ_IX_DISCRIMINATOR,
-   FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR,
-   FILL_QUOTE_IX_DISCRIMINATOR,
+   FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR,
+   FILL_BET_QUOTE_IX_DISCRIMINATOR,
    FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
    GET_CASHOUT_QUOTE_IX_DISCRIMINATOR,
    GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
@@ -47,9 +47,9 @@ import type {
    EventGameState,
    EventId,
    FillCashoutQuoteIxData,
-   FillCashoutQuoteParlayIxData,
+   FillCashoutParlayQuoteIxData,
    FillParlayQuoteIxData,
-   FillQuoteIxData,
+   FillBetQuoteIxData,
    FillRfqIxData,
    GetCashoutQuoteIxData,
    GetCashoutQuoteParlayIxData,
@@ -62,13 +62,13 @@ import {
    validateEventGameState,
    validateEventId,
    validateFillParlayQuoteIxData,
-   validateFillQuoteIxData,
+   validateFillBetQuoteIxData,
    validateGetQuoteIxData,
    validateGetQuoteParlayIxData,
    validateGetCashoutQuoteIxData,
    validateFillCashoutQuoteIxData,
    validateGetCashoutQuoteParlayIxData,
-   validateFillCashoutQuoteParlayIxData,
+   validateFillCashoutParlayQuoteIxData,
    validateMarketId,
    validateOdds,
    validateU16,
@@ -114,6 +114,7 @@ export type MmGetQuoteParlay = {
 };
 
 const ro = (address: Address) => ({ address, role: AccountRole.READONLY });
+const rs = (address: Address) => ({ address, role: AccountRole.READONLY_SIGNER });
 const rw = (address: Address) => ({ address, role: AccountRole.WRITABLE });
 const ws = (address: Address) => ({ address, role: AccountRole.WRITABLE_SIGNER });
 
@@ -186,6 +187,7 @@ export async function getMmFillBetRfqIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(AGGREGATOR_CONFIG_PDA),
          rw(marketDataPda),
          rw(eventStatePda),
          rw(configPda),
@@ -193,7 +195,6 @@ export async function getMmFillBetRfqIx(
          rw(liabilityAta),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: encodeMarketMakerInstructionData({ kind: 'fillBetRfq', data }),
    };
@@ -217,12 +218,12 @@ export async function getMmFillParlayRfqIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(AGGREGATOR_CONFIG_PDA),
          rw(configPda),
          rw(mmTokenAta),
          rw(liabilityAta),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: encodeMarketMakerInstructionData({ kind: 'fillParlayRfq', data }),
    };
@@ -460,35 +461,35 @@ export async function getMmFillParlayQuoteIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(AGGREGATOR_CONFIG_PDA),
          rw(mmConfigPda),
          rw(mmParlayQuoteBufferPda),
          rw(mmTokenAta),
          rw(liabilityAta),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: ixData,
    };
 }
 
 /**
- * **`fill_quote`** — consume quote buffer (aggregator CPI order). **`liabilityAta`** is the MM liability vault ATA.
+ * **`fill_bet_quote`** — consume quote buffer (aggregator CPI order). **`liabilityAta`** is the MM liability vault ATA.
  *
- * **Rust:** `fill_quote::process` (`FILL_QUOTE_IX_DISCRIMINATOR` = 121).
+ * **Rust:** `fill_bet_quote::process` (`FILL_BET_QUOTE_IX_DISCRIMINATOR` = 121).
  */
-export async function getMmFillQuoteIx(
-   params: Omit<FillQuoteIxData, 'instructionDiscriminator'>,
+export async function getMmFillBetQuoteIx(
+   params: Omit<FillBetQuoteIxData, 'instructionDiscriminator'>,
    mmProgram: Address,
    user: Address,
    liabilityAta: Address,
 ): Promise<Instruction> {
-   const full: FillQuoteIxData = {
-      instructionDiscriminator: FILL_QUOTE_IX_DISCRIMINATOR,
+   const full: FillBetQuoteIxData = {
+      instructionDiscriminator: FILL_BET_QUOTE_IX_DISCRIMINATOR,
       ...params,
    };
-   validateFillQuoteIxData(full, 'fill');
-   const ixData = encodeFillQuoteIxData(full);
+   validateFillBetQuoteIxData(full, 'fill');
+   const ixData = encodeFillBetQuoteIxData(full);
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, params.marketId);
    const [eventStatePda] = await getEventStatePda(mmProgram, params.marketId.eventId);
@@ -498,6 +499,7 @@ export async function getMmFillQuoteIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(AGGREGATOR_CONFIG_PDA),
          rw(marketDataPda),
          rw(eventStatePda),
          rw(mmConfigPda),
@@ -506,7 +508,6 @@ export async function getMmFillQuoteIx(
          rw(liabilityAta),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: ixData,
    };
@@ -572,6 +573,7 @@ export async function getMmFillCashoutQuoteIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(AGGREGATOR_CONFIG_PDA),
          rw(marketDataPda),
          rw(eventStatePda),
          rw(mmConfigPda),
@@ -580,7 +582,6 @@ export async function getMmFillCashoutQuoteIx(
          rw(paymentDest),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: ixData,
    };
@@ -623,22 +624,22 @@ export async function getMmGetCashoutQuoteParlayIx(
 }
 
 /**
- * **`fill_cashout_quote_parlay`** — transfer `amountToSend` from MM ATA to payment dest; set parlay quote buffer `is_used`.
+ * **`fill_cashout_parlay_quote`** — transfer `amountToSend` from MM ATA to payment dest; set parlay quote buffer `is_used`.
  *
- * **Rust:** `fill_cashout_quote_parlay::process` (`FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR` = 143).
+ * **Rust:** `fill_cashout_parlay_quote::process` (`FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR` = 143).
  */
-export async function getMmFillCashoutQuoteParlayIx(
-   params: Omit<FillCashoutQuoteParlayIxData, 'instructionDiscriminator'>,
+export async function getMmFillCashoutParlayQuoteIx(
+   params: Omit<FillCashoutParlayQuoteIxData, 'instructionDiscriminator'>,
    mmProgram: Address,
    user: Address,
    paymentDest: Address,
 ): Promise<Instruction> {
-   const full: FillCashoutQuoteParlayIxData = {
-      instructionDiscriminator: FILL_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+   const full: FillCashoutParlayQuoteIxData = {
+      instructionDiscriminator: FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
       ...params,
    };
-   validateFillCashoutQuoteParlayIxData(full);
-   const ixData = encodeFillCashoutQuoteParlayIxData(full);
+   validateFillCashoutParlayQuoteIxData(full);
+   const ixData = encodeFillCashoutParlayQuoteIxData(full);
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
    const mmTokenAta = await getAta(mmConfigPda);
@@ -646,13 +647,13 @@ export async function getMmFillCashoutQuoteParlayIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(AGGREGATOR_CONFIG_PDA),
          rw(mmConfigPda),
          rw(mmParlayQuoteBufferPda),
          rw(mmTokenAta),
          rw(paymentDest),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: ixData,
    };
@@ -682,6 +683,7 @@ export async function getMmFillCashoutRfqIx(
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(AGGREGATOR_CONFIG_PDA),
          rw(marketDataPda),
          rw(eventStatePda),
          rw(configPda),
@@ -689,18 +691,17 @@ export async function getMmFillCashoutRfqIx(
          rw(paymentDest),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
       data: encodeMarketMakerInstructionData({ kind: 'fillCashoutRfq', data }),
    };
 }
 
 /**
- * **`fill_parlay_cashout_rfq`** — transfer `amountToSend` from MM ATA to payment dest (aggregator CPI order).
+ * **`fill_cashout_parlay_rfq`** — transfer `amountToSend` from MM ATA to payment dest (aggregator CPI order).
  *
- * **Rust:** `fill_parlay_cashout_rfq::process` (`FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR` = 145).
+ * **Rust:** `fill_cashout_parlay_rfq::process` (`FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR` = 145).
  */
-export async function getMmFillParlayCashoutRfqIx(
+export async function getMmFillCashoutParlayRfqIx(
    user: Address,
    mmProgram: Address,
    amountToSend: bigint,
@@ -709,21 +710,21 @@ export async function getMmFillParlayCashoutRfqIx(
    const [configPda] = await getMmConfigPda(mmProgram);
    const mmTokenAta = await getAta(configPda);
    const data: FillRfqIxData = {
-      instructionDiscriminator: FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR,
+      instructionDiscriminator: FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR,
       amountToSend,
    };
    return {
       programAddress: mmProgram,
       accounts: [
          ro(user),
+         rs(AGGREGATOR_CONFIG_PDA),
          rw(configPda),
          rw(mmTokenAta),
          rw(paymentDest),
          ro(MINT_ID),
          ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SYSVAR_INSTRUCTIONS_ID),
       ],
-      data: encodeMarketMakerInstructionData({ kind: 'fillParlayCashoutRfq', data }),
+      data: encodeMarketMakerInstructionData({ kind: 'fillCashoutParlayRfq', data }),
    };
 }
 
@@ -783,8 +784,8 @@ export type MarketMakerInstructionInput =
    | { kind: 'getQuote'; quote: MmGetQuote; mmProgram: Address; user: Address }
    | { kind: 'getQuoteParlay'; quote: MmGetQuoteParlay; mmProgram: Address; user: Address }
    | {
-        kind: 'fillQuote';
-        params: Omit<FillQuoteIxData, 'instructionDiscriminator'>;
+        kind: 'fillBetQuote';
+        params: Omit<FillBetQuoteIxData, 'instructionDiscriminator'>;
         mmProgram: Address;
         user: Address;
         liabilityAta: Address;
@@ -816,8 +817,8 @@ export type MarketMakerInstructionInput =
         user: Address;
      }
    | {
-        kind: 'fillCashoutQuoteParlay';
-        params: Omit<FillCashoutQuoteParlayIxData, 'instructionDiscriminator'>;
+        kind: 'fillCashoutParlayQuote';
+        params: Omit<FillCashoutParlayQuoteIxData, 'instructionDiscriminator'>;
         mmProgram: Address;
         user: Address;
         paymentDest: Address;
@@ -831,7 +832,7 @@ export type MarketMakerInstructionInput =
         paymentDest: Address;
      }
    | {
-        kind: 'fillParlayCashoutRfq';
+        kind: 'fillCashoutParlayRfq';
         user: Address;
         mmProgram: Address;
         amountToSend: bigint;
@@ -879,8 +880,8 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
          return getMmGetQuoteIx(input.quote, input.mmProgram, input.user);
       case 'getQuoteParlay':
          return getMmGetQuoteParlayIx(input.quote, input.mmProgram, input.user);
-      case 'fillQuote':
-         return getMmFillQuoteIx(input.params, input.mmProgram, input.user, input.liabilityAta);
+      case 'fillBetQuote':
+         return getMmFillBetQuoteIx(input.params, input.mmProgram, input.user, input.liabilityAta);
       case 'fillParlayQuote':
          return getMmFillParlayQuoteIx(input.params, input.mmProgram, input.user, input.liabilityAta);
       case 'getCashoutQuote':
@@ -889,8 +890,8 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
          return getMmFillCashoutQuoteIx(input.params, input.mmProgram, input.user, input.paymentDest);
       case 'getCashoutQuoteParlay':
          return getMmGetCashoutQuoteParlayIx(input.params, input.mmProgram, input.user);
-      case 'fillCashoutQuoteParlay':
-         return getMmFillCashoutQuoteParlayIx(input.params, input.mmProgram, input.user, input.paymentDest);
+      case 'fillCashoutParlayQuote':
+         return getMmFillCashoutParlayQuoteIx(input.params, input.mmProgram, input.user, input.paymentDest);
       case 'fillCashoutRfq':
          return getMmFillCashoutRfqIx(
             input.user,
@@ -899,8 +900,8 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
             input.amountToSend,
             input.paymentDest,
          );
-      case 'fillParlayCashoutRfq':
-         return getMmFillParlayCashoutRfqIx(
+      case 'fillCashoutParlayRfq':
+         return getMmFillCashoutParlayRfqIx(
             input.user,
             input.mmProgram,
             input.amountToSend,

@@ -1,8 +1,8 @@
 //! RFQ cashout of a single bet.
 //!
-//! Accounts: **18** then **7** MM accounts.
+//! Accounts: **17** then **7** MM accounts.
 //!
-//! **Fixed (18)**
+//! **Fixed (17)**
 //! 0. `feepayer` (writable signer)
 //! 1. `ticket_feepayer` (writable) — original ticket `feepayer`; rent dest on full pregame close
 //! 2. `user` (readonly signer)
@@ -19,8 +19,7 @@
 //! 13. `associated_token_program` (readonly)
 //! 14. `rent_sysvar` (readonly)
 //! 15. `system_program` (readonly)
-//! 16. `instructions_sysvar` (readonly)
-//! 17. `clock_sysvar` (readonly)
+//! 16. `clock_sysvar` (readonly)
 //!
 //! **MM (7)**
 //! 0. `mm_program` (readonly)
@@ -34,7 +33,7 @@
 use core::mem::MaybeUninit;
 
 use pinocchio::{
-   AccountView, ProgramResult, address::address_eq, cpi::invoke,
+   AccountView, ProgramResult, address::address_eq, cpi::{Signer, invoke_signed},
    error::ProgramError, hint::unlikely, instruction::{InstructionAccount, InstructionView},
 };
 use pinocchio_log::log;
@@ -50,7 +49,7 @@ use crate::{
       },
       freebet_helpers::require_not_freebet, verify_bet_pda,
    }, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
-      BetAccountData, FILL_CASHOUT_RFQ_IX_DISCRIMINATOR, FillRfqCashoutIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, RFQ_CASHOUT_MESSAGE_LEN, account_bet::{BetFiller, BetResult}, build_rfq_cashout_message,
+      BetAccountData, FILL_CASHOUT_RFQ_IX_DISCRIMINATOR, FillRfqCashoutIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, RFQ_CASHOUT_MESSAGE_LEN, account_bet::{BetFiller, BetResult}, build_rfq_cashout_message, other::config_signer_seeds,
    },
 };
 
@@ -75,7 +74,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       mm_program,
       mm_config,
@@ -100,7 +98,6 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       associated_token_program,
       rent_sysvar,
       system_program,
-      instructions_sysvar,
       clock_sysvar,
       "fill_rfq_cashout",
    )?;
@@ -228,6 +225,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       cpi.write_wire(&mut cpi_buf)?;
       let metas = [
          InstructionAccount::new(user.address(), false, false),
+         InstructionAccount::new(config_pda.address(), false, true),
          InstructionAccount::new(mm_market.address(), true, false),
          InstructionAccount::new(mm_event.address(), true, false),
          InstructionAccount::new(mm_config.address(), false, false),
@@ -235,9 +233,9 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          InstructionAccount::new(payment_dest.address(), true, false),
          InstructionAccount::new(mint.address(), false, false),
          InstructionAccount::new(token_program.address(), false, false),
-         InstructionAccount::new(instructions_sysvar.address(), false, false),
       ];
-      invoke(
+      let seeds = config_signer_seeds();
+      invoke_signed(
          &InstructionView {
             program_id: mm_program.address(),
             accounts: &metas,
@@ -245,6 +243,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          },
          &[
             user.as_ref(),
+            config_pda.as_ref(),
             mm_market.as_ref(),
             mm_event.as_ref(),
             mm_config.as_ref(),
@@ -252,8 +251,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
             payment_dest.as_ref(),
             mint.as_ref(),
             token_program.as_ref(),
-            instructions_sysvar.as_ref(),
          ],
+         &[Signer::from(&seeds)],
       )?;
       finish_cashout_single(
          feepayer,

@@ -11,12 +11,11 @@
 //! Return data: 8-byte LE `max_payment` (0 = no quote).
 //! Quote buffer `odds_scaled` is 0 — cashout fill matcher does not check odds.
 
-use pinocchio::{AccountView, Address, address::address_eq, hint::unlikely};
+use pinocchio::{AccountView, Address, hint::unlikely};
 
 use crate::{
-   constants::{MM_CONFIG_PDA, QUOTE_BUFFER_PDA},
    instructions::quote_helpers::{odds_from_market_data_body, set_cashout_return, validate_quote_leg_context},
-   mm_helpers::{mm_market_data_pda_ok, verify_event_state},
+   mm_helpers::{mm_config_address_ok, mm_market_data_pda_ok, quote_buffer_address_ok, verify_event_state},
    state::GetCashoutQuoteIxPayload,
 };
 use spamm_aggregator::{
@@ -49,11 +48,11 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       }
    };
 
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
+   if unlikely(!mm_config_address_ok(mm_config_pda, program_id)) {
       set_cashout_return(0)?;
       return Ok(());
    }
-   if unlikely(!address_eq(mm_quote_buffer.address(), &QUOTE_BUFFER_PDA)) {
+   if unlikely(!quote_buffer_address_ok(mm_quote_buffer, program_id)) {
       set_cashout_return(0)?;
       return Ok(());
    }

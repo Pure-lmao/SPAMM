@@ -9,8 +9,8 @@ pub const FILL_BET_RFQ_IX_DISCRIMINATOR: u8 = 130;
 pub const FILL_PARLAY_RFQ_IX_DISCRIMINATOR: u8 = 131;
 /// Cashout RFQ payment CPI (`fill_cashout_rfq`).
 pub const FILL_CASHOUT_RFQ_IX_DISCRIMINATOR: u8 = 144;
-/// Parlay cashout RFQ payment CPI (`fill_parlay_cashout_rfq`).
-pub const FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR: u8 = 145;
+/// Parlay cashout RFQ payment CPI (`fill_cashout_parlay_rfq`).
+pub const FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR: u8 = 145;
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
@@ -30,7 +30,7 @@ impl FillRfqIxData {
       if data[0] != FILL_BET_RFQ_IX_DISCRIMINATOR
          && data[0] != FILL_PARLAY_RFQ_IX_DISCRIMINATOR
          && data[0] != FILL_CASHOUT_RFQ_IX_DISCRIMINATOR
-         && data[0] != FILL_PARLAY_CASHOUT_RFQ_IX_DISCRIMINATOR
+         && data[0] != FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR
       {
          return Err(ProgramError::InvalidInstructionData);
       }

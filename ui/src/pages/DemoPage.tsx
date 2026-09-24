@@ -1,5 +1,6 @@
 import { useAccount } from "@solana/connector/react";
 import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { requestFreebetRefresh } from "../betting/freebetRefresh";
 import { fetchDemoEvents, postDemoFreebet, postDemoPromo, type DemoEvent } from "../demo/demoApi";
 
 function formatEventStart(ms: number): string {
@@ -70,6 +71,9 @@ export function DemoPage(): ReactElement {
       try {
          const result = await postDemoFreebet(wallet.trim());
          setFbOk(`Freebet ${result.freebetId}`);
+         window.setTimeout(() => {
+            requestFreebetRefresh();
+         }, 2000);
       } catch (e) {
          setFbErr(e instanceof Error ? e.message : String(e));
       } finally {

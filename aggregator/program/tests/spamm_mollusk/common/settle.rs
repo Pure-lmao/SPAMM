@@ -68,6 +68,47 @@ pub fn settle_bet_instruction(bet_pda: Pubkey, bet_ata: Pubkey, ticket_id: u64) 
    )
 }
 
+pub fn settle_bet_instruction_mms(
+   user_pk: Pubkey,
+   user_ata: Pubkey,
+   bet_pda: Pubkey,
+   bet_ata: Pubkey,
+   ticket_id: u64,
+   groups: &[(&super::mm_keys::MmKeys, Pubkey)],
+) -> Instruction {
+   let sys = system_program_id();
+   let tok = token::ID;
+   let (escrow, dest_enc) = settle_escrow_and_dest(&user_pk, ticket_id);
+   let mut metas = vec![
+      AccountMeta::new(user_pk, true),
+      AccountMeta::new(bet_pda, false),
+      AccountMeta::new(bet_ata, false),
+      AccountMeta::new(bet_feepayer(), false),
+      AccountMeta::new_readonly(user_pk, false),
+      AccountMeta::new(user_ata, false),
+      AccountMeta::new_readonly(config_pda(), false),
+      AccountMeta::new_readonly(mint_pubkey(), false),
+      AccountMeta::new_readonly(tok, false),
+      escrow,
+      dest_enc,
+   ];
+   for (keys, netting) in groups {
+      let netting_meta = if *netting == sys {
+         AccountMeta::new_readonly(sys, false)
+      } else {
+         AccountMeta::new(*netting, false)
+      };
+      metas.extend([
+         AccountMeta::new_readonly(keys.program_id, false),
+         AccountMeta::new_readonly(keys.config, false),
+         AccountMeta::new(keys.encumbrance(), false),
+         AccountMeta::new(keys.liability_ata(), false),
+         netting_meta,
+      ]);
+   }
+   Instruction::new_with_bytes(agg_program_id(), &[SETTLE_BET_IX_DISCRIMINATOR], metas)
+}
+
 pub fn settle_bet_instruction_with_netting(
    bet_pda: Pubkey,
    bet_ata: Pubkey,

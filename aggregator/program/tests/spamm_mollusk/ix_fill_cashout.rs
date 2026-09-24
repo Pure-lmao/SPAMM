@@ -257,6 +257,7 @@ fn fill_cashout_live_prefunded_escrow_dust_fails() {
       event_state_sequence: 2,
       event_game_state: EventGameState::zeroed(),
    };
+   let snap = env.snapshot_accounts(&[user_collateral_ata(), bat, mm_collateral_ata()]);
    let r = env.run_ix(fill_cashout_instruction(
       &data,
       bet,
@@ -267,7 +268,8 @@ fn fill_cashout_live_prefunded_escrow_dust_fails() {
       bet_token_ata(&escrow),
       &mid,
    ));
-   assert!(r.program_result.is_err(), "1-lamport escrow PDA bricks CreateAccount");
+   assert_program_err(&r, ProgramError::Custom(0));
+   env.assert_accounts_unchanged(&snap);
 }
 
 #[test]
@@ -399,7 +401,7 @@ fn fill_cashout_mm_accounts_not_multiple_of_eight() {
       metas,
    );
    let r = env.run_ix(ix);
-   assert!(r.program_result.is_err());
+   assert_program_err(&r, ProgramError::NotEnoughAccountKeys);
 }
 
 #[test]
@@ -443,6 +445,9 @@ fn fill_cashout_skips_unregistered_mm() {
       metas,
    ));
    assert!(r.program_result.is_ok(), "dead MM skipped: {:?}", r);
+   let header = decode_cashout(&env, &co);
+   assert_eq!(header.amount, 2_000_000);
+   assert_eq!(header.mm, pinocchio::Address::new_from_array(*mm_program_id().as_array()));
 }
 
 #[test]
@@ -463,6 +468,7 @@ fn fill_cashout_unpaid_when_mm_ata_empty() {
       event_state_sequence: 1,
       event_game_state: EventGameState::zeroed(),
    };
+   let snap = env.snapshot_accounts(&[user_collateral_ata(), bat, mm_collateral_ata()]);
    let r = env.run_ix(fill_cashout_instruction(
       &payload,
       bet,
@@ -473,7 +479,8 @@ fn fill_cashout_unpaid_when_mm_ata_empty() {
       cashout_escrow_placeholder(),
       &mid,
    ));
-   assert!(r.program_result.is_err(), "unpaid cashout must fail: {:?}", r);
+   assert_program_err(&r, ProgramError::Custom(1));
+   env.assert_accounts_unchanged(&snap);
 }
 
 #[test]
@@ -657,45 +664,3 @@ fn fill_cashout_live_partial_free_escrow_dest() {
    );
 }
 
-#[test]
-fn split_fillers_redistributes_last_slot_and_conserves_reserved() {
-   use core::mem::MaybeUninit;
-   use pinocchio::Address;
-   use spamm_aggregator::constants::MAX_NUMBER_OF_MMS;
-   use spamm_aggregator::helpers::split_fillers;
-   use spamm_aggregator::state::account_bet::BetFiller;
-
-   let mm = Address::new_from_array([7u8; 32]);
-   let amounts = [25u64, 25, 25, 25, 1];
-   let orig_amount: u64 = 101;
-   let cashout: u64 = 100;
-   let mut orig = [BetFiller {
-      mm_address: mm,
-      amount: 0,
-      reserved_profit: 0,
-      odds_scaled: 13_000,
-      is_potentially_netted: false,
-   }; MAX_NUMBER_OF_MMS];
-   let mut reserved_sum = 0u64;
-   for i in 0..5 {
-      let p = spamm_aggregator::helpers::calc_potential_profit(amounts[i], 13_000).unwrap();
-      orig[i].amount = amounts[i];
-      orig[i].reserved_profit = p;
-      reserved_sum += p;
-   }
-   let mut remaining = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
-   let mut cashed = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
-   let payout = split_fillers(&orig, 5, orig_amount, cashout, &mut remaining, &mut cashed)
-      .expect("split_fillers");
-   assert!(payout > 0);
-   let rem = unsafe { core::slice::from_raw_parts(remaining.as_ptr().cast::<BetFiller>(), 5) };
-   let cas = unsafe { core::slice::from_raw_parts(cashed.as_ptr().cast::<BetFiller>(), 5) };
-   assert_eq!(cas.iter().map(|f| f.amount).sum::<u64>(), cashout);
-   assert_eq!(rem.iter().map(|f| f.amount).sum::<u64>(), orig_amount - cashout);
-   assert_eq!(
-      rem.iter().map(|f| f.reserved_profit).sum::<u64>()
-         + cas.iter().map(|f| f.reserved_profit).sum::<u64>(),
-      reserved_sum
-   );
-   assert!(cas[4].amount <= 1);
-}

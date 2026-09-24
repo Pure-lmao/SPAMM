@@ -3,11 +3,11 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use spamm_aggregator::state::{EventGameState, MarketId};
 
-/// Fill-quote instruction payload (bytes after the router discriminator in `lib.rs`), matching
-/// `FillQuoteIxData` minus `instruction_discriminator`.
+/// `fill_bet_quote` instruction payload (bytes after the MM router discriminator), matching
+/// [`FillBetQuoteIxData`] minus `instruction_discriminator`.
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
-pub struct FillQuoteIxPayload {
+pub struct FillBetQuoteIxPayload {
    pub amount_to_fill: u64,
    pub odds_scaled: u32,
    pub market_id: MarketId,
@@ -17,11 +17,11 @@ pub struct FillQuoteIxPayload {
    pub amount_to_send: u64,
 }
 
-pub const FILL_QUOTE_IX_PAYLOAD_LEN: usize = <FillQuoteIxPayload as ZeroPodFixed>::SIZE;
+pub const FILL_BET_QUOTE_IX_PAYLOAD_LEN: usize = <FillBetQuoteIxPayload as ZeroPodFixed>::SIZE;
 
-impl FillQuoteIxPayload {
+impl FillBetQuoteIxPayload {
    #[inline(always)]
-   pub fn from_zc(z: &FillQuoteIxPayloadZc) -> Option<Self> {
+   pub fn from_zc(z: &FillBetQuoteIxPayloadZc) -> Option<Self> {
       Some(Self {
          amount_to_fill: z.amount_to_fill.get(),
          odds_scaled: z.odds_scaled.get(),
@@ -35,7 +35,7 @@ impl FillQuoteIxPayload {
 
    #[inline(always)]
    pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
-      if data.len() != FILL_QUOTE_IX_PAYLOAD_LEN {
+      if data.len() != FILL_BET_QUOTE_IX_PAYLOAD_LEN {
          return Err(ProgramError::InvalidInstructionData);
       }
       let z = <Self as ZeroPodFixed>::from_bytes(data)

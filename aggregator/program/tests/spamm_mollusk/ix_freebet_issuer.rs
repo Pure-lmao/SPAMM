@@ -155,7 +155,7 @@ fn issue_freebet_wrong_signer() {
    );
    ix.accounts[0] = AccountMeta::new(wrong_signer(), true);
    let r = env.run_ix(ix);
-   assert!(r.program_result.is_err());
+   crate::common::assert_program_err(&r, solana_program_error::ProgramError::InvalidAccountData);
 }
 
 #[test]

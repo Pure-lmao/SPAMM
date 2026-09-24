@@ -13,16 +13,17 @@
 //! discriminator). Legs are decoded per-slot straight into the quoted-leg buffer —
 //! no staging array — to keep the BPF stack frame within the 4 KiB limit.
 
-use pinocchio::{error::ProgramError, AccountView, Address, address::address_eq, hint::unlikely};
+use pinocchio::{error::ProgramError, AccountView, Address, hint::unlikely};
 use pinocchio_log::log;
 use zeropod::ZeroPodFixed;
 
 use crate::{
-   constants::{MAX_QUOTE_STAKE_UNITS, MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA},
+   constants::MAX_QUOTE_STAKE_UNITS,
    instructions::quote_helpers::{
       fold_same_event_odds, product_parlay_odds, read_parlay_leg_market_odds,
       validate_quote_leg_context,
    },
+   mm_helpers::{mm_config_address_ok, parlay_quote_buffer_address_ok},
    state::{GetQuoteParlayIxHeader, GET_QUOTE_PARLAY_IX_PAYLOAD_HEADER_LEN},
 };
 use spamm_aggregator::{
@@ -82,13 +83,13 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       return Ok(());
    }
 
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
+   if unlikely(!mm_config_address_ok(mm_config_pda, program_id)) {
       log!("get_quote_parlay: mm config pda invalid");
       set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
       return Ok(());
    }
 
-   if unlikely(!address_eq(mm_parlay_quote_buffer.address(), &PARLAY_QUOTE_BUFFER_PDA)) {
+   if unlikely(!parlay_quote_buffer_address_ok(mm_parlay_quote_buffer, program_id)) {
       log!("get_quote_parlay: parlay quote buffer invalid");
       set_get_parlay_quote_return_data(0, 0, 0, [0; MAX_PARLAY_LEGS])?;
       return Ok(());

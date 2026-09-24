@@ -3,13 +3,13 @@
 //!
 //! Accounts **(8)** (aggregator order):
 //! 0. `user`
-//! 1. `mm_config_pda`
-//! 2. `mm_parlay_quote_buffer`
-//! 3. `mm_token_account`
-//! 4. `payment_dest`
-//! 5. `mint` (readonly)
-//! 6. `token_program` (readonly)
-//! 7. `instructions_sysvar` (readonly) — introspect parent `fill_parlay_cashout`
+//! 1. `config_pda` — aggregator config (readonly signer)
+//! 2. `mm_config_pda`
+//! 3. `mm_parlay_quote_buffer`
+//! 4. `mm_token_account`
+//! 5. `payment_dest`
+//! 6. `mint` (readonly)
+//! 7. `token_program` (readonly)
 
 use pinocchio::{
    AccountView, Address, ProgramResult, address::address_eq, error::ProgramError, hint::{likely, unlikely},
@@ -17,52 +17,47 @@ use pinocchio::{
 use pinocchio_log::log;
 
 use crate::{
-   constants::{MM_CONFIG_PDA, PARLAY_QUOTE_BUFFER_PDA},
    instructions::token_transfer::transfer_mm_config_signed,
-   state::FillCashoutQuoteParlayIxPayload,
+   mm_helpers::{mm_config_address_ok, parlay_quote_buffer_address_ok},
+   state::FillCashoutParlayQuoteIxPayload,
 };
 use spamm_aggregator::{
    constants::MAX_PARLAY_LEGS,
    helpers::verify_invoked_via_aggregator,
-   instructions::FILL_PARLAY_CASHOUT_IX_DISCRIMINATOR,
    writers::write_u8_unchecked,
    state::{
       MMParlayQuoteBuffer, MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR, MM_PARLAY_QUOTE_BUFFER_LEN,
    },
 };
 
-pub fn process(_program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
+pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
       user,
+      config_pda,
       mm_config_pda,
       mm_parlay_quote_buffer,
       mm_token_account,
       payment_dest,
       _mint,
       _token_program,
-      instructions_sysvar,
    ] = accounts else {
-      log!("fill_cashout_quote_parlay: accounts mismatch");
+      log!("fill_cashout_parlay_quote: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   let parent_disc = verify_invoked_via_aggregator(instructions_sysvar)?;
-   if unlikely(parent_disc != FILL_PARLAY_CASHOUT_IX_DISCRIMINATOR) {
-      log!("fill_cashout_quote_parlay: parent must be fill_parlay_cashout");
-      return Err(ProgramError::InvalidInstructionData);
-   }
+   verify_invoked_via_aggregator(config_pda)?;
 
-   if unlikely(!address_eq(mm_config_pda.address(), &MM_CONFIG_PDA)) {
+   if unlikely(!mm_config_address_ok(mm_config_pda, program_id)) {
       return Err(ProgramError::InvalidSeeds);
    }
-   if unlikely(!address_eq(mm_parlay_quote_buffer.address(), &PARLAY_QUOTE_BUFFER_PDA)) {
+   if unlikely(!parlay_quote_buffer_address_ok(mm_parlay_quote_buffer, program_id)) {
       return Err(ProgramError::InvalidAccountData);
    }
    if unlikely(mm_parlay_quote_buffer.data_len() != MM_PARLAY_QUOTE_BUFFER_LEN) {
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let ix_data = FillCashoutQuoteParlayIxPayload::decode(data)?;
+   let ix_data = FillCashoutParlayQuoteIxPayload::decode(data)?;
    let quote = {
       let quote_buf = mm_parlay_quote_buffer.try_borrow()?;
       MMParlayQuoteBuffer::decode(quote_buf.as_ref())?

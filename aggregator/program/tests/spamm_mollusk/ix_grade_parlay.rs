@@ -166,7 +166,7 @@ fn grade_parlay_after_settle_fails() {
       .program_result
       .is_ok());
    let r = env.run_ix(grade_parlay_instruction(&mask, bet, admin()));
-   assert!(r.program_result.is_err(), "{:?}", r);
+   crate::common::assert_program_err(&r, solana_program_error::ProgramError::InvalidAccountOwner);
 }
 
 #[test]

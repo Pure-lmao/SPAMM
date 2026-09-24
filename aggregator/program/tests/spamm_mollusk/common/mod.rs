@@ -7,6 +7,7 @@ pub mod fill;
 pub mod fixtures;
 pub mod freebet;
 pub mod ledger;
+pub mod mm_keys;
 pub mod proxy;
 pub mod rfq;
 pub mod settle;
@@ -23,14 +24,18 @@ pub use assertions::{
 pub use cashout::*;
 pub use env::{
    assert_ix_ok, assert_ok_record_cu, assert_program_err, assert_spamm_err, record_cu_success,
-   rich_signer_account, system_owned_empty, Env, USER_COLLATERAL_TOKENS,
+   rich_signer_account, system_owned_empty, Env, AccountSnapshot, USER_COLLATERAL_TOKENS,
+};
+pub use mm_keys::{
+   adversarial_mm_admin, adversarial_mm_program_id, user_b, user_b_collateral_ata, MmKeys,
+   EXTRA_MM_SLOTS, MAX_TX_ACCOUNTS, mm_alt_admin, mm_alt_program_id,
 };
 pub use fill::*;
 pub use fixtures::*;
 pub use freebet::*;
 pub use proxy::*;
 pub use rfq::{
-   sign_rfq_bet_quote, sign_rfq_bet_quote_other_mm, sign_rfq_bet_quote_wrong_domain,
+   sign_rfq_bet_quote, sign_rfq_bet_quote_for_mm, sign_rfq_bet_quote_other_mm, sign_rfq_bet_quote_wrong_domain,
    sign_rfq_cashout_quote, sign_rfq_cashout_parlay_quote, sign_rfq_parlay_quote, RFQ_OFFER_EXPIRY,
 };
 pub use settle::*;

@@ -167,7 +167,7 @@ fn fill_bet_invalid_sport_wire_byte_rejected() {
       fill_bet_metas_one_mm(bet, bat, &mid, fill_bet_netting_placeholder()),
    );
    let r = env.run_ix(ix);
-   assert_program_err(&r, ProgramError::InvalidInstructionData);
+   assert_spamm_err(&r, SpammError::NoQuotesAvailable);
 }
 
 #[test]
@@ -773,7 +773,6 @@ fn fill_bet_no_mm_accounts_rejected() {
          AccountMeta::new_readonly(ata, false),
       AccountMeta::new_readonly(crate::common::rent_sysvar_pubkey(), false),
       AccountMeta::new_readonly(sys, false),
-      AccountMeta::new_readonly(solana_sdk_ids::sysvar::instructions::ID, false),
    ];
    let ix = solana_instruction::Instruction::new_with_bytes(crate::common::agg_program_id(), &buf, metas);
    let r = env.run_ix(ix);
@@ -881,32 +880,42 @@ fn fill_bet_partial_fill_clips_to_mm_max() {
    assert_eq!(b.num_fillers, 1);
 }
 
+fn fill_bet_quote_stub_metas(config: AccountMeta) -> Vec<AccountMeta> {
+   let ro = |pk| AccountMeta::new_readonly(pk, false);
+   vec![
+      ro(user()),
+      config,
+      ro(user()),
+      ro(user()),
+      ro(user()),
+      ro(user()),
+      ro(user()),
+      ro(user()),
+      ro(user()),
+      ro(user()),
+   ]
+}
+
 #[test]
-fn fill_bet_stub_two_fillers() {
+fn fill_bet_quote_rejects_invalid_config_pda() {
    let mut env = Env::new();
-   env.bootstrap_default_mm_spread();
-   let mid = market_spread_pregame(event_id_soccer());
-   let r = run_fill_bet(
-      &mut env,
-      895,
-      mid,
-      0,
-      1_000_000,
-      15_000,
-      fill_bet_netting_placeholder(),
+   let ix = env.mm_ix(
+      spamm_aggregator::state::FILL_BET_QUOTE_IX_DISCRIMINATOR,
+      vec![],
+      fill_bet_quote_stub_metas(AccountMeta::new_readonly(user(), true)),
    );
-   assert!(r.program_result.is_ok(), "{:?}", r);
-   let bet = bet_pda_for(&user(), 895);
-   let mut bd = decode_bet(&env, &bet);
-   let f0 = bd.fillers[0];
-   bd.fillers.push(f0);
-   let mut header = bd.header;
-   header.num_fillers = 2;
-   let mut wired = vec![0u8; spamm_aggregator::state::account_bet::bet_account_len(2)];
-   spamm_aggregator::state::BetAccountData::write_header_and_fillers(&mut wired, &header, &bd.fillers)
-      .expect("two-filler wire");
-   let mut acct = env.get_account(&bet).expect("bet").clone();
-   acct.data = wired;
-   env.upsert(bet, acct);
-   assert_eq!(decode_bet(&env, &bet).num_fillers, 2);
+   let r = env.run_ix(ix);
+   assert_program_err(&r, ProgramError::InvalidAccountOwner);
+}
+
+#[test]
+fn fill_bet_quote_rejects_unsigned_config_pda() {
+   let mut env = Env::new();
+   let ix = env.mm_ix(
+      spamm_aggregator::state::FILL_BET_QUOTE_IX_DISCRIMINATOR,
+      vec![],
+      fill_bet_quote_stub_metas(AccountMeta::new_readonly(config_pda(), false)),
+   );
+   let r = env.run_ix(ix);
+   assert_program_err(&r, ProgramError::InvalidAccountOwner);
 }

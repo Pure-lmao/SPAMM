@@ -10,24 +10,56 @@ use pinocchio::{
 use pinocchio_log::log;
 use zeropod::ZeroPodFixed;
 
-use crate::constants::{MM_CONFIG_PDA, MM_MARKET_DATA_PDA_SEED};
+use crate::constants::{MM_MARKET_DATA_PDA_SEED, MM_PARLAY_QUOTE_BUFFER_SEED, MM_QUOTE_BUFFER_SEED};
 use spamm_aggregator::{
    readers::read_u8_unchecked,
    state::{
       EVENT_STATE_DISCRIMINATOR, EVENT_STATE_HEADER_LEN, EVENT_STATE_SEED, EventGameState, EventId,
-      EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId, MARKET_ID_LEN, market_id_pda_seed_parts,
+      EventStateData, EventStateDataZc, MMQuoteBuffer, MarketId, MARKET_ID_LEN, MM_ACCOUNT_CONFIG_SEED,
+      market_id_pda_seed_parts,
       mm_account_config::MM_CONFIG_PDA_ADMIN_OFFSET,
       other::{MM_MARKET_DATA_PDA_BUMP_OFFSET, MM_MARKET_DATA_PDA_MIN_LEN},
    },
 };
+
+#[inline(always)]
+pub fn find_mm_config_pda(program_id: &Address) -> (Address, u8) {
+   Address::find_program_address(&[MM_ACCOUNT_CONFIG_SEED], program_id)
+}
+
+#[inline(always)]
+pub fn mm_config_address_ok(config_pda: &AccountView, program_id: &Address) -> bool {
+   address_eq(config_pda.address(), &find_mm_config_pda(program_id).0)
+}
+
+#[inline(always)]
+pub fn find_quote_buffer_pda(program_id: &Address) -> (Address, u8) {
+   Address::find_program_address(&[MM_QUOTE_BUFFER_SEED], program_id)
+}
+
+#[inline(always)]
+pub fn quote_buffer_address_ok(buf: &AccountView, program_id: &Address) -> bool {
+   address_eq(buf.address(), &find_quote_buffer_pda(program_id).0)
+}
+
+#[inline(always)]
+pub fn find_parlay_quote_buffer_pda(program_id: &Address) -> (Address, u8) {
+   Address::find_program_address(&[MM_PARLAY_QUOTE_BUFFER_SEED], program_id)
+}
+
+#[inline(always)]
+pub fn parlay_quote_buffer_address_ok(buf: &AccountView, program_id: &Address) -> bool {
+   address_eq(buf.address(), &find_parlay_quote_buffer_pda(program_id).0)
+}
 
 /// MM config PDA `["config"]` under `program_id`; `feepayer` must match `admin`.
 #[inline(always)]
 pub fn verify_mm_config_auth(
    feepayer: &AccountView,
    config_pda: &AccountView,
+   program_id: &Address,
 ) -> Result<(), ProgramError> {
-   if unlikely(!address_eq(config_pda.address(), &MM_CONFIG_PDA)) {
+   if unlikely(!mm_config_address_ok(config_pda, program_id)) {
       return Err(ProgramError::InvalidSeeds);
    }
 

@@ -432,3 +432,74 @@ pub fn compute_modified_parlay_settlement(
 
    Ok((user_return, false))
 }
+
+#[cfg(test)]
+mod tests {
+   use super::*;
+   use pinocchio::Address;
+   use pinocchio::error::ProgramError;
+   use crate::errors::SpammError;
+   use crate::state::{EventGameState, MarketId};
+
+   fn mid(event: u64, odds: u32) -> ParlayLegQuoted {
+      ParlayLegQuoted {
+         market_id: MarketId {
+            event_id: EventId { event, league: 1, sport: 1 },
+            player: 0,
+            mkt: 400,
+            period: 1,
+            is_pregame: true,
+            operator: Address::new_from_array([1u8; 32]),
+         },
+         side: 0,
+         event_state_sequence: 1,
+         event_game_state: EventGameState::zeroed(),
+         odds_scaled: odds,
+      }
+   }
+
+   #[test]
+   fn product_of_eighteen_even_money_legs_fits_u32() {
+      let legs: [ParlayLegQuoted; 18] = core::array::from_fn(|i| mid(i as u64 + 1, 20_000));
+      assert_eq!(product_parlay_odds(18, &legs).unwrap(), 2_621_440_000);
+   }
+
+   #[test]
+   fn product_of_nineteen_even_money_legs_overflows_u32() {
+      let legs: [ParlayLegQuoted; 19] = core::array::from_fn(|i| mid(i as u64 + 1, 20_000));
+      assert_eq!(
+         product_parlay_odds(19, &legs).unwrap_err(),
+         ProgramError::ArithmeticOverflow
+      );
+   }
+
+   #[test]
+   fn same_event_zero_odds_companion_is_ok() {
+      let legs = [mid(1, 20_000), {
+         let mut c = mid(1, 0);
+         c.side = 1;
+         c.market_id.mkt = 401;
+         c
+      }];
+      validate_parlay_same_event_odds(2, &legs).unwrap();
+   }
+
+   #[test]
+   fn same_event_all_zero_odds_is_event_rule_violation() {
+      let legs = [mid(1, 0), mid(1, 0)];
+      assert_eq!(
+         validate_parlay_same_event_odds(2, &legs).unwrap_err(),
+         ProgramError::Custom(SpammError::ParlayEventRuleViolation as u32)
+      );
+   }
+
+   #[test]
+   fn odds_product_mismatch_is_off_by_one() {
+      let legs = [mid(1, 20_000), mid(2, 20_000)];
+      ensure_parlay_odds_product_matches(2, &legs, 40_000).unwrap();
+      assert_eq!(
+         ensure_parlay_odds_product_matches(2, &legs, 39_999).unwrap_err(),
+         ProgramError::Custom(SpammError::ParlayOddsMismatch as u32)
+      );
+   }
+}
