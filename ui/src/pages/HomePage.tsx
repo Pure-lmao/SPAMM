@@ -5,7 +5,7 @@ import { pickBetSide } from "../betting/outcomeSide";
 import type { BetColumn, MarketRow } from "../betting/types";
 import { useBetSlip } from "../betting/BetSlipContext";
 import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
-import { displayEventTitle, formatStart } from "../markets/eventDisplay";
+import { displayEventTitle } from "../markets/eventDisplay";
 import { LineWithOddsCell, MainOddsCell, EmptyTotalOddsPlaceholder } from "../markets/MarketOddsCells";
 import {
    extraMarketsCount,
@@ -14,10 +14,11 @@ import {
    getSpreadOdds,
    getTotalOdds,
 } from "../markets/selectors";
-import { oddsTableLabels } from "../markets/oddsTableLabels";
+import { useOddsTableLabels } from "../markets/oddsTableLabels";
 import { fetchActivePromos } from "../markets/fetchPromos";
 import { PromoMarketsSection } from "../markets/PromoMarketsSection";
 import type { UiGroupedSport, UiPromotionalMarket } from "../markets/types";
+import { useI18n } from "../i18n/useI18n";
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 async function fetchGroupedTree(): Promise<UiGroupedSport[]> {
@@ -85,6 +86,8 @@ function computeMatchColPx(tree: UiGroupedSport[], font: string): number {
 
 export function HomePage(): ReactElement {
    const { toggleSelection, isSelected } = useBetSlip();
+   const { t, sportName, leagueName, formatStart } = useI18n();
+   const oddsTableLabels = useOddsTableLabels();
    const [tree, setTree] = useState<UiGroupedSport[] | null>(null);
    const [promos, setPromos] = useState<UiPromotionalMarket[]>([]);
    const [err, setErr] = useState<string | null>(null);
@@ -146,7 +149,7 @@ export function HomePage(): ReactElement {
    return (
       <>
          {err != null && <div className="banner-error">{err}</div>}
-         {tree === null && err == null && <p className="loading">Loading…</p>}
+         {tree === null && err == null && <p className="loading">{t("home.loading")}</p>}
          {tree != null && displayTree != null && (
             <div className="home-events-scope" style={homeScopeStyle}>
                <PromoMarketsSection promos={promos} />
@@ -166,7 +169,7 @@ export function HomePage(): ReactElement {
                   </table>
                </div>
                {displayTree.length === 0 ? (
-                  <p className="loading">No events with published odds.</p>
+                  <p className="loading">{t("home.noEvents")}</p>
                ) : (
                   displayTree.map((sport) => {
                const sportCollapsed = collapsedSports.has(sport.id);
@@ -191,7 +194,7 @@ export function HomePage(): ReactElement {
                         <span className="collapse-chevron" aria-hidden>
                            {sportCollapsed ? "▸" : "▾"}
                         </span>
-                        {sport.sport}
+                        {sportName(sport.id, sport.sport)}
                      </button>
                      {!sportCollapsed &&
                         sport.leagues.map((league) => {
@@ -218,7 +221,7 @@ export function HomePage(): ReactElement {
                                     <span className="collapse-chevron" aria-hidden>
                                        {leagueCollapsed ? "▸" : "▾"}
                                     </span>
-                                    {league.name}
+                                    {leagueName(league.name)}
                                  </button>
                                  {!leagueCollapsed && (
                                     <div className="league-table-scroll">
@@ -232,7 +235,7 @@ export function HomePage(): ReactElement {
                                        </colgroup>
                                        <thead>
                                           <tr className="thead-row-primary">
-                                             <th rowSpan={2} className="th-match" aria-label="Teams and start time" />
+                                             <th rowSpan={2} className="th-match" aria-label={oddsTableLabels.teamsAndStart} />
                                              <th>{sport.id === 1 ? oddsTableLabels.main1x2 : oddsTableLabels.mainMl}</th>
                                              <th>{oddsTableLabels.spread}</th>
                                              <th>
@@ -440,8 +443,8 @@ export function HomePage(): ReactElement {
                                                             to={`/events/${sport.id}/${league.id}/${ev.id}`}
                                                             state={{ leagueName: league.name }}
                                                          >
-                                                            <span className="event-more-markets__line1">+{moreN} more</span>
-                                                            <span className="event-more-markets__line2">markets</span>
+                                                            <span className="event-more-markets__line1">+{moreN} {t("home.more")}</span>
+                                                            <span className="event-more-markets__line2">{t("home.markets")}</span>
                                                          </Link>
                                                       ) : (
                                                          <span className="event-more-placeholder"> </span>

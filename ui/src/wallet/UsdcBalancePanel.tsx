@@ -15,6 +15,7 @@ import { formatUsdcBaseUnitsForUi, USDC_BASE_UNITS_PER_TOKEN } from "../betting/
 import { buildSignV1Transaction, httpToWsRpcUrl, resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { buildDevnetUsdcAirdropIx } from "./devnetUsdcAirdropIx";
 import { subscribeWalletBalanceRefresh } from "./walletBalanceRefresh";
+import { useI18n } from "../i18n/useI18n";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
@@ -47,6 +48,7 @@ export function UsdcBalancePanel(): ReactElement | null {
    const { isConnected, account } = useWallet();
    const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
    const { cluster } = useCluster();
+   const { t } = useI18n();
 
    const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
 
@@ -187,7 +189,7 @@ export function UsdcBalancePanel(): ReactElement | null {
                      disabled={usdcAirdropBusy || !signerReady}
                      onClick={() => void runUsdcAirdrop()}
                   >
-                     {usdcAirdropBusy ? "Airdropping…" : "Airdrop 100 USDC"}
+                     {usdcAirdropBusy ? t("buttons.airdropping") : t("buttons.airdropUsdc")}
                   </button>
                ) : (
                   <span className="usdc-balance-panel__lead-slot" aria-hidden="true" />
@@ -211,7 +213,7 @@ export function UsdcBalancePanel(): ReactElement | null {
                      disabled={solAirdropBusy}
                      onClick={() => void runSolAirdrop()}
                   >
-                     {solAirdropBusy ? "Sending…" : "Airdrop SOL"}
+                     {solAirdropBusy ? t("buttons.sending") : t("buttons.airdropSol")}
                   </button>
                ) : (
                   <span className="usdc-balance-panel__lead-slot" aria-hidden="true" />

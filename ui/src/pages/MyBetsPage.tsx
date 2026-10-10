@@ -41,6 +41,8 @@ import {
 import { buildSignV1Transaction, httpToWsRpcUrl, resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { formatUsdcBaseUnitsForUi } from "../betting/usdc";
 import { userWinCreditBase, solscanTxUrl } from "../betting/betSlipUtils";
+import { convertOdds, type OddsFormat } from "../settings/convertOdds";
+import { useSettings } from "../settings/SettingsContext";
 import {
    fetchClosedBetHistory,
    fetchOpenWalletBets,
@@ -48,7 +50,7 @@ import {
    type WalletBetRow,
    type WalletParlayLeg,
 } from "../markets/fetchBetHistory";
-import { fetchOneEvent } from "../markets/fetchEvent";
+import { fetchBetCardEvents } from "../markets/fetchEvent";
 import { fetchPromosForBetLookup } from "../markets/fetchPromos";
 import {
    betMarketDisplayLines,
@@ -56,9 +58,12 @@ import {
    indexPromotionalMarkets,
    isPromoMarketChain,
    promoMarketLookupKey,
+   useBetMarketCopy,
    type BetMarketDisplayLines,
 } from "../markets/myBetsMarketDisplay";
-import type { UiGroupedEvent, UiPromotionalMarket } from "../markets/types";
+import type { BetCardEvent, UiPromotionalMarket } from "../markets/types";
+import { useI18n } from "../i18n/useI18n";
+import type { Translate } from "../i18n/translate";
 
 type LoadState = "idle" | "loading" | "ok" | "err";
 
@@ -67,30 +72,30 @@ type MyBetsTab = "open" | "closed";
 const MAX_SETTLE_IX_PER_TX = 9;
 const CASHOUT_QUOTE_DEBOUNCE_MS = 450;
 
-function betResultLabel(r: BetResult): string {
+function betResultLabel(r: BetResult, t: Translate): string {
    switch (r) {
       case BetResult.Pending:
-         return "Pending";
+         return t("myBets.pending");
       case BetResult.Won:
-         return "Won";
+         return t("myBets.won");
       case BetResult.Lost:
-         return "Lost";
+         return t("myBets.lost");
       case BetResult.HalfWon:
-         return "Half won";
+         return t("myBets.halfWon");
       case BetResult.HalfLost:
-         return "Half lost";
+         return t("myBets.halfLost");
       case BetResult.Push:
-         return "Push";
+         return t("myBets.push");
       case BetResult.Cancelled:
-         return "Cancelled";
+         return t("myBets.cancelled");
       case BetResult.RolledBack:
-         return "Rolled back";
+         return t("myBets.rolledBack");
       case BetResult.CashedOut:
-         return "Cashed out";
+         return t("myBets.cashedOut");
       case BetResult.ModifiedWin:
-         return "Modified win";
+         return t("myBets.modifiedWin");
       default:
-         return `Unknown (${r})`;
+         return t("myBets.unknown", { code: r });
    }
 }
 
@@ -121,12 +126,15 @@ function resultModifierClass(r: BetResult): string {
    }
 }
 
-function oddsFromScaled(scaled: bigint): string {
+function oddsFromScaled(scaled: bigint, format: OddsFormat): string {
+   if (scaled === 0n) {
+      return "0.000";
+   }
    const x = Number(scaled) / Number(ODDS_SCALE);
-   if (!Number.isFinite(x)) {
+   if (!Number.isFinite(x) || x <= 0) {
       return "—";
    }
-   return x >= 10 ? x.toFixed(2) : x.toFixed(3);
+   return convertOdds(x, format, "slip");
 }
 
 /** Effective filled odds from on-chain `payout` / `amount` (unchanged after grading). */
@@ -137,21 +145,21 @@ function filledOddsScaledFromStake(amount: bigint, payout: bigint): bigint | nul
    return (payout * ODDS_SCALE) / amount;
 }
 
-function filledOddsUiFromStake(amount: bigint, payout: bigint): string {
+function filledOddsUiFromStake(amount: bigint, payout: bigint, format: OddsFormat): string {
    const scaled = filledOddsScaledFromStake(amount, payout);
-   return scaled !== null ? oddsFromScaled(scaled) : "—";
+   return scaled !== null ? oddsFromScaled(scaled, format) : "—";
 }
 
-function legOddsUi(oddsScaled: bigint | null): string {
+function legOddsUi(oddsScaled: bigint | null, format: OddsFormat): string {
    if (oddsScaled === null) {
       return "—";
    }
-   return oddsFromScaled(oddsScaled);
+   return oddsFromScaled(oddsScaled, format);
 }
 
-function eventGroupOddsUi(items: readonly { leg: WalletParlayLeg }[]): string {
+function eventGroupOddsUi(items: readonly { leg: WalletParlayLeg }[], format: OddsFormat): string {
    const priced = items.find((item) => item.leg.oddsScaled != null && item.leg.oddsScaled > 0n);
-   return priced != null ? oddsFromScaled(priced.leg.oddsScaled!) : "—";
+   return priced != null ? oddsFromScaled(priced.leg.oddsScaled!, format) : "—";
 }
 
 type ParlayLegItem = {
@@ -235,19 +243,6 @@ function settledReturnBaseUnits(
    }
 }
 
-function formatBetUnixSeconds(ts: number): string {
-   if (!Number.isFinite(ts) || ts <= 0) {
-      return "";
-   }
-   const ms = ts < 1e12 ? ts * 1000 : ts;
-   return new Date(ms).toLocaleString(undefined, {
-      month: "short",
-      day: "numeric",
-      hour: "numeric",
-      minute: "2-digit",
-   });
-}
-
 function truncateAddressMiddle(addr: string, head = 4, tail = 4): string {
    if (addr.length <= head + tail + 3) {
       return addr;
@@ -272,19 +267,20 @@ function BetBanner({
    placedAt?: number;
    historySig?: string;
 }): ReactElement {
-   const when = placedAt != null ? formatBetUnixSeconds(placedAt) : "";
+   const { t, formatBetTime } = useI18n();
+   const when = placedAt != null ? formatBetTime(placedAt) : "";
    const href = historySig ? solscanTxUrl(historySig) : solscanAddressUrl(betPda);
    const linkLabel = historySig ? truncateAddressMiddle(historySig, 4, 4) : truncateAddressMiddle(betPda);
    return (
       <div className={`my-bets-card__banner my-bets-card__banner--${resultModifierClass(result)}`}>
-         <span className="my-bets-card__banner-result">{betResultLabel(result)}</span>
+         <span className="my-bets-card__banner-result">{betResultLabel(result, t)}</span>
          <div className="my-bets-card__banner-meta">
             {when !== "" && (
                <span className="my-bets-card__bet-time" title={when}>
                   {when}
                </span>
             )}
-            <span className="my-bets-card__bet-id" title={`Bet ID ${betId.toString()}`}>
+            <span className="my-bets-card__bet-id" title={t("myBets.betId", { id: betId.toString() })}>
                {betId.toString()}
             </span>
             <a
@@ -314,10 +310,12 @@ function BetStakeGrid({
    freebet?: boolean;
    finalPayout?: bigint | null;
 }): ReactElement {
+   const { oddsFormat } = useSettings();
+   const { t } = useI18n();
    const oddsScaled = filledOddsScaledFromStake(amount, payout);
-   const oddsUi = filledOddsUiFromStake(amount, payout);
+   const oddsUi = filledOddsUiFromStake(amount, payout, oddsFormat);
    const settled = result !== BetResult.Pending;
-   const payoutLabel = settled ? "Return" : "Potential payout";
+   const payoutLabel = settled ? t("myBets.return") : t("myBets.potentialPayout");
    const payoutBase = settled
       ? settledReturnBaseUnits(amount, payout, result, oddsScaled, freebet === true, finalPayout)
       : userWinCreditBase(amount, payout, oddsScaled, freebet === true);
@@ -325,15 +323,15 @@ function BetStakeGrid({
    return (
       <dl className="my-bets-card__grid">
          <div>
-            <dt>{result === BetResult.CashedOut ? "Cashout amount" : "Stake"}</dt>
+            <dt>{result === BetResult.CashedOut ? t("myBets.cashoutAmount") : t("myBets.stake")}</dt>
             <dd>
                <strong>{formatUsdcBaseUnitsForUi(amount)}</strong> USDC
-               {freebet === true && <span className="my-bets-card__stake-freebet"> FREEBET</span>}
+               {freebet === true && <span className="my-bets-card__stake-freebet"> {t("myBets.freebet")}</span>}
             </dd>
          </div>
          {result !== BetResult.CashedOut && (
             <div>
-               <dt>Filled odds</dt>
+               <dt>{t("myBets.filledOdds")}</dt>
                <dd>{oddsUi === "—" ? "—" : `${oddsUi}`}</dd>
             </div>
          )}
@@ -397,22 +395,24 @@ function CashoutBetPreview({
    promosByMarketKey,
 }: {
    row: WalletBetRow;
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement {
+   const copy = useBetMarketCopy();
+   const { t } = useI18n();
    if (row.kind === "single") {
       const b = row.data;
       const ek = eventLookupKey(b.marketId);
       const promoKey = isPromoMarketChain(b.marketId) ? promoMarketLookupKey(b.marketId) : null;
       const promo = promoKey != null ? (promosByMarketKey.get(promoKey) ?? null) : null;
-      const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side, promo);
+      const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side, promo, copy);
       return <BetMarketBody lines={lines} />;
    }
    const legCount = row.legs.length;
    return (
       <>
          <p className="my-bets-card__parlay-heading">
-            Parlay · {legCount} {legCount === 1 ? "leg" : "legs"}
+            {legCount === 1 ? t("myBets.parlayOne", { count: legCount }) : t("myBets.parlayMany", { count: legCount })}
          </p>
          <ParlayLegsList
             listKey={`${row.address}-cashout`}
@@ -432,7 +432,7 @@ function CashoutModal({
    onChanged,
 }: {
    row: WalletBetRow;
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
    onClose: () => void;
    onChanged: () => void;
@@ -459,6 +459,7 @@ function CashoutModal({
    const [sendErr, setSendErr] = useState<string | null>(null);
    const lockRef = useRef(false);
    const auctionQuoteRef = useRef<AuctionCashoutQuote | null>(null);
+   const { t } = useI18n();
 
    useEffect(() => {
       const onKey = (e: KeyboardEvent) => {
@@ -617,9 +618,9 @@ function CashoutModal({
          >
             <header className="bet-modal-header">
                <h2 id="cashout-modal-title" className="bet-modal-title">
-                  Cash out
+                  {t("myBets.cashOut")}
                </h2>
-               <button type="button" className="bet-modal-close" onClick={onClose} aria-label="Close" disabled={busy}>
+               <button type="button" className="bet-modal-close" onClick={onClose} aria-label={t("buttons.close")} disabled={busy}>
                   ×
                </button>
             </header>
@@ -627,11 +628,11 @@ function CashoutModal({
                <div className="cashout-modal__bet">
                   <CashoutBetPreview row={row} eventsByKey={eventsByKey} promosByMarketKey={promosByMarketKey} />
                   <p className="cashout-modal__stake">
-                     Stake <strong>{formatUsdcBaseUnitsForUi(stake)}</strong> USDC
+                     {t("myBets.stake")} <strong>{formatUsdcBaseUnitsForUi(stake)}</strong> USDC
                   </p>
                </div>
                <label className="cashout-modal__slider-field">
-                  <span className="bet-modal-field-label">Amount to cash out</span>
+                  <span className="bet-modal-field-label">{t("myBets.amountToCashOut")}</span>
                   <input
                      className="cashout-modal__slider"
                      type="range"
@@ -660,19 +661,19 @@ function CashoutModal({
                </label>
                <dl className="cashout-modal__stats">
                   <div>
-                     <dt>Cashing out</dt>
+                     <dt>{t("myBets.cashingOut")}</dt>
                      <dd>
                         <strong>{formatUsdcBaseUnitsForUi(cashAmount)}</strong> USDC
                      </dd>
                   </div>
                   <div>
-                     <dt>Remaining</dt>
+                     <dt>{t("myBets.remaining")}</dt>
                      <dd>
                         <strong>{formatUsdcBaseUnitsForUi(remaining)}</strong> USDC
                      </dd>
                   </div>
                   <div>
-                     <dt>You receive</dt>
+                     <dt>{t("myBets.youReceive")}</dt>
                      <dd>
                         {receiveUpdating ? (
                            <strong>…</strong>
@@ -686,13 +687,13 @@ function CashoutModal({
                      </dd>
                   </div>
                </dl>
-               {quoting && cashAmount === debouncedAmount && <p className="bet-modal-muted">Fetching quote…</p>}
+               {quoting && cashAmount === debouncedAmount && <p className="bet-modal-muted">{t("myBets.fetchingQuote")}</p>}
                {quoteErr != null && cashAmount === debouncedAmount && <p className="bet-modal-err">{quoteErr}</p>}
                {sendErr != null && <p className="bet-modal-err">{sendErr}</p>}
             </div>
             <footer className="bet-modal-footer">
                <button type="button" className="bet-modal-btn bet-modal-btn--ghost" disabled={busy} onClick={onClose}>
-                  Cancel
+                  {t("buttons.cancel")}
                </button>
                <button
                   type="button"
@@ -700,7 +701,7 @@ function CashoutModal({
                   disabled={busy || !quoteReady || !signerReady || walletSigner == null}
                   onClick={() => void runCashout()}
                >
-                  {busy ? "Cashing out…" : "Confirm cash out"}
+                  {busy ? t("myBets.cashingOutBusy") : t("myBets.confirmCashOut")}
                </button>
             </footer>
          </div>
@@ -718,7 +719,7 @@ function CardActions({
    row: WalletBetRow;
    interactive: boolean;
    onChanged: () => void;
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement | null {
    const { account, isConnected } = useWallet();
@@ -737,6 +738,7 @@ function CardActions({
    const [escrowReady, setEscrowReady] = useState(false);
    const [escrowWait, setEscrowWait] = useState<number | null>(null);
    const lockRef = useRef(false);
+   const { t } = useI18n();
 
    const result = walletBetRowResult(row);
    const showCashout = interactive && canCashoutRow(row);
@@ -826,7 +828,7 @@ function CardActions({
                disabled={!signerReady || walletSigner == null}
                onClick={() => setCashoutOpen(true)}
             >
-               Cash out
+               {t("myBets.cashOut")}
             </button>
          )}
          {showClaimEscrow && (
@@ -837,10 +839,10 @@ function CardActions({
                onClick={() => void runClaimEscrow()}
             >
                {busy
-                  ? "Claiming…"
+                  ? t("myBets.claiming")
                   : escrowWait != null && escrowWait > 0
-                    ? `Claim cashout in ${escrowWait}s`
-                    : "Claim cashout"}
+                    ? t("myBets.claimCashoutIn", { seconds: escrowWait })
+                    : t("myBets.claimCashout")}
             </button>
          )}
          {err != null && <p className="my-bets-card__action-err">{err}</p>}
@@ -868,16 +870,17 @@ function BetCard({
 }: {
    betPda: string;
    b: BetAccountData;
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
    actions?: ReactElement | null;
    historySig?: string;
    finalPayout?: bigint | null;
 }): ReactElement {
+   const copy = useBetMarketCopy();
    const ek = eventLookupKey(b.marketId);
    const promoKey = isPromoMarketChain(b.marketId) ? promoMarketLookupKey(b.marketId) : null;
    const promo = promoKey != null ? (promosByMarketKey.get(promoKey) ?? null) : null;
-   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side, promo);
+   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side, promo, copy);
 
    return (
       <li className="my-bets-card">
@@ -904,7 +907,8 @@ function BetCard({
 }
 
 function ParlayLegOdds({ oddsScaled }: { oddsScaled: bigint | null }): ReactElement {
-   const ui = legOddsUi(oddsScaled);
+   const { oddsFormat } = useSettings();
+   const ui = legOddsUi(oddsScaled, oddsFormat);
    const zero = oddsScaled === 0n;
    return (
       <span className={`my-bets-card__parlay-odds${zero ? " my-bets-card__parlay-odds--zero" : ""}`}>
@@ -923,15 +927,17 @@ function ParlayLegRow({
 }: {
    leg: WalletParlayLeg;
    legIndex: number;
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
    hideEventLine?: boolean;
    hideOdds?: boolean;
 }): ReactElement {
+   const copy = useBetMarketCopy();
+   const { t } = useI18n();
    const ek = eventLookupKey(leg.marketId);
    const promoKey = isPromoMarketChain(leg.marketId) ? promoMarketLookupKey(leg.marketId) : null;
    const promo = promoKey != null ? (promosByMarketKey.get(promoKey) ?? null) : null;
-   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, leg.marketId, leg.side, promo);
+   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, leg.marketId, leg.side, promo, copy);
    const legResult = leg.result;
    const showResult = legResult != null && legResult !== BetResult.Pending;
    return (
@@ -944,7 +950,7 @@ function ParlayLegRow({
                <BetMarketBody lines={lines} hideEventLine={hideEventLine} />
                {showResult && (
                   <span className={`my-bets-card__leg-result my-bets-card__leg-result--${resultModifierClass(legResult)}`}>
-                     {betResultLabel(legResult)}
+                     {betResultLabel(legResult, t)}
                   </span>
                )}
             </div>
@@ -960,15 +966,17 @@ function ParlayEventGroup({
    promosByMarketKey,
 }: {
    items: readonly ParlayLegItem[];
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement {
+   const copy = useBetMarketCopy();
    const first = items[0]!.leg;
    const ek = eventLookupKey(first.marketId);
    const promoKey = isPromoMarketChain(first.marketId) ? promoMarketLookupKey(first.marketId) : null;
    const promo = promoKey != null ? (promosByMarketKey.get(promoKey) ?? null) : null;
-   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, first.marketId, first.side, promo);
-   const eventOdds = eventGroupOddsUi(items);
+   const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, first.marketId, first.side, promo, copy);
+   const { oddsFormat } = useSettings();
+   const eventOdds = eventGroupOddsUi(items, oddsFormat);
    return (
       <li className="my-bets-card__parlay-event">
          <div className="my-bets-card__parlay-event-head">
@@ -1003,7 +1011,7 @@ function ParlayLegsList({
 }: {
    listKey: string;
    legs: readonly WalletParlayLeg[];
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement {
    const groups = groupParlayLegsForDisplay(legs);
@@ -1040,10 +1048,11 @@ function ParlayBetCard({
 }: {
    betPda: string;
    row: Extract<WalletBetRow, { kind: "parlay" }>;
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
    actions?: ReactElement | null;
 }): ReactElement {
+   const { t } = useI18n();
    const legCount = row.legs.length;
    return (
       <li className="my-bets-card my-bets-card--parlay">
@@ -1056,7 +1065,7 @@ function ParlayBetCard({
          />
          <div className="my-bets-card__body">
             <p className="my-bets-card__parlay-heading">
-               Parlay · {legCount} {legCount === 1 ? "leg" : "legs"}
+               {legCount === 1 ? t("myBets.parlayOne", { count: legCount }) : t("myBets.parlayMany", { count: legCount })}
             </p>
             <ParlayLegsList
                listKey={betPda}
@@ -1085,7 +1094,7 @@ function WalletBetCard({
    onChanged,
 }: {
    row: WalletBetRow;
-   eventsByKey: ReadonlyMap<string, UiGroupedEvent | null>;
+   eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
    interactive?: boolean;
    onChanged?: () => void;
@@ -1128,6 +1137,7 @@ export function MyBetsPage(): ReactElement {
    const { account, isConnected } = useWallet();
    const { signer: walletSigner, ready: signerReady, walletName } = useAppTransactionSigner();
    const { cluster } = useCluster();
+   const { t } = useI18n();
 
    const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
 
@@ -1144,7 +1154,7 @@ export function MyBetsPage(): ReactElement {
    const [closedErr, setClosedErr] = useState<string | null>(null);
    const [closedRows, setClosedRows] = useState<readonly WalletBetRow[]>([]);
    const [betTab, setBetTab] = useState<MyBetsTab>("open");
-   const [eventsByKey, setEventsByKey] = useState<ReadonlyMap<string, UiGroupedEvent | null>>(() => new Map());
+   const [eventsByKey, setEventsByKey] = useState<ReadonlyMap<string, BetCardEvent | null>>(() => new Map());
    const [promosByMarketKey, setPromosByMarketKey] = useState<ReadonlyMap<string, UiPromotionalMarket>>(
       () => new Map(),
    );
@@ -1207,22 +1217,21 @@ export function MyBetsPage(): ReactElement {
       }
       let cancelled = false;
       void (async () => {
-         const entries = await Promise.all(
-            missing.map(async ([key, ids]) => {
-               try {
-                  const ev = await fetchOneEvent(ids.sport, ids.league, ids.event);
-                  return [key, ev] as const;
-               } catch {
-                  return [key, null] as const;
-               }
-            }),
-         );
+         const byKey = new Map<string, BetCardEvent>();
+         try {
+            const cards = await fetchBetCardEvents(missing.map(([, ids]) => ids.event));
+            for (const ev of cards) {
+               byKey.set(`${ev.sport_id}:${ev.league_id}:${ev.id}`, ev);
+            }
+         } catch {
+            /* mark missing keys null below so we do not retry per bet */
+         }
          if (!cancelled) {
             setEventsByKey((prev) => {
                const next = new Map(prev);
-               for (const [key, ev] of entries) {
+               for (const [key] of missing) {
                   if (!next.has(key)) {
-                     next.set(key, ev);
+                     next.set(key, byKey.get(key) ?? null);
                   }
                }
                return next;
@@ -1381,8 +1390,8 @@ export function MyBetsPage(): ReactElement {
    if (!isConnected || !account) {
       return (
          <main className="my-bets-page">
-            <h2 className="my-bets-page__title">My Bets</h2>
-            <p className="my-bets-page__hint">Connect your wallet to load bets.</p>
+            <h2 className="my-bets-page__title">{t("myBets.title")}</h2>
+            <p className="my-bets-page__hint">{t("myBets.connectHint")}</p>
          </main>
       );
    }
@@ -1390,14 +1399,14 @@ export function MyBetsPage(): ReactElement {
    return (
       <main className="my-bets-page">
          <div className="my-bets-page__head">
-            <h2 className="my-bets-page__title">My Bets</h2>
+            <h2 className="my-bets-page__title">{t("myBets.title")}</h2>
             <button
                type="button"
                className="my-bets-page__refresh"
                disabled={activeState === "loading"}
                onClick={() => void (betTab === "open" ? loadOpen() : loadClosed())}
             >
-               {activeState === "loading" ? "Refreshing…" : "Refresh"}
+               {activeState === "loading" ? t("myBets.refreshing") : t("myBets.refresh")}
             </button>
          </div>
 
@@ -1405,7 +1414,7 @@ export function MyBetsPage(): ReactElement {
          {claimErr != null && betTab === "open" && <p className="my-bets-page__err">{claimErr}</p>}
 
          <div className="my-bets-page__tabs-row">
-            <div className="my-bets-page__tabs" role="tablist" aria-label="Bet groups">
+            <div className="my-bets-page__tabs" role="tablist" aria-label={t("myBets.groups")}>
                <button
                   type="button"
                   role="tab"
@@ -1413,7 +1422,7 @@ export function MyBetsPage(): ReactElement {
                   className={`my-bets-page__tab${betTab === "open" ? " my-bets-page__tab--active" : ""}`}
                   onClick={() => setBetTab("open")}
                >
-                  Open Bets ({rows.length})
+                  {t("myBets.openBets", { count: rows.length })}
                </button>
                <button
                   type="button"
@@ -1422,7 +1431,7 @@ export function MyBetsPage(): ReactElement {
                   className={`my-bets-page__tab${betTab === "closed" ? " my-bets-page__tab--active" : ""}`}
                   onClick={() => setBetTab("closed")}
                >
-                  Closed Bets ({closedRows.length})
+                  {t("myBets.closedBets", { count: closedRows.length })}
                </button>
             </div>
             {betTab === "open" && settledRows.length > 0 && (
@@ -1432,26 +1441,29 @@ export function MyBetsPage(): ReactElement {
                   disabled={claimBusy || state === "loading" || !signerReady || walletSigner == null}
                   title={
                      walletSigner == null
-                        ? "Connect a wallet"
+                        ? t("myBets.connectWallet")
                         : !signerReady
-                          ? "Wallet signer not ready"
+                          ? t("myBets.signerNotReady")
                           : undefined
                   }
                   onClick={() => void runClaim()}
                >
                   {claimBusy
-                     ? "Claiming…"
-                     : `Claim (${claimTxCount} ${claimTxCount === 1 ? "tx" : "txs"})`}
+                     ? t("myBets.claiming")
+                     : t("myBets.claim", {
+                          count: claimTxCount,
+                          txs: claimTxCount === 1 ? t("myBets.tx") : t("myBets.txs"),
+                       })}
                </button>
             )}
          </div>
 
          <div className="my-bets-page__tab-panel" role="tabpanel">
-            {activeLoading && <p className="my-bets-page__loading">Loading bets…</p>}
+            {activeLoading && <p className="my-bets-page__loading">{t("myBets.loading")}</p>}
 
             {activeState === "ok" && activeEmpty && (
                <p className="my-bets-page__empty">
-                  {betTab === "open" ? "No bets found for this wallet." : "No closed bets found for this wallet."}
+                  {betTab === "open" ? t("myBets.emptyOpen") : t("myBets.emptyClosed")}
                </p>
             )}
 

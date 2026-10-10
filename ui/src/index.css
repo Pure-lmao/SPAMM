@@ -1816,6 +1816,121 @@ h1 {
    position: relative;
    min-width: 0;
    max-width: 100%;
+   display: flex;
+   align-items: center;
+   justify-content: flex-end;
+   gap: 0.65rem;
+}
+
+.app-header__actions {
+   display: flex;
+   align-items: center;
+   gap: 0.45rem;
+   flex-shrink: 0;
+}
+
+.settings-menu {
+   position: relative;
+   flex-shrink: 0;
+   z-index: 1100;
+}
+
+.settings-menu__btn {
+   display: inline-flex;
+   align-items: center;
+   justify-content: center;
+   width: 2.15rem;
+   height: 2.15rem;
+   padding: 0;
+   border-radius: 8px;
+   border: 1px solid var(--border);
+   background: var(--panel);
+   color: var(--text);
+   cursor: pointer;
+}
+
+.settings-menu__btn:hover,
+.settings-menu__btn[aria-expanded="true"] {
+   border-color: var(--accent-dim);
+   color: var(--accent);
+}
+
+.settings-menu__icon {
+   display: block;
+}
+
+.settings-menu__panel {
+   position: absolute;
+   right: 0;
+   top: calc(100% + 0.4rem);
+   z-index: 1;
+   width: 15.5rem;
+   padding: 0.85rem 0.9rem;
+   background: var(--panel);
+   border: 1px solid var(--border);
+   border-radius: 10px;
+   box-shadow: var(--shadow-panel-pop);
+   display: flex;
+   flex-direction: column;
+   gap: 0.85rem;
+}
+
+.settings-menu__field {
+   display: flex;
+   flex-direction: column;
+   gap: 0.4rem;
+   margin: 0;
+   padding: 0;
+   border: 0;
+   min-width: 0;
+}
+
+.settings-menu__label {
+   font-size: 0.72rem;
+   font-weight: 600;
+   text-transform: uppercase;
+   letter-spacing: 0.05em;
+   color: var(--muted);
+}
+
+.settings-menu__select {
+   font: inherit;
+   font-size: 0.88rem;
+   padding: 0.4rem 0.5rem;
+   border-radius: 8px;
+   border: 1px solid var(--border);
+   background: var(--bg);
+   color: var(--text);
+}
+
+.odds-input-row {
+   display: flex;
+   align-items: center;
+   gap: 0.45rem;
+   min-width: 0;
+}
+
+.odds-input-row .bet-modal-input {
+   flex: 1;
+   min-width: 0;
+   width: 100%;
+}
+
+.odds-input-decimal {
+   flex-shrink: 0;
+   font-variant-numeric: tabular-nums;
+   font-size: 0.82rem;
+   font-weight: 600;
+   color: var(--muted);
+}
+
+.bet-slip-tray__selection-odds {
+   margin-left: auto;
+   flex-shrink: 0;
+   font-weight: 700;
+   font-variant-numeric: tabular-nums;
+   padding-top: 0.1rem;
+   text-align: right;
 }
 
 .app-header__wallet-menu-btn {
@@ -2063,6 +2178,10 @@ h1 {
       display: flex;
       flex-direction: column;
       align-items: flex-end;
+   }
+
+   .app-header__actions {
+      order: -1;
    }
 
    .app-header__wallet-menu-btn {
@@ -3265,6 +3384,56 @@ a.inline-nav-link:hover {
    color: var(--heading);
    text-align: center;
    border-bottom: 1px solid var(--border);
+}
+
+.event-market-section-toggle {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   gap: 0.75rem;
+   width: 100%;
+   box-sizing: border-box;
+   margin: 0;
+   padding: 0.65rem 1rem;
+   font: inherit;
+   font-size: 0.98rem;
+   font-weight: 700;
+   letter-spacing: 0.02em;
+   text-align: left;
+   color: var(--text);
+   background: var(--panel);
+   border: 0;
+   cursor: pointer;
+}
+
+.event-market-section-toggle:hover {
+   color: var(--accent);
+}
+
+.event-market-section-toggle__chevron {
+   width: 0.45rem;
+   height: 0.45rem;
+   border-right: 2px solid currentColor;
+   border-bottom: 2px solid currentColor;
+   transform: rotate(-45deg);
+   flex-shrink: 0;
+}
+
+.event-market-section-toggle__chevron.is-open {
+   transform: rotate(45deg);
+}
+
+.promo-markets-section__toggle {
+   display: flex;
+   align-items: center;
+   justify-content: space-between;
+   width: 100%;
+   padding: 0;
+   border: 0;
+   background: transparent;
+   cursor: pointer;
+   text-align: left;
+   font: inherit;
 }
 
 .event-market-section-caption {

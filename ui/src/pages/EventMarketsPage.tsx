@@ -11,16 +11,18 @@ import { pickBetSide } from "../betting/outcomeSide";
 import type { MarketRow } from "../betting/types";
 import { useBetSlip } from "../betting/BetSlipContext";
 import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
-import { displayEventTitle, formatStart } from "../markets/eventDisplay";
+import { displayEventTitle } from "../markets/eventDisplay";
 import { fetchOneEvent } from "../markets/fetchEvent";
 import { fetchPromosForEvent } from "../markets/fetchPromos";
 import { PromoMarketsSection } from "../markets/PromoMarketsSection";
+import { MarketSection } from "../markets/MarketSection";
 import { PlayerOverUnderTable, PlayerYesNoTable } from "../markets/PlayerPropsTable";
 import { marketDomKey, periodCaption, shouldShowPeriodBadge, uiMarketDisplayCtx } from "../markets/eventMarketsDisplay";
-import { oddsTableLabels } from "../markets/oddsTableLabels";
+import { useOddsTableLabels } from "../markets/oddsTableLabels";
+import { useI18n } from "../i18n/useI18n";
+import { useFormatDbOdd } from "../settings/SettingsContext";
 import {
    decimalOddsFromDb,
-   fmtOdd,
    formatMarketLineDisplay,
    orderOneX2WireToDisplay,
    parseOdds,
@@ -60,6 +62,9 @@ export function EventMarketsPage(): ReactElement {
    const { state } = useLocation();
    const leagueName = (state as NavState | null)?.leagueName?.trim() ?? "";
    const { toggleSelection, isSelected } = useBetSlip();
+   const formatOdd = useFormatDbOdd();
+   const { t, leagueName: translateLeague, formatStart } = useI18n();
+   const oddsTableLabels = useOddsTableLabels();
    // const { cluster } = useCluster();
    const [ev, setEv] = useState<EventPayload | null>(null);
    const [promos, setPromos] = useState<UiPromotionalMarket[]>([]);
@@ -73,7 +78,7 @@ export function EventMarketsPage(): ReactElement {
       const l = Number(leagueId);
       const e = Number(eventId);
       if (!Number.isFinite(s) || !Number.isFinite(l) || !Number.isFinite(e)) {
-         setErr("Invalid route.");
+         setErr("invalid-route");
          return;
       }
       let cancelled = false;
@@ -115,9 +120,9 @@ export function EventMarketsPage(): ReactElement {
    if (err != null) {
       return (
          <div className="event-page">
-            <p className="banner-error">{err}</p>
+            <p className="banner-error">{err === "invalid-route" ? t("event.invalidRoute") : err}</p>
             <Link to="/" className="inline-nav-link">
-               ← Back to events
+               {t("event.back")}
             </Link>
          </div>
       );
@@ -126,7 +131,7 @@ export function EventMarketsPage(): ReactElement {
    if (ev === null) {
       return (
          <div className="event-page">
-            <p className="loading">Loading event…</p>
+            <p className="loading">{t("event.loading")}</p>
          </div>
       );
    }
@@ -184,7 +189,7 @@ export function EventMarketsPage(): ReactElement {
             </button>
          ) : (
             <button type="button" className={oddBtnClass(m, column, i)} onClick={() => toggleSheet(m, column, i, v)}>
-               <span className="odds-value">{fmtOdd(v)}</span>
+               <span className="odds-value">{formatOdd(v)}</span>
             </button>
          )}
       </td>
@@ -196,7 +201,7 @@ export function EventMarketsPage(): ReactElement {
             <header className="event-page-header" data-sport={sid}>
                <h1 className="event-page-title">{displayEventTitle(ev)}</h1>
                <p className="event-page-sub">
-                  {leagueName !== "" && <span className="event-page-league">{leagueName}</span>}
+                  {leagueName !== "" && <span className="event-page-league">{translateLeague(leagueName)}</span>}
                   {leagueName !== "" && <span className="event-page-sub-sep"> · </span>}
                   <time dateTime={new Date(ev.start_time).toISOString()}>{formatStart(ev.start_time)}</time>
                </p>
@@ -209,10 +214,10 @@ export function EventMarketsPage(): ReactElement {
 
             <div className="event-page-sections">
                {groups.map((g, gi) => (
-                  <section key={`${g.kind}-${g.title}-${gi}`} className="event-market-section">
+                  <MarketSection key={`${g.kind}-${g.title}-${gi}`} title={g.title} tooltip={g.tooltip}>
                      {(g.layout === "threeWay1x2" || g.layout === "twoWayTeams") && (
                         <div className="event-money-blocks">
-                           {g.rows.map((m, mi) => {
+                           {g.rows.map((m) => {
                               const raw = parseOdds(m.last_odds);
                               const is1x2 = g.layout === "threeWay1x2";
                               const values = is1x2 ? orderOneX2WireToDisplay(raw) : raw;
@@ -220,11 +225,6 @@ export function EventMarketsPage(): ReactElement {
                               const n = is1x2 ? 3 : 2;
                               return (
                                  <table key={marketDomKey(m)} className="event-markets-table event-markets-table--money">
-                                    {mi === 0 ? (
-                                       <caption className="event-market-section-caption" title={g.tooltip}>
-                                          {g.title}
-                                       </caption>
-                                    ) : null}
                                     <thead>
                                        <tr>
                                           {is1x2 ? (
@@ -269,9 +269,6 @@ export function EventMarketsPage(): ReactElement {
 
                      {(g.layout === "handicapPair") && (
                         <table className="event-markets-table event-markets-table--handicap-pair">
-                           <caption className="event-market-section-caption" title={g.tooltip}>
-                              {g.title}
-                           </caption>
                            <thead>
                               <tr>
                                  <th>{homeHead}</th>
@@ -306,7 +303,7 @@ export function EventMarketsPage(): ReactElement {
                                                    {homeLine}
                                                 </span>
                                                 <span className={`odd-btn__odds odds-value${home === 0 ? " odds-value--na" : ""}`}>
-                                                   {fmtOdd(home)}
+                                                   {formatOdd(home)}
                                                 </span>
                                              </button>
                                           </td>
@@ -321,7 +318,7 @@ export function EventMarketsPage(): ReactElement {
                                                    {awayLine}
                                                 </span>
                                                 <span className={`odd-btn__odds odds-value${away === 0 ? " odds-value--na" : ""}`}>
-                                                   {fmtOdd(away)}
+                                                   {formatOdd(away)}
                                                 </span>
                                              </button>
                                           </td>
@@ -342,9 +339,6 @@ export function EventMarketsPage(): ReactElement {
 
                      {(g.layout === "overUnder") && (
                         <table className="event-markets-table">
-                           <caption className="event-market-section-caption" title={g.tooltip}>
-                              {g.title}
-                           </caption>
                            <thead>
                               <tr>
                                  <th className="event-markets-th-line">{oddsTableLabels.line}</th>
@@ -387,8 +381,6 @@ export function EventMarketsPage(): ReactElement {
 
                      {g.layout === "playerOverUnder" && (
                         <PlayerOverUnderTable
-                           title={g.title}
-                           tooltip={g.tooltip}
                            rows={g.rows}
                            handlers={{
                               sportId: sid,
@@ -400,8 +392,6 @@ export function EventMarketsPage(): ReactElement {
 
                      {g.layout === "playerYesNo" && (
                         <PlayerYesNoTable
-                           title={g.title}
-                           tooltip={g.tooltip}
                            rows={g.rows}
                            handlers={{
                               sportId: sid,
@@ -413,9 +403,6 @@ export function EventMarketsPage(): ReactElement {
 
                      {(g.layout === "yesNo") && (
                         <table className="event-markets-table">
-                           <caption className="event-market-section-caption" title={g.tooltip}>
-                              {g.title}
-                           </caption>
                            <thead>
                               <tr>
                                  <th>{oddsTableLabels.yes}</th>
@@ -438,7 +425,7 @@ export function EventMarketsPage(): ReactElement {
 
                      {(g.layout === "multiWay" || g.layout === "moneyOdds" || g.layout === "correctScore") && (
                         <div className="event-money-blocks">
-                           {g.rows.map((m, mi) => {
+                           {g.rows.map((m) => {
                               const values = parseOdds(m.last_odds);
                               const column = inferBetColumn(m.mkt_string, m.id);
                               const ctx = uiMarketDisplayCtx(m, teams);
@@ -449,11 +436,6 @@ export function EventMarketsPage(): ReactElement {
                               const n = Math.max(headers.length, values.length, 1);
                               return (
                                  <table key={marketDomKey(m)} className="event-markets-table event-markets-table--money">
-                                    {mi === 0 ? (
-                                       <caption className="event-market-section-caption" title={g.tooltip}>
-                                          {g.title}
-                                       </caption>
-                                    ) : null}
                                     <thead>
                                        <tr>
                                           <th className="event-markets-th-meta" />
@@ -476,7 +458,7 @@ export function EventMarketsPage(): ReactElement {
                            })}
                         </div>
                      )}
-                  </section>
+                  </MarketSection>
                ))}
             </div>
          </div>

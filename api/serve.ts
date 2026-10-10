@@ -2,6 +2,7 @@ import { createDemoPromo, issueDemoFreebet, listDemoEvents } from "./demoAdmin";
 import { airdropUser } from "./solana";
 import {
    fetchEvents,
+   fetchBetCardEvents,
    fetchEventsByLeague,
    fetchEventsBySport,
    fetchEventsGrouped,
@@ -74,6 +75,7 @@ function withCors(req: Request, res: Response): Response {
  * - /api/events?sport={sportId}
  * - /api/events?sport={sportId}&league={leagueId}
  * - /api/events?sport={sportId}&league={leagueId}&event={eventId}
+ * - /api/events/cards?ids={eventId},{eventId},...  (bet-card labels only)
  * - /api/sports
  * - /api/leagues?all=true
  * - /api/leagues?sport={sportId}
@@ -120,6 +122,35 @@ export class ApiServer {
          return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
       }
       return Response.json({ error: "Missing query params. Use all=true, sport=, league=, or event=" }, { status: 400 });
+   }
+
+   /** Comma-separated event ids → event name and team names for bet cards. */
+   private async handleGetEventCards(params: URLSearchParams): Promise<Response> {
+      const raw = params.get("ids");
+      if (raw == null || raw.trim() === "") {
+         return Response.json({ error: "Missing query param ids= (comma-separated event ids)" }, { status: 400 });
+      }
+      const ids: number[] = [];
+      const seen = new Set<number>();
+      for (const part of raw.split(",")) {
+         const trimmed = part.trim();
+         if (trimmed === "") {
+            continue;
+         }
+         const n = Number(trimmed);
+         if (!Number.isInteger(n) || n < 0) {
+            return Response.json({ error: `Invalid event id: ${trimmed}` }, { status: 400 });
+         }
+         if (!seen.has(n)) {
+            seen.add(n);
+            ids.push(n);
+         }
+      }
+      if (ids.length === 0) {
+         return Response.json({ error: "Missing query param ids= (comma-separated event ids)" }, { status: 400 });
+      }
+      const result = fetchBetCardEvents(ids);
+      return new Response(safeJSONStringify(result), { headers: { "Content-Type": "application/json" } });
    }
 
    private async handleGetSports(params: URLSearchParams): Promise<Response> {
@@ -373,6 +404,9 @@ export class ApiServer {
 
       const params = url.searchParams;
 
+      if (url.pathname === "/api/events/cards") {
+         return this.handleGetEventCards(params).then((r) => withCors(req, r));
+      }
       if (url.pathname === "/api/events") {
          return this.handleGetEvents(params).then((r) => withCors(req, r));
       }

@@ -1,7 +1,9 @@
 import { betSlipLabel, groupTitle, periodCaption, type MarketId } from "spamm-aggregator-sdk";
+import { useMemo } from "react";
+import { useI18n } from "../i18n/useI18n";
 import { displayEventTitle } from "./eventDisplay";
-import { isPromoMarket, shouldShowPeriodBadge, uiMarketDisplayCtx } from "./eventMarketsDisplay";
-import type { UiGroupedEvent, UiMarket, UiPromotionalMarket } from "./types";
+import { shouldShowPeriodBadge } from "./eventMarketsDisplay";
+import type { BetCardEvent, UiMarket, UiPromotionalMarket } from "./types";
 
 export function eventLookupKey(chain: MarketId): string {
    const eid = chain.eventId;
@@ -31,20 +33,41 @@ export function indexPromotionalMarkets(promos: readonly UiPromotionalMarket[]):
    return map;
 }
 
-function promoPickLabel(side: number, promo: UiPromotionalMarket): string {
-   return side === 0 ? promo.yes_label : "No";
+function promoPickLabel(side: number, promo: UiPromotionalMarket, noLabel: string): string {
+   return side === 0 ? promo.yes_label : noLabel;
 }
 
-function findUiMarket(ev: UiGroupedEvent, chain: MarketId): UiMarket | undefined {
-   const mkts = ev.markets ?? [];
-   const id = Number(chain.mkt);
-   const pid = chain.period;
-   const player = Number(chain.player);
-   const exact = mkts.find((m) => m.id === id && m.period_id === pid && (m.player_id ?? 0) === player);
-   if (exact !== undefined) {
-      return exact;
-   }
-   return mkts.find((m) => m.id === id && m.period_id === pid) ?? mkts.find((m) => m.id === id);
+export type BetMarketCopy = {
+   live: string;
+   no: string;
+   promo: string;
+   event: (id: string) => string;
+   market: (id: string) => string;
+   side: (side: number) => string;
+};
+
+const englishBetCopy: BetMarketCopy = {
+   live: " · LIVE",
+   no: "No",
+   promo: "Promo",
+   event: (id) => `Event ${id}`,
+   market: (id) => `Market #${id}`,
+   side: (side) => `side ${side}`,
+};
+
+export function useBetMarketCopy(): BetMarketCopy {
+   const { t } = useI18n();
+   return useMemo(
+      () => ({
+         live: t("myBets.live"),
+         no: t("myBets.no"),
+         promo: t("myBets.promo"),
+         event: (id: string) => t("myBets.event", { id }),
+         market: (id: string) => t("myBets.market", { id }),
+         side: (side: number) => t("myBets.side", { side }),
+      }),
+      [t],
+   );
 }
 
 export type BetMarketDisplayLines = Readonly<{
@@ -58,16 +81,17 @@ export type BetMarketDisplayLines = Readonly<{
 }>;
 
 export function betMarketDisplayLines(
-   ev: UiGroupedEvent | undefined,
+   ev: BetCardEvent | undefined,
    chain: MarketId,
    side: number,
    promo?: UiPromotionalMarket | null,
+   copy: BetMarketCopy = englishBetCopy,
 ): BetMarketDisplayLines {
-   const eventTitle = ev != null ? displayEventTitle(ev) : `Event ${chain.eventId.event.toString()}`;
-   const liveSuffix = !chain.isPregame ? " · LIVE" : "";
+   const eventTitle = ev != null ? displayEventTitle(ev) : copy.event(chain.eventId.event.toString());
+   const liveSuffix = !chain.isPregame ? copy.live : "";
 
    if (promo != null) {
-      const pick = promoPickLabel(side, promo);
+      const pick = promoPickLabel(side, promo, copy.no);
       const sportId = ev?.sport_id ?? promo.sport_id;
       const periodMarket = shouldShowPeriodBadge(sportId, { period_id: promo.period_id } as UiMarket)
          ? `${periodCaption(promo.period_id)} · ${promo.title}`
@@ -84,8 +108,8 @@ export function betMarketDisplayLines(
    }
 
    if (ev == null) {
-      const fb = `Market #${chain.mkt.toString()}`;
-      const pick = `side ${side}`;
+      const fb = copy.market(chain.mkt.toString());
+      const pick = copy.side(side);
       return {
          eventTitle,
          liveSuffix,
@@ -97,25 +121,20 @@ export function betMarketDisplayLines(
       };
    }
 
-   const m = findUiMarket(ev, chain);
-   const ctx = m
-      ? uiMarketDisplayCtx(m, { homeName: ev.home_name, awayName: ev.away_name })
-      : {
-         sport: ev.sport_id,
-         homeName: ev.home_name,
-         awayName: ev.away_name,
-         playerId: Number(chain.player),
-      };
-   const mkt = m?.id ?? Number(chain.mkt);
+   const ctx = {
+      sport: ev.sport_id,
+      homeName: ev.home_name,
+      awayName: ev.away_name,
+      playerId: Number(chain.player),
+      period: chain.period,
+   };
+   const mkt = Number(chain.mkt);
    const pick = betSlipLabel(mkt, side, ctx)
       .replace(/\s*\(1X2\)\s*$/, "")
       .replace(/\s*\(ML\)\s*$/, "")
       .replace(/\s*\(To qualify\)\s*$/, "");
-   const category =
-      m != null && isPromoMarket(m)
-         ? "Promo"
-         : m?.player_name?.trim() || groupTitle(mkt, ctx);
-   const periodId = m?.period_id ?? chain.period;
+   const category = isPromoMarketChain(chain) ? copy.promo : groupTitle(mkt, ctx);
+   const periodId = chain.period;
    const periodMarket = shouldShowPeriodBadge(ev.sport_id, { period_id: periodId } as UiMarket)
       ? `${periodCaption(periodId)} · ${category}`
       : category;

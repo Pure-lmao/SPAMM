@@ -5,6 +5,7 @@ import type {
    DbLeague,
    DbEvent,
    DbMarket,
+   BetCardEvent,
    GroupedSport,
    GroupedLeague,
    GroupedEvent,
@@ -223,6 +224,29 @@ export function fetchEvents(ids: number[] = [], withMarkets: boolean = false): M
       ).all(...idParams);
       return rowsToEventsWithMarketsMap(rows);
    }
+}
+
+const BET_CARD_ID_CHUNK = 1000;
+
+/** Event names for bet cards. `ids` is a list of event ids. */
+export function fetchBetCardEvents(ids: number[]): BetCardEvent[] {
+   if (ids.length === 0) {
+      return [];
+   }
+   const database = getDb();
+   const out: BetCardEvent[] = [];
+   for (let i = 0; i < ids.length; i += BET_CARD_ID_CHUNK) {
+      const chunk = ids.slice(i, i + BET_CARD_ID_CHUNK);
+      const placeholders = chunk.map(() => "?").join(",");
+      const params = chunk.map((id) => id.toString());
+      const rows = database.query<BetCardEvent, string[]>(
+         `SELECT id, league_id, sport_id, home_name, away_name, event_name
+         FROM events
+         WHERE id IN (${placeholders})`
+      ).all(...params);
+      out.push(...rows);
+   }
+   return out;
 }
 
 export function fetchUngradedStartedEvents(): Map<string, DbEvent> {

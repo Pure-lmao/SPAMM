@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from "react";
 import { isValidRefCode, loadOrCreateRefCode, persistRefCode, sanitizeRefCodeInput } from "./refCodeStorage";
+import { useI18n } from "../i18n/useI18n";
 
 type InviteFriendsModalProps = Readonly<{
    open: boolean;
@@ -14,7 +15,8 @@ function buildInviteUrl(refCode: string): string {
 
 export function InviteFriendsModal({ open, onClose }: InviteFriendsModalProps): ReactElement | null {
    const [code, setCode] = useState(() => loadOrCreateRefCode());
-   const [copyLabel, setCopyLabel] = useState<"Copy link" | "Copied">("Copy link");
+   const [copyState, setCopyState] = useState<"copy" | "copied">("copy");
+   const { t } = useI18n();
 
    useEffect(() => {
       if (!open) {
@@ -32,7 +34,7 @@ export function InviteFriendsModal({ open, onClose }: InviteFriendsModalProps): 
    useEffect(() => {
       if (open) {
          setCode(loadOrCreateRefCode());
-         setCopyLabel("Copy link");
+         setCopyState("copy");
       }
    }, [open]);
 
@@ -52,10 +54,10 @@ export function InviteFriendsModal({ open, onClose }: InviteFriendsModalProps): 
       }
       try {
          await navigator.clipboard.writeText(inviteUrl);
-         setCopyLabel("Copied");
-         window.setTimeout(() => setCopyLabel("Copy link"), 2000);
+         setCopyState("copied");
+         window.setTimeout(() => setCopyState("copy"), 2000);
       } catch {
-         setCopyLabel("Copy link");
+         setCopyState("copy");
       }
    }, [inviteUrl]);
 
@@ -82,9 +84,9 @@ export function InviteFriendsModal({ open, onClose }: InviteFriendsModalProps): 
          >
             <header className="bet-modal-header">
                <h2 id="invite-friends-title" className="bet-modal-title">
-                  Invite Friends
+                  {t("buttons.inviteFriends")}
                </h2>
-               <button type="button" className="bet-modal-close" onClick={onClose} aria-label="Close">
+               <button type="button" className="bet-modal-close" onClick={onClose} aria-label={t("buttons.close")}>
                   ×
                </button>
             </header>
@@ -116,7 +118,7 @@ export function InviteFriendsModal({ open, onClose }: InviteFriendsModalProps): 
             </div>
             <footer className="bet-modal-footer">
                <button type="button" className="bet-modal-btn bet-modal-btn--ghost" onClick={onClose}>
-                  Close
+                  {t("buttons.close")}
                </button>
                <button
                   type="button"
@@ -124,7 +126,7 @@ export function InviteFriendsModal({ open, onClose }: InviteFriendsModalProps): 
                   disabled={inviteUrl === ""}
                   onClick={() => void onCopy()}
                >
-                  {copyLabel}
+                  {copyState === "copied" ? t("buttons.copied") : t("buttons.copyLink")}
                </button>
             </footer>
          </div>
@@ -134,10 +136,11 @@ export function InviteFriendsModal({ open, onClose }: InviteFriendsModalProps): 
 
 export function InviteFriendsControls(): ReactElement {
    const [open, setOpen] = useState(false);
+   const { t } = useI18n();
    return (
       <>
          <button type="button" className="invite-friends-btn" onClick={() => setOpen(true)}>
-            Invite Friends
+            {t("buttons.inviteFriends")}
          </button>
          <InviteFriendsModal open={open} onClose={() => setOpen(false)} />
       </>

@@ -1,5 +1,6 @@
 import { type ReactElement } from "react";
-import { decimalOddsFromDb, fmtOdd, formatMarketLineDisplay } from "./oddsFormat";
+import { useFormatDbOdd } from "../settings/SettingsContext";
+import { decimalOddsFromDb, formatMarketLineDisplay } from "./oddsFormat";
 import { type MarketLineSource, spreadLineDisplayForOutcome } from "./lineFromMarket";
 
 export function OddButtons({
@@ -13,6 +14,7 @@ export function OddButtons({
    onPickIndex?: (index: number) => void;
    isIndexSelected?: (index: number) => boolean;
 }): ReactElement {
+   const formatOdd = useFormatDbOdd();
    const cols = Math.max(values.length, 1);
    const gridStyle = { gridTemplateColumns: `repeat(${cols}, minmax(0, 1fr))` } as const;
    const cls = ["odds-buttons", className].filter(Boolean).join(" ");
@@ -32,7 +34,7 @@ export function OddButtons({
                      className={["odd-btn", isIndexSelected?.(i) ? "odd-btn--selected" : ""].filter(Boolean).join(" ")}
                      onClick={() => onPickIndex?.(i)}
                   >
-                     <span className="odds-value">{fmtOdd(v)}</span>
+                     <span className="odds-value">{formatOdd(v)}</span>
                   </button>
                ),
             )
@@ -91,6 +93,7 @@ export function LineWithOddsCell({
    onPick: (outcomeIndex: number, decimalOdds: number) => void;
    isIndexSelected?: (outcomeIndex: number) => boolean;
 }): ReactElement {
+   const formatOdd = useFormatDbOdd();
    const displayLine = formatMarketLineDisplay(line, lineKind);
    const lineClass =
       sportId === 1 ? "odds-line-value odds-line-value--soccer-asian" : "odds-line-value";
@@ -117,7 +120,7 @@ export function LineWithOddsCell({
                         {lineDisp}
                      </span>
                      <span className={`odd-btn__odds odds-value${pair[i] === 0 ? " odds-value--na" : ""}`}>
-                        {fmtOdd(pair[i])}
+                        {formatOdd(pair[i])}
                      </span>
                   </button>
                );

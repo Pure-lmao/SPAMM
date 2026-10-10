@@ -5,7 +5,9 @@ import { AppTopNav } from "./AppTopNav";
 import { AppFooter } from "./AppFooter";
 import { InviteFriendsControls } from "../invite/InviteFriendsModal";
 import UsdcBalancePanel from "../wallet/UsdcBalancePanel";
+import { SettingsMenu } from "../settings/SettingsMenu";
 import { WalletBar } from "../wallet/WalletBar";
+import { useI18n } from "../i18n/useI18n";
 
 /** Keep in sync with `max-width` in `index.css` for `.app-header` wallet menu rules. */
 const WALLET_MENU_MQ = "(max-width: 720px)";
@@ -14,6 +16,7 @@ export function RootLayout(): ReactElement {
    const [walletMenuOpen, setWalletMenuOpen] = useState(false);
    const walletShellRef = useRef<HTMLDivElement>(null);
    const location = useLocation();
+   const { t } = useI18n();
 
    useEffect(() => {
       setWalletMenuOpen(false);
@@ -62,17 +65,6 @@ export function RootLayout(): ReactElement {
             <AppBrand />
             <AppTopNav />
             <div className="app-header__wallet-shell" ref={walletShellRef}>
-               <button
-                  type="button"
-                  className="app-header__wallet-menu-btn"
-                  id="header-wallet-menu-trigger"
-                  aria-expanded={walletMenuOpen}
-                  aria-controls="header-wallet-menu-panel"
-                  aria-haspopup="true"
-                  onClick={() => setWalletMenuOpen((o) => !o)}
-               >
-                  Wallet
-               </button>
                <div
                   id="header-wallet-menu-panel"
                   className={`app-header__wallet-panel${walletMenuOpen ? " is-open" : ""}`}
@@ -82,6 +74,20 @@ export function RootLayout(): ReactElement {
                   <InviteFriendsControls />
                   <UsdcBalancePanel />
                   <WalletBar />
+               </div>
+               <div className="app-header__actions">
+                  <button
+                     type="button"
+                     className="app-header__wallet-menu-btn"
+                     id="header-wallet-menu-trigger"
+                     aria-expanded={walletMenuOpen}
+                     aria-controls="header-wallet-menu-panel"
+                     aria-haspopup="true"
+                     onClick={() => setWalletMenuOpen((o) => !o)}
+                  >
+                     {t("buttons.wallet")}
+                  </button>
+                  <SettingsMenu />
                </div>
             </div>
          </header>

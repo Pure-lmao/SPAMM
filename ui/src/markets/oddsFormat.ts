@@ -1,3 +1,5 @@
+import { convertOdds, type OddsFormat } from "../settings/convertOdds";
+
 const INT_EPS = 1e-9;
 
 /** `last_odds` JSON stores decimal odds × this factor (on-chain ODDS_SCALE). */
@@ -69,4 +71,12 @@ export function fmtOdd(dbValue: number): string {
       return "—";
    }
    return decimalOddsFromDb(dbValue).toFixed(2);
+}
+
+/** `last_odds` cell in the user's odds format. Zero means no price. */
+export function formatDbOdds(dbValue: number, format: OddsFormat): string {
+   if (dbValue === 0) {
+      return "—";
+   }
+   return convertOdds(decimalOddsFromDb(dbValue), format, 2);
 }

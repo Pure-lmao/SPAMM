@@ -181,16 +181,20 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       let mm_quote_buffer = &mm_accounts[base + 4];
 
       if verify_mm_program_executable(mm_program_account).is_err() {
+         log!("get_quote_proxy: mm program not executable");
          continue;
       }
 
       if !verify_mm_config_pda(mm_config_pda, mm_program_account) {
+         log!("get_quote_proxy: mm config pda not valid");
          continue;
       }
       if !verify_quote_buffer(mm_quote_buffer, mm_program_account) {
+         log!("get_quote_proxy: mm quote buffer not valid");
          continue;
       }
       if !verify_mm_market_data_pda(mm_market_data_pda, mm_program_account, &market_wire) {
+         log!("get_quote_proxy: mm market data pda not valid");
          continue;
       }
       if !verify_event_state(
@@ -200,6 +204,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          &event_game_state,
          event_state_sequence,
       ) {
+         log!("get_quote_proxy: mm event state pda not valid");
          continue;
       }
 
@@ -213,10 +218,12 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          mm_quote_buffer,
          &get_quote_ix_buf,
       ) else {
+         log!("get_quote_proxy: no quote for mm");
          continue;
       };
 
       if valid_quote_count >= MAX_NUMBER_OF_MMS_PROXY {
+         log!("get_quote_proxy: too many valid quotes");
          break;
       }
 

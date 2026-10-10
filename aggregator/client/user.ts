@@ -19,18 +19,18 @@ export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
 );
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
 const WCMarketMaker = "WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address;
-const operator = "3z6QBMEUjJubCwbKUsMKFnKnf1twyc5bZ9gaWHNAn1nP" as Address;
+const operator = "BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW" as Address;
 
-const betId = 100004n;
-const sport = 1 as Sport;
+const betId = 100002n;
+const sport = 2 as Sport;
 const marketId: MarketId = {
    eventId: {
-      event: 1n,
-      league: 1,
+      event: 401872979n,
+      league: 11840,
       sport,
    },
-   mkt: 1,
-   period: 1,
+   mkt: 0,
+   period: 0,
    isPregame: true,
    player: 0n,
    operator,
@@ -115,6 +115,7 @@ async function placeBet() {
 
 async function getQuotesFromProxy() {
    const mmList = await getMmListData(clients.rpc);
+   console.log(mmList.mmProgramAddresses);
    const quoteProxyIx = await getGetQuoteProxyIx(
       {
          betId,
@@ -126,7 +127,7 @@ async function getQuotesFromProxy() {
          eventStateSequence,
       },
       USER_SIGNER.address,
-      mmList.mmProgramAddresses,
+      [mmList.mmProgramAddresses[2]!],
    )
 
    const returnData = await simulateTransaction(clients.rpc, [quoteProxyIx], [USER_SIGNER]);
@@ -136,7 +137,7 @@ async function getQuotesFromProxy() {
    const parsedReturnData = decodeProxyQuoteReturnData(Buffer.from(...returnData));
    return parsedReturnData;
 }
-// getQuotesFromProxy().then(console.log).catch(console.error);
+getQuotesFromProxy().then(console.log).catch(console.error);
 
 async function getQuote() {
    const quote = await getMmGetQuoteIx({

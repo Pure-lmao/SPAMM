@@ -7,7 +7,7 @@ import {
 } from "spamm-aggregator-sdk";
 import type { BetSlipSelection } from "./types";
 import { parseOperatorAddress } from "./chainIds";
-import { oddsDecimalLabel } from "./betSlipUtils";
+import { formatSlipOddsFromScaled, type OddsFormat } from "../settings/convertOdds";
 import { formatUsdcBaseUnitsForUi } from "./usdc";
 
 export type SlipFreebet = Readonly<{
@@ -66,12 +66,20 @@ export function oddsInFreebetRange(oddsScaled: bigint, voucher: FreebetAccountDa
    return oddsScaled >= voucher.minOddsScaled && oddsScaled <= voucher.maxOddsScaled;
 }
 
-export function explainFreebetOdds(oddsScaled: bigint, voucher: FreebetAccountData): string | null {
+function freebetOddsLabel(scaled: bigint, format: OddsFormat): string {
+   return formatSlipOddsFromScaled(scaled, format, Number(ODDS_SCALE));
+}
+
+export function explainFreebetOdds(
+   oddsScaled: bigint,
+   voucher: FreebetAccountData,
+   format: OddsFormat = "decimal",
+): string | null {
    if (oddsScaled < voucher.minOddsScaled) {
-      return `Odds must be higher than ${oddsDecimalLabel(voucher.minOddsScaled)}`;
+      return `Odds must be higher than ${freebetOddsLabel(voucher.minOddsScaled, format)}`;
    }
    if (oddsScaled > voucher.maxOddsScaled) {
-      return `Odds must be lower than ${oddsDecimalLabel(voucher.maxOddsScaled)}`;
+      return `Odds must be lower than ${freebetOddsLabel(voucher.maxOddsScaled, format)}`;
    }
    return null;
 }
@@ -79,22 +87,23 @@ export function explainFreebetOdds(oddsScaled: bigint, voucher: FreebetAccountDa
 export function explainFreebetOddsForQuotes(
    rows: readonly FreebetQuoteRow[],
    voucher: FreebetAccountData,
+   format: OddsFormat = "decimal",
 ): string | null {
    if (rows.some((r) => oddsInFreebetRange(r.oddsScaled, voucher))) {
       return null;
    }
    if (rows.length === 0) {
-      return `Odds must be between ${oddsDecimalLabel(voucher.minOddsScaled)} and ${oddsDecimalLabel(voucher.maxOddsScaled)}`;
+      return `Odds must be between ${freebetOddsLabel(voucher.minOddsScaled, format)} and ${freebetOddsLabel(voucher.maxOddsScaled, format)}`;
    }
    const allBelow = rows.every((r) => r.oddsScaled < voucher.minOddsScaled);
    if (allBelow) {
-      return `Odds must be higher than ${oddsDecimalLabel(voucher.minOddsScaled)}`;
+      return `Odds must be higher than ${freebetOddsLabel(voucher.minOddsScaled, format)}`;
    }
    const allAbove = rows.every((r) => r.oddsScaled > voucher.maxOddsScaled);
    if (allAbove) {
-      return `Odds must be lower than ${oddsDecimalLabel(voucher.maxOddsScaled)}`;
+      return `Odds must be lower than ${freebetOddsLabel(voucher.maxOddsScaled, format)}`;
    }
-   return `Odds must be between ${oddsDecimalLabel(voucher.minOddsScaled)} and ${oddsDecimalLabel(voucher.maxOddsScaled)}`;
+   return `Odds must be between ${freebetOddsLabel(voucher.minOddsScaled, format)} and ${freebetOddsLabel(voucher.maxOddsScaled, format)}`;
 }
 
 export function combinedBoardOddsScaled(selections: readonly BetSlipSelection[]): bigint | null {
@@ -137,6 +146,7 @@ export function assessFreebetForSlip(
       quoteRows?: readonly FreebetQuoteRow[];
       quotesAttempted?: boolean;
       isSelected?: boolean;
+      oddsFormat?: OddsFormat;
    }>,
 ): { eligible: boolean; reason: string | null } {
    const legs = Math.max(1, selections.length);
@@ -155,6 +165,7 @@ export function assessFreebetForSlip(
    const isSelected = ctx?.isSelected === true;
    const quotesAttempted = ctx?.quotesAttempted === true;
    const rows = ctx?.quoteRows ?? [];
+   const oddsFormat = ctx?.oddsFormat ?? "decimal";
 
    if (isSelected && quotesAttempted) {
       const mmRows =
@@ -167,7 +178,7 @@ export function assessFreebetForSlip(
       if (mmRows.length === 0) {
          return { eligible: false, reason: "No allowed MM quoted" };
       }
-      const oddsReason = explainFreebetOddsForQuotes(mmRows, voucher);
+      const oddsReason = explainFreebetOddsForQuotes(mmRows, voucher, oddsFormat);
       if (oddsReason != null) {
          return { eligible: false, reason: oddsReason };
       }
@@ -176,7 +187,7 @@ export function assessFreebetForSlip(
 
    const boardOdds = combinedBoardOddsScaled(selections);
    if (boardOdds != null) {
-      const oddsReason = explainFreebetOdds(boardOdds, voucher);
+      const oddsReason = explainFreebetOdds(boardOdds, voucher, oddsFormat);
       if (oddsReason != null) {
          return { eligible: false, reason: oddsReason };
       }
@@ -191,6 +202,7 @@ export function withSlipEligibility(
       quoteRows: readonly FreebetQuoteRow[];
       quotesAttempted: boolean;
       selectedKey: string;
+      oddsFormat?: OddsFormat;
    }>,
 ): SlipFreebet[] {
    return vouchers.map((v) => {
@@ -198,6 +210,7 @@ export function withSlipEligibility(
          quoteRows: ctx.quoteRows,
          quotesAttempted: ctx.quotesAttempted,
          isSelected: freebetKey(v) === ctx.selectedKey,
+         oddsFormat: ctx.oddsFormat,
       });
       return { ...v, eligible: a.eligible, reason: a.reason };
    });

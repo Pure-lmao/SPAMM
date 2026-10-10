@@ -16,7 +16,9 @@ import {
    type PredictionKind,
 } from 'spamm-score-predict-sdk';
 import { resolveAppHttpRpcUrl } from '../betting/txPipeline';
-import { formatFilledBetOdds } from '../betting/filledOdds';
+import { filledDecimalOdds } from '../betting/filledOdds';
+import { convertOdds, type OddsFormat } from '../settings/convertOdds';
+import { useSettings } from '../settings/SettingsContext';
 import { formatUsdcBaseUnitsForUi } from '../betting/usdc';
 import { fetchTodayContest } from '../scorePredict/fetchContest';
 import {
@@ -48,6 +50,11 @@ function msUntil(deadline: number): string {
    return `${h}h ${m}m ${s}s`;
 }
 
+function linkedBetOdds(amount: bigint, payout: bigint, format: OddsFormat): string {
+   const dec = filledDecimalOdds(amount, payout);
+   return dec == null ? '—' : convertOdds(dec, format, 'slip');
+}
+
 function scoreLabel(kind: PredictionKind, home: number, away: number, total: number): string {
    if (kind === 'match_score') {
       return `${home}-${away}`;
@@ -56,6 +63,7 @@ function scoreLabel(kind: PredictionKind, home: number, away: number, total: num
 }
 
 export function ScorePredictPage(): ReactElement {
+   const { oddsFormat } = useSettings();
    const { isConnected, account } = useWallet();
    const { cluster } = useCluster();
    const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
@@ -564,7 +572,7 @@ export function ScorePredictPage(): ReactElement {
                         <span className="score-predict-bet-chip__label">Linked bet</span>
                         <span className="score-predict-bet-chip__value">
                            {openBet.eventLabel} · {formatUsdcBaseUnitsForUi(openBet.amount)} USDC @{' '}
-                           {formatFilledBetOdds(openBet.row.data.amount, openBet.row.data.payout)}
+                           {linkedBetOdds(openBet.row.data.amount, openBet.row.data.payout, oddsFormat)}
                         </span>
                      </div>
                   )}

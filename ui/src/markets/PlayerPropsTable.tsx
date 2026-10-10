@@ -4,7 +4,7 @@ import type { BetColumn } from "../betting/types";
 import { marketDomKey, shouldShowPeriodBadge, uiMarketDisplayCtx } from "./eventMarketsDisplay";
 import { lineRawForSpreadOrTotal } from "./lineFromMarket";
 import { formatMarketLineDisplay, parseOdds } from "./oddsFormat";
-import { oddsTableLabels } from "./oddsTableLabels";
+import { useOddsTableLabels } from "./oddsTableLabels";
 import { clusterPlayerPropMarkets, defaultPlayerPropMarket, inferBetColumn } from "./selectors";
 import type { UiMarket } from "./types";
 
@@ -187,27 +187,21 @@ function PlayerYesNoRow({
 }
 
 export function PlayerOverUnderTable({
-   title,
-   tooltip,
    rows,
    handlers,
 }: {
-   title: string;
-   tooltip: string;
    rows: UiMarket[];
    handlers: PlayerPropOddHandlers;
 }): ReactElement {
+   const oddsTableLabels = useOddsTableLabels();
    const clusters = clusterPlayerPropMarkets(rows);
    return (
       <table className="event-markets-table event-markets-table--player-ou">
-         <caption className="event-market-section-caption" title={tooltip}>
-            {title}
-         </caption>
          <thead>
             <tr>
-               <th className="event-markets-th-player">Player</th>
+               <th className="event-markets-th-player">{oddsTableLabels.player}</th>
                <th>{oddsTableLabels.over}</th>
-               <th className="event-markets-th-line">Line</th>
+               <th className="event-markets-th-line">{oddsTableLabels.line}</th>
                <th>{oddsTableLabels.under}</th>
             </tr>
          </thead>
@@ -221,27 +215,21 @@ export function PlayerOverUnderTable({
 }
 
 export function PlayerYesNoTable({
-   title,
-   tooltip,
    rows,
    handlers,
 }: {
-   title: string;
-   tooltip: string;
    rows: UiMarket[];
    handlers: PlayerPropOddHandlers;
 }): ReactElement {
+   const oddsTableLabels = useOddsTableLabels();
    const clusters = clusterPlayerPropMarkets(rows);
    const anyMulti = clusters.some((c) => c.markets.length > 1);
    return (
       <table className="event-markets-table event-markets-table--player-yn">
-         <caption className="event-market-section-caption" title={tooltip}>
-            {title}
-         </caption>
          <thead>
             <tr>
-               <th className="event-markets-th-player">Player</th>
-               {anyMulti ? <th className="event-markets-th-line">Line</th> : null}
+               <th className="event-markets-th-player">{oddsTableLabels.player}</th>
+               {anyMulti ? <th className="event-markets-th-line">{oddsTableLabels.line}</th> : null}
                <th>{oddsTableLabels.yes}</th>
                <th>{oddsTableLabels.no}</th>
             </tr>

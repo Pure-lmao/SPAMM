@@ -173,5 +173,6 @@ export async function simulateTransaction(
    const simulation = await rpc
       .simulateTransaction(encodedTransaction, { encoding: 'base64', sigVerify: false })
       .send();
+   console.log(simulation.value)
    return simulation.value.returnData?.data;
 }

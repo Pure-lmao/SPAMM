@@ -46,6 +46,16 @@ export type DbMarket = {
    operator: string;
 };
 
+/** Event names for a bet card. Market id, period, and side come from the bet. */
+export type BetCardEvent = {
+   id: number;
+   league_id: number;
+   sport_id: number;
+   home_name: string;
+   away_name: string;
+   event_name: string;
+};
+
 export type PromotionalMarketStatus = 'open' | 'settled';
 
 export type PromoRelatedEvent = {

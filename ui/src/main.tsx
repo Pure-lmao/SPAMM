@@ -3,6 +3,7 @@ import { createRoot } from "react-dom/client";
 import { BrowserRouter } from "react-router-dom";
 import { BetSlipProvider } from "./betting/BetSlipContext";
 import { SolanaProviders } from "./providers/SolanaProviders";
+import { SettingsProvider } from "./settings/SettingsContext";
 import { AppRoutes } from "./routes";
 import "./index.css";
 
@@ -12,9 +13,11 @@ if (el) {
       <StrictMode>
          <BrowserRouter>
             <SolanaProviders>
-               <BetSlipProvider>
-                  <AppRoutes />
-               </BetSlipProvider>
+               <SettingsProvider>
+                  <BetSlipProvider>
+                     <AppRoutes />
+                  </BetSlipProvider>
+               </SettingsProvider>
             </SolanaProviders>
          </BrowserRouter>
       </StrictMode>,

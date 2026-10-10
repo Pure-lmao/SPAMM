@@ -8,6 +8,19 @@ export function filledOddsScaled(amount: bigint, payout: bigint): bigint {
    return (payout * ODDS_SCALE) / amount;
 }
 
+/** Decimal odds from on-chain filled `payout` / `amount`, or null when unset. */
+export function filledDecimalOdds(amount: bigint, payout: bigint): number | null {
+   const scaled = filledOddsScaled(amount, payout);
+   if (scaled <= 0n) {
+      return null;
+   }
+   const x = Number(scaled) / Number(ODDS_SCALE);
+   if (!Number.isFinite(x) || x <= 0) {
+      return null;
+   }
+   return x;
+}
+
 /** Decimal odds from on-chain filled `payout` / `amount` (pending bets). */
 export function formatFilledBetOdds(amount: bigint, payout: bigint): string {
    const scaled = filledOddsScaled(amount, payout);

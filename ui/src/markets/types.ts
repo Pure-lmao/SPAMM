@@ -28,6 +28,16 @@ export type UiGroupedEvent = {
    markets?: UiMarket[];
 };
 
+/** `/api/events/cards` — event names. The pick is labeled from the on-chain market id. */
+export type BetCardEvent = {
+   id: number;
+   league_id: number;
+   sport_id: number;
+   home_name: string;
+   away_name: string;
+   event_name: string;
+};
+
 export type UiGroupedLeague = {
    id: number;
    sport_id: number;

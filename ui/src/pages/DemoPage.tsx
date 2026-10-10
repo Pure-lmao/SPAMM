@@ -1,6 +1,9 @@
 import { useAccount } from "@solana/connector/react";
-import { useCallback, useEffect, useState, type ReactElement } from "react";
+import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { requestFreebetRefresh } from "../betting/freebetRefresh";
+import { formatOddsInputFromDecimal, oddsFormatInputLabel, parseUserOddsToDecimal } from "../settings/convertOdds";
+import { OddsInputWithDecimal } from "../settings/OddsInputWithDecimal";
+import { useSettings } from "../settings/SettingsContext";
 import { fetchDemoEvents, postDemoFreebet, postDemoPromo, type DemoEvent } from "../demo/demoApi";
 
 function formatEventStart(ms: number): string {
@@ -18,6 +21,23 @@ function formatEventStart(ms: number): string {
 
 export function DemoPage(): ReactElement {
    const { address: connectedAddress } = useAccount();
+   const { oddsFormat } = useSettings();
+   const appliedOddsFormatRef = useRef(oddsFormat);
+
+   useEffect(() => {
+      const prev = appliedOddsFormatRef.current;
+      if (prev === oddsFormat) {
+         return;
+      }
+      appliedOddsFormatRef.current = oddsFormat;
+      setOdds((cur) => {
+         const dec = parseUserOddsToDecimal(cur, prev);
+         if (dec == null) {
+            return cur;
+         }
+         return formatOddsInputFromDecimal(dec, oddsFormat);
+      });
+   }, [oddsFormat]);
 
    const [wallet, setWallet] = useState("");
    const [fbBusy, setFbBusy] = useState(false);
@@ -84,9 +104,9 @@ export function DemoPage(): ReactElement {
    const onCreatePromo = useCallback(async () => {
       setPromoErr(null);
       setPromoOk(null);
-      const oddsNum = Number(odds);
-      if (!Number.isFinite(oddsNum) || oddsNum <= 1 || oddsNum > 10) {
-         setPromoErr("Odds must be > 1 and ≤ 10");
+      const oddsNum = parseUserOddsToDecimal(odds, oddsFormat);
+      if (oddsNum == null || oddsNum <= 1 || oddsNum > 10) {
+         setPromoErr("Decimal odds must be > 1 and ≤ 10");
          return;
       }
       setPromoBusy(true);
@@ -112,7 +132,7 @@ export function DemoPage(): ReactElement {
       } finally {
          setPromoBusy(false);
       }
-   }, [allow, description, eventId, loadEvents, odds, title, useAllow, yesLabel]);
+   }, [allow, description, eventId, loadEvents, odds, oddsFormat, title, useAllow, yesLabel]);
 
    return (
       <main className="demo-page">
@@ -176,16 +196,8 @@ export function DemoPage(): ReactElement {
                />
             </label>
             <label className="bet-modal-field">
-               <span className="bet-modal-field-label">Odds</span>
-               <input
-                  className="bet-modal-input"
-                  type="number"
-                  min={1.01}
-                  max={10}
-                  step={0.01}
-                  value={odds}
-                  onChange={(e) => setOdds(e.target.value)}
-               />
+               <span className="bet-modal-field-label">{oddsFormatInputLabel("Odds", oddsFormat)}</span>
+               <OddsInputWithDecimal value={odds} onChange={setOdds} />
             </label>
             <label className="bet-modal-field">
                <span className="bet-modal-field-label">Outcome title</span>

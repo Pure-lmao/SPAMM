@@ -7,6 +7,7 @@ import {
    useWalletConnectors,
 } from "@solana/connector/react";
 import { EPHEMERAL_DEVNET_WALLET_NAME } from "./ephemeralDevnetWallet";
+import { useI18n } from "../i18n/useI18n";
 
 export function WalletBar(): ReactElement {
    const { isConnected, isConnecting } = useWallet();
@@ -14,6 +15,7 @@ export function WalletBar(): ReactElement {
    const { connect, isConnecting: connectBusy, error: connectError, resetError } = useConnectWallet();
    const { disconnect, isDisconnecting } = useDisconnectWallet();
    const connectors = useWalletConnectors();
+   const { t } = useI18n();
 
    const [menuOpen, setMenuOpen] = useState(false);
    const [copied, setCopied] = useState(false);
@@ -47,7 +49,7 @@ export function WalletBar(): ReactElement {
                      setMenuOpen((o) => !o);
                   }}
                >
-                  {busy ? "Connecting…" : "Connect wallet"}
+                  {busy ? t("buttons.connecting") : t("buttons.connectWallet")}
                </button>
                {connectError != null && (
                   <span className="wallet-bar__err" title={connectError.message}>
@@ -101,7 +103,7 @@ export function WalletBar(): ReactElement {
                <button
                   type="button"
                   className="wallet-bar__addr"
-                  title={copied ? "Copied" : address}
+                  title={copied ? t("buttons.copied") : address}
                   onClick={async () => {
                      try {
                         await navigator.clipboard.writeText(address);
@@ -112,10 +114,10 @@ export function WalletBar(): ReactElement {
                      }
                   }}
                >
-                  {copied ? "Copied" : formatted}
+                  {copied ? t("buttons.copied") : formatted}
                </button>
                <button type="button" className="wallet-bar__btn wallet-bar__btn--ghost" disabled={busy} onClick={() => disconnect()}>
-                  Disconnect
+                  {t("buttons.disconnect")}
                </button>
             </div>
          )}

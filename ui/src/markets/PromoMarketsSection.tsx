@@ -6,7 +6,8 @@ import { pickBetSide } from "../betting/outcomeSide";
 import { useBetSlip } from "../betting/BetSlipContext";
 import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 import { resolveAppHttpRpcUrl } from "../betting/txPipeline";
-import { decimalOddsFromDb, fmtOdd, parseOdds } from "./oddsFormat";
+import { useFormatDbOdd } from "../settings/SettingsContext";
+import { decimalOddsFromDb, parseOdds } from "./oddsFormat";
 import { filterPromosOpenToUser } from "./promoQuoteAccess";
 import type { UiPromotionalMarket } from "./types";
 
@@ -46,6 +47,9 @@ function promoEventTitle(promo: UiPromotionalMarket): string | null {
 
 export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSectionProps): ReactElement | null {
    const { toggleSelection, isSelected } = useBetSlip();
+   const formatOdd = useFormatDbOdd();
+   const collapsible = eventFilter != null;
+   const [sectionOpen, setSectionOpen] = useState(true);
    const { account, isConnected } = useWallet();
    const { cluster } = useCluster();
    const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
@@ -105,8 +109,20 @@ export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSection
 
    return (
       <section className="promo-markets-section" aria-label="Promotional markets">
-         <h2 className="promo-markets-section__title">Odds Boost</h2>
-         <ul className="promo-markets-list">
+         {collapsible ? (
+            <button
+               type="button"
+               className="promo-markets-section__title promo-markets-section__toggle"
+               aria-expanded={sectionOpen}
+               onClick={() => setSectionOpen((v) => !v)}
+            >
+               <span>Odds Boost</span>
+               <span className={`event-market-section-toggle__chevron${sectionOpen ? " is-open" : ""}`} aria-hidden="true" />
+            </button>
+         ) : (
+            <h2 className="promo-markets-section__title">Odds Boost</h2>
+         )}
+         {(!collapsible || sectionOpen) && <ul className="promo-markets-list">
             {visible.map((promo) => {
                const [yesDb] = parseOdds(promo.last_odds);
                const yesDec = decimalOddsFromDb(yesDb);
@@ -170,14 +186,14 @@ export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSection
                            <span
                               className={`promo-market-card__odd-price${yesDb > 0 ? " promo-market-card__odd-price--boosted" : ""}`}
                            >
-                              {yesDb > 0 ? fmtOdd(yesDb) : "—"}
+                              {yesDb > 0 ? formatOdd(yesDb) : "—"}
                            </span>
                         </button>
                      </div>
                   </li>
                );
             })}
-         </ul>
+         </ul>}
       </section>
    );
 }

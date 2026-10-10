@@ -1,4 +1,5 @@
 import { ODDS_SCALE, type MarketId, type ParlayLegSel } from "spamm-aggregator-sdk";
+import { formatDecimalOdds, parseUserOddsToDecimal, type OddsFormat } from "../settings/convertOdds";
 import { apiSportToSdk, buildMarketId, DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG, parseOperatorAddress } from "./chainIds";
 import { pickBetSide } from "./outcomeSide";
 import type { BetSlipSelection } from "./types";
@@ -22,13 +23,9 @@ export function selectionMatches(
    return selectionId(a) === selectionId(b);
 }
 
-export function parseMinOddsScaled(raw: string, fallback: bigint): bigint {
-   const t = raw.trim();
-   if (!t) {
-      return fallback;
-   }
-   const n = Number(t);
-   if (!Number.isFinite(n) || n <= 0) {
+export function parseMinOddsScaled(raw: string, fallback: bigint, format: OddsFormat = "decimal"): bigint {
+   const n = parseUserOddsToDecimal(raw, format);
+   if (n == null || n <= 0) {
       return fallback;
    }
    return BigInt(Math.round(n * Number(ODDS_SCALE)));
@@ -36,10 +33,10 @@ export function parseMinOddsScaled(raw: string, fallback: bigint): bigint {
 
 export function oddsDecimalLabel(scaled: bigint): string {
    const x = Number(scaled) / Number(ODDS_SCALE);
-   if (!Number.isFinite(x)) {
+   if (!Number.isFinite(x) || x <= 0) {
       return "—";
    }
-   return x >= 10 ? x.toFixed(2) : x.toFixed(3);
+   return formatDecimalOdds(x, "slip");
 }
 
 /** Matches on-chain `calc_potential_payout`. */

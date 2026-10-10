@@ -18,6 +18,7 @@ import {
    getBetData,
    getParlayData,
    MAX_PARLAY_LEGS,
+   MAX_RFQ_PARLAY_LEGS,
    ODDS_SCALE,
    type BetAccountData,
    type RfqHttpRequestJson,
@@ -28,7 +29,6 @@ import {
    calcPotentialProfitBase,
    userWinCreditBase,
    buildMarketIdForSelection,
-   oddsDecimalLabel,
    parlayLegFromSelection,
    parseMinOddsScaled,
    quoteErrorMessageForUi,
@@ -62,13 +62,21 @@ import { pickBetSide } from "./outcomeSide";
 import { httpToWsRpcUrl, resolveAppHttpRpcUrl } from "./txPipeline";
 import { formatUsdcBaseUnitsForUi, parseUsdcAmountUiToBaseUnits } from "./usdc";
 import { AppBrand } from "../layout/AppBrand";
+import {
+   formatOddsInputFromDecimal,
+   formatSlipOdds,
+} from "../settings/convertOdds";
+import { OddsInputWithDecimal } from "../settings/OddsInputWithDecimal";
+import { useSettings } from "../settings/SettingsContext";
+import { useI18n } from "../i18n/useI18n";
 
 type SendPhase = "idle" | "signing" | "confirming" | "done";
 
 type PlacedBetSummary = Readonly<{
    signature: string;
    stakeLabel: string;
-   oddsLabel: string;
+   /** Filled decimal odds × ODDS_SCALE. Null when the fill price could not be read. */
+   oddsScaled: bigint | null;
    /** On-chain payout from filled bet account (potential return at settlement). */
    filledPayoutLabel: string | null;
    betId: string;
@@ -79,8 +87,6 @@ type PlacedBetSummary = Readonly<{
 function primaryFill(b: BetAccountData): BetAccountData["fillers"][number] | undefined {
    return b.fillers.find((f) => f.amount > 0n);
 }
-
-const RFQ_TOOLTIP = "Some market makers can offer larger stakes or more complex parlays via offchain quotes";
 
 function rfqExpiryLabel(offerExpiry: number, nowSec: number): string {
    const left = offerExpiry - nowSec;
@@ -127,6 +133,19 @@ export function BetSlipTray(): ReactElement | null {
    const { account, isConnected } = useWallet();
    const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
    const { cluster } = useCluster();
+   const { oddsFormat } = useSettings();
+   const { t, slipReason } = useI18n();
+   const minOddsLabel = t("slip.minOdds", {
+      format:
+         oddsFormat === "american"
+            ? t("odds.american")
+            : oddsFormat === "percent"
+              ? t("odds.percentShort")
+              : t("odds.decimal"),
+   });
+   const oddsFormatRef = useRef(oddsFormat);
+   oddsFormatRef.current = oddsFormat;
+   const appliedOddsFormatRef = useRef(oddsFormat);
    const { connect, isConnecting: connectBusy, resetError } = useConnectWallet();
    const connectors = useWalletConnectors();
 
@@ -187,8 +206,9 @@ export function BetSlipTray(): ReactElement | null {
             quoteRows,
             quotesAttempted,
             selectedKey: selectedFreebetKey,
+            oddsFormat,
          }),
-      [freebets, selections, quoteRows, quotesAttempted, selectedFreebetKey],
+      [freebets, selections, quoteRows, quotesAttempted, selectedFreebetKey, oddsFormat],
    );
    const selectedFreebet = useMemo(() => {
       if (selectedFreebetKey === "") {
@@ -268,7 +288,7 @@ export function BetSlipTray(): ReactElement | null {
                ? "No allowed MM quoted"
                : fallbackNoQuote;
          }
-         return explainFreebetOddsForQuotes(rawRows, voucher) ?? "No allowed MM quoted";
+         return explainFreebetOddsForQuotes(rawRows, voucher, oddsFormatRef.current) ?? "No allowed MM quoted";
       };
 
       try {
@@ -292,7 +312,9 @@ export function BetSlipTray(): ReactElement | null {
                top[0]!.oddsScaled,
             );
             setConservativeMin(conservative);
-            setMinOdds((Number(conservative) / Number(ODDS_SCALE)).toFixed(4).replace(/\.?0+$/, ""));
+            setMinOdds(
+               formatOddsInputFromDecimal(Number(conservative) / Number(ODDS_SCALE), oddsFormatRef.current),
+            );
             setQuoteRows(top);
             setQuoteMmErrors(q.errors);
             setBestParlayMm(null);
@@ -324,7 +346,9 @@ export function BetSlipTray(): ReactElement | null {
                top[0]!.oddsScaled,
             );
             setConservativeMin(conservative);
-            setMinOdds((Number(conservative) / Number(ODDS_SCALE)).toFixed(4).replace(/\.?0+$/, ""));
+            setMinOdds(
+               formatOddsInputFromDecimal(Number(conservative) / Number(ODDS_SCALE), oddsFormatRef.current),
+            );
             setQuoteRows(top);
             setQuoteMmErrors(q.errors);
             setBestParlayMm(top[0]!.mmProgramAddress);
@@ -422,9 +446,24 @@ export function BetSlipTray(): ReactElement | null {
    }, [selections, amount, runQuotes, isCollapsed, rfqOnly]);
 
    const minOddsScaled = useMemo(
-      () => parseMinOddsScaled(minOdds, conservativeMin),
-      [minOdds, conservativeMin],
+      () => parseMinOddsScaled(minOdds, conservativeMin, oddsFormat),
+      [minOdds, conservativeMin, oddsFormat],
    );
+
+   useEffect(() => {
+      const prev = appliedOddsFormatRef.current;
+      if (prev === oddsFormat) {
+         return;
+      }
+      appliedOddsFormatRef.current = oddsFormat;
+      setMinOdds((cur) => {
+         const dec = Number(parseMinOddsScaled(cur, 0n, prev)) / Number(ODDS_SCALE);
+         if (!(dec > 0)) {
+            return cur;
+         }
+         return formatOddsInputFromDecimal(dec, oddsFormat);
+      });
+   }, [oddsFormat]);
 
    const potentialReturnLabel = useMemo(() => {
       if (placedBetSummary?.filledPayoutLabel != null) {
@@ -532,9 +571,9 @@ export function BetSlipTray(): ReactElement | null {
             return;
          }
 
-         let minScaled = parseMinOddsScaled(minOdds, conservativeMin);
+         let minScaled = parseMinOddsScaled(minOdds, conservativeMin, oddsFormatRef.current);
          if (selectedFreebet != null) {
-            const oddsReason = explainFreebetOdds(minScaled, selectedFreebet.data);
+            const oddsReason = explainFreebetOdds(minScaled, selectedFreebet.data, oddsFormatRef.current);
             if (oddsReason != null) {
                setSendErr(oddsReason);
                return;
@@ -631,7 +670,7 @@ export function BetSlipTray(): ReactElement | null {
             const signature = getSignatureFromTransaction(signed);
 
             let stakeLabel = formatUsdcBaseUnitsForUi(amt);
-            let oddsLabel = "—";
+            let filledOddsScaled: bigint | null = null;
             let filledPayoutLabel: string | null = null;
             let detailErr: string | undefined;
             const isFreebetFill = freebet != null;
@@ -644,8 +683,7 @@ export function BetSlipTray(): ReactElement | null {
                      filledPayoutLabel = `${formatUsdcBaseUnitsForUi(userWinCreditBase(bet.amount, bet.payout, odds, isFreebetFill))} USDC`;
                   }
                   if (bet.amount > 0n && bet.payout > 0n) {
-                     const scaled = (bet.payout * ODDS_SCALE) / bet.amount;
-                     oddsLabel = oddsDecimalLabel(scaled);
+                     filledOddsScaled = (bet.payout * ODDS_SCALE) / bet.amount;
                   }
                } else {
                   const bet = await getBetData(rpc, { user: userAddress, betId });
@@ -656,7 +694,7 @@ export function BetSlipTray(): ReactElement | null {
                      filledPayoutLabel = `${formatUsdcBaseUnitsForUi(userWinCreditBase(bet.amount, bet.payout, fillOdds, isFreebetFill))} USDC`;
                   }
                   if (fill !== undefined && fill.oddsScaled > 0n) {
-                     oddsLabel = oddsDecimalLabel(fill.oddsScaled);
+                     filledOddsScaled = fill.oddsScaled;
                      if (filledPayoutLabel === null && bet.amount > 0n) {
                         const est = isFreebetFill
                            ? calcPotentialProfitBase(bet.amount, fill.oddsScaled)
@@ -666,8 +704,7 @@ export function BetSlipTray(): ReactElement | null {
                         }
                      }
                   } else if (bet.amount > 0n && bet.payout > 0n) {
-                     const scaled = (bet.payout * ODDS_SCALE) / bet.amount;
-                     oddsLabel = oddsDecimalLabel(scaled);
+                     filledOddsScaled = (bet.payout * ODDS_SCALE) / bet.amount;
                   }
                }
             } catch (e) {
@@ -677,7 +714,7 @@ export function BetSlipTray(): ReactElement | null {
             setPlacedBetSummary({
                signature,
                stakeLabel,
-               oddsLabel,
+               oddsScaled: filledOddsScaled,
                filledPayoutLabel,
                betId: betId.toString(),
                isParlay,
@@ -721,21 +758,23 @@ export function BetSlipTray(): ReactElement | null {
    const primaryDisabled = needsWallet ? !canConnect : showTryRfq ? sending : !canAuction;
 
    const headerTitle =
-      selections.length === 1 ? "Single Bet" : `${selections.length} Selections`;
+      selections.length === 1 ? t("slip.single") : t("slip.selections", { count: selections.length });
 
    const primaryLabel = needsWallet
       ? connectBusy
-         ? "Connecting…"
-         : "Connect wallet"
+         ? t("buttons.connecting")
+         : t("buttons.connectWallet")
       : sendPhase === "signing"
-        ? "Sign in wallet…"
+        ? t("slip.signInWallet")
         : sendPhase === "confirming"
-          ? "Sending…"
+          ? t("buttons.sending")
           : sendPhase === "done"
-            ? `Reuse selection${selections.length > 1 ? "s" : ""}`
+            ? selections.length > 1
+               ? t("slip.reuseMany")
+               : t("slip.reuseOne")
             : showTryRfq
-              ? "Try RFQ"
-              : "Place bet";
+              ? t("slip.tryRfq")
+              : t("slip.placeBet");
 
    const onHeaderClick = () => {
       if (isParlay) {
@@ -744,10 +783,17 @@ export function BetSlipTray(): ReactElement | null {
    };
 
    const selectionBlock = (sel: (typeof selections)[number]) => (
-      <div className="bet-slip-tray__selection-text">
-         <span className="bet-slip-tray__selection-market">{sel.marketLabel}</span>
-         <span className="bet-slip-tray__selection-event">{sel.eventTitle}</span>
-      </div>
+      <>
+         <div className="bet-slip-tray__selection-text">
+            <span className="bet-slip-tray__selection-market">{sel.marketLabel}</span>
+            <span className="bet-slip-tray__selection-event">{sel.eventTitle}</span>
+         </div>
+         {sel.displayedDecimalOdds != null && sel.displayedDecimalOdds > 0 && (
+            <span className="bet-slip-tray__selection-odds odds-value">
+               {formatSlipOdds(sel.displayedDecimalOdds, oddsFormat)}
+            </span>
+         )}
+      </>
    );
 
    return (
@@ -756,7 +802,7 @@ export function BetSlipTray(): ReactElement | null {
          <div
             className={`bet-slip-tray${isCollapsed ? " bet-slip-tray--collapsed" : " bet-slip-tray--expanded"}`}
             role="region"
-            aria-label="Bet slip"
+            aria-label={t("slip.betSlip")}
          >
          <header
             className={`bet-slip-tray__header${isParlay ? " bet-slip-tray__header--toggle" : ""}`}
@@ -774,7 +820,7 @@ export function BetSlipTray(): ReactElement | null {
                <button
                   type="button"
                   className="bet-slip-tray__dismiss"
-                  aria-label="Dismiss bet slip"
+                  aria-label={t("slip.dismissSlip")}
                   onClick={(e) => {
                      e.stopPropagation();
                      dismissSlip();
@@ -795,7 +841,7 @@ export function BetSlipTray(): ReactElement | null {
                            <button
                               type="button"
                               className="bet-slip-tray__leg-remove"
-                              aria-label={`Remove ${selections[0]!.marketLabel}`}
+                              aria-label={t("slip.remove", { label: selections[0]!.marketLabel })}
                               onClick={() => removeSelection(selections[0]!.id)}
                            >
                               ×
@@ -811,7 +857,7 @@ export function BetSlipTray(): ReactElement | null {
                                  <button
                                     type="button"
                                     className="bet-slip-tray__leg-remove"
-                                    aria-label={`Remove ${sel.marketLabel}`}
+                                    aria-label={t("slip.remove", { label: sel.marketLabel })}
                                     onClick={() => removeSelection(sel.id)}
                                  >
                                     ×
@@ -835,18 +881,18 @@ export function BetSlipTray(): ReactElement | null {
                               clearSlip();
                            }}
                         >
-                           {sendPhase === "done" ? "Dismiss" : "Clear all"}
+                           {sendPhase === "done" ? t("buttons.dismiss") : t("slip.clearAll")}
                         </button>
                      )}
                      {sendPhase !== "done" && (
                         <button
                            type="button"
                            className="bet-slip-tray__rfq-link"
-                           title={RFQ_TOOLTIP}
+                           title={t("slip.rfqTooltip")}
                            disabled={sending}
                            onClick={() => setRfqOpen(true)}
                         >
-                           Request offchain quotes
+                           {t("slip.requestOffchain")}
                         </button>
                      )}
                   </div>
@@ -872,18 +918,18 @@ export function BetSlipTray(): ReactElement | null {
                                  }}
                               />
                               <span>
-                                 Use Freebet
+                                 {t("slip.useFreebet")}
                                  {assessedFreebets.length === 1
                                     ? assessedFreebets[0]!.eligible
                                        ? ` · ${freebetPickerLabel(assessedFreebets[0]!)}`
-                                       : ` (${assessedFreebets[0]!.reason ?? "unavailable"})`
+                                       : ` (${slipReason(assessedFreebets[0]!.reason ?? t("slip.unavailable"))})`
                                     : null}
                               </span>
                            </label>
                         )}
                         {usingFreebet && assessedFreebets.length > 1 && (
                            <label className="bet-modal-field bet-slip-tray__freebet">
-                              <span className="bet-modal-field-label">Freebet</span>
+                              <span className="bet-modal-field-label">{t("slip.freebet")}</span>
                               <select
                                  className="bet-modal-input"
                                  value={selectedFreebetKey}
@@ -896,14 +942,14 @@ export function BetSlipTray(): ReactElement | null {
                                        disabled={!v.eligible}
                                     >
                                        {freebetPickerLabel(v)}
-                                       {v.eligible ? "" : ` (${v.reason ?? "unavailable"})`}
+                                       {v.eligible ? "" : ` (${slipReason(v.reason ?? t("slip.unavailable"))})`}
                                     </option>
                                  ))}
                               </select>
                            </label>
                         )}
                         <label className="bet-modal-field">
-                           <span className="bet-modal-field-label">Amount (USDC)</span>
+                           <span className="bet-modal-field-label">{t("slip.amount")}</span>
                            <input
                               className="bet-modal-input"
                               type="text"
@@ -912,56 +958,54 @@ export function BetSlipTray(): ReactElement | null {
                               value={amount}
                               disabled={selectedFreebet != null && selectedFreebet.eligible}
                               onChange={(e) => setAmount(e.target.value)}
-                              placeholder="e.g. 10"
+                              placeholder={t("slip.amountPlaceholder")}
                            />
                         </label>
                         {!rfqOnly && (
                            <label className="bet-modal-field">
-                              <span className="bet-modal-field-label">Min. odds (decimal)</span>
-                              <input
-                                 className="bet-modal-input"
-                                 type="text"
-                                 inputMode="decimal"
-                                 autoComplete="off"
-                                 value={minOdds}
-                                 onChange={(e) => setMinOdds(e.target.value)}
-                                 placeholder="Fetching quotes…"
-                              />
+                              <span className="bet-modal-field-label">{minOddsLabel}</span>
+                              <OddsInputWithDecimal value={minOdds} onChange={setMinOdds} />
                            </label>
                         )}
                         {rfqOnly && (
-                           <p className="bet-modal-muted">RFQ only — more than {MAX_PARLAY_LEGS} legs.</p>
+                           <p className="bet-modal-muted">{t("slip.rfqOnly", { count: MAX_PARLAY_LEGS })}</p>
                         )}
                      </div>
                   )}
                </div>
 
-               {slipCapNotice != null && <p className="bet-modal-err">{slipCapNotice}</p>}
-               {sendErr != null && <p className="bet-modal-err">{sendErr}</p>}
+               {slipCapNotice != null && (
+                  <p className="bet-modal-err">{t("slip.maxSelections", { count: MAX_RFQ_PARLAY_LEGS })}</p>
+               )}
+               {sendErr != null && <p className="bet-modal-err">{slipReason(sendErr)}</p>}
                {placedBetSummary != null && (
                   <div className="bet-modal-placed" role="status">
-                     <div className="bet-modal-placed-title">Bet placed</div>
+                     <div className="bet-modal-placed-title">{t("slip.betPlaced")}</div>
                      <dl className="bet-modal-meta bet-modal-placed-meta">
                         <div className="bet-modal-meta-row">
-                           <dt>Stake filled</dt>
+                           <dt>{t("slip.stakeFilled")}</dt>
                            <dd>
                               <strong>{placedBetSummary.stakeLabel}</strong> USDC
                            </dd>
                         </div>
                         <div className="bet-modal-meta-row">
-                           <dt>Total odds</dt>
+                           <dt>{t("slip.totalOdds")}</dt>
                            <dd className="odds-value">
-                              <strong>{placedBetSummary.oddsLabel}</strong>
+                              <strong>
+                                 {placedBetSummary.oddsScaled != null && placedBetSummary.oddsScaled > 0n
+                                    ? formatSlipOdds(Number(placedBetSummary.oddsScaled) / Number(ODDS_SCALE), oddsFormat)
+                                    : "—"}
+                              </strong>
                            </dd>
                         </div>
                         <div className="bet-modal-meta-row">
-                           <dt>Bet ID</dt>
+                           <dt>{t("slip.betId")}</dt>
                            <dd className="bet-modal-mono">{placedBetSummary.betId}</dd>
                         </div>
                      </dl>
                      {placedBetSummary.detailErr != null && (
                         <p className="bet-modal-muted bet-modal-placed-warn">
-                           Could not load on-chain details: {placedBetSummary.detailErr}
+                           {t("slip.detailsFailed", { error: placedBetSummary.detailErr })}
                         </p>
                      )}
                      <p className="bet-modal-muted bet-modal-placed-tx">
@@ -971,7 +1015,7 @@ export function BetSlipTray(): ReactElement | null {
                            rel="noopener noreferrer"
                            className="inline-nav-link"
                         >
-                           View transaction
+                           {t("slip.viewTx")}
                         </a>
                      </p>
                   </div>
@@ -979,18 +1023,18 @@ export function BetSlipTray(): ReactElement | null {
 
                <div className="bet-slip-tray__footer-row">
                <div className="bet-modal-quote">
-                  <div className="bet-modal-quote-head">Market offers</div>
+                  <div className="bet-modal-quote-head">{t("slip.marketOffers")}</div>
                   {rfqOnly && (
                      <p className="bet-modal-muted">
-                        Onchain quotes are unavailable above {MAX_PARLAY_LEGS} legs.
+                        {t("slip.onchainUnavailable", { count: MAX_PARLAY_LEGS })}
                      </p>
                   )}
                   {!rfqOnly && quoteStatus === "loading" && (
                      <p className="bet-modal-muted" role="status">
-                        Fetching best odds
+                        {t("slip.fetchingOdds")}
                      </p>
                   )}
-                  {!rfqOnly && quoteStatus === "err" && quoteErr != null && <p className="bet-modal-err">{quoteErr}</p>}
+                  {!rfqOnly && quoteStatus === "err" && quoteErr != null && <p className="bet-modal-err">{slipReason(quoteErr)}</p>}
                   {!rfqOnly && quoteStatus === "ok" && quoteRows.length > 0 && (
                      <ul className="bet-modal-mm-list">
                         {quoteRows.map((row, i) => {
@@ -1005,8 +1049,8 @@ export function BetSlipTray(): ReactElement | null {
                               >
                                  {i + 1}. {String(row.mmProgramAddress).slice(0, 8)}…{" "}
                                  {formatUsdcBaseUnitsForUi(row.maxAmount)} USDC @{" "}
-                                 <span className="odds-value">{dec.toFixed(3)}</span>
-                                 {isBest ? " (best)" : ""}
+                                 <span className="odds-value">{formatSlipOdds(dec, oddsFormat)}</span>
+                                 {isBest ? ` ${t("slip.best")}` : ""}
                               </li>
                            );
                         })}
@@ -1014,7 +1058,7 @@ export function BetSlipTray(): ReactElement | null {
                   )}
                   {!rfqOnly && quoteStatus === "ok" && quoteMmErrors.length > 0 && (
                      <p className="bet-modal-muted bet-slip-tray__mm-errors">
-                        Some MMs did not quote:{" "}
+                        {t("slip.someMms")}{" "}
                         {quoteMmErrors.map(quoteErrorMessageForUi).slice(0, 2).join(" · ")}
                         {quoteMmErrors.length > 2 ? " …" : ""}
                      </p>
@@ -1023,7 +1067,7 @@ export function BetSlipTray(): ReactElement | null {
 
                <div className="bet-slip-tray__actions">
                   <div className="bet-slip-tray__return">
-                     <span className="bet-slip-tray__return-label">Potential return</span>
+                     <span className="bet-slip-tray__return-label">{t("slip.potentialReturn")}</span>
                      <span className="bet-slip-tray__return-value">{potentialReturnLabel}</span>
                   </div>
                   <div className="bet-slip-tray__action-btns">
@@ -1033,7 +1077,7 @@ export function BetSlipTray(): ReactElement | null {
                            className="bet-modal-btn bet-modal-btn--ghost"
                            onClick={() => dismissSlip()}
                         >
-                           Dismiss
+                           {t("buttons.dismiss")}
                         </button>
                      )}
                      <button
@@ -1089,13 +1133,13 @@ export function BetSlipTray(): ReactElement | null {
                  >
                     <header className="bet-modal-header">
                        <h2 id="rfq-quotes-title" className="bet-modal-title">
-                          Offchain quotes
+                          {t("slip.offchainQuotes")}
                        </h2>
                        <button
                           type="button"
                           className="bet-modal-close"
                           onClick={closeRfqModal}
-                          aria-label="Close"
+                          aria-label={t("buttons.close")}
                           disabled={sending}
                        >
                           ×
@@ -1111,7 +1155,7 @@ export function BetSlipTray(): ReactElement | null {
                        </ul>
                        <div className="bet-slip-tray__fields rfq-modal-section">
                           <label className="bet-modal-field">
-                             <span className="bet-modal-field-label">Amount (USDC)</span>
+                             <span className="bet-modal-field-label">{t("slip.amount")}</span>
                              <input
                                 className="bet-modal-input"
                                 type="text"
@@ -1120,34 +1164,25 @@ export function BetSlipTray(): ReactElement | null {
                                 value={amount}
                                 disabled={sending || (selectedFreebet != null && selectedFreebet.eligible)}
                                 onChange={(e) => setAmount(e.target.value)}
-                                placeholder="e.g. 10"
+                                placeholder={t("slip.amountPlaceholder")}
                              />
                           </label>
                           {!rfqOnly && (
                              <label className="bet-modal-field">
-                                <span className="bet-modal-field-label">Min. odds (decimal)</span>
-                                <input
-                                   className="bet-modal-input"
-                                   type="text"
-                                   inputMode="decimal"
-                                   autoComplete="off"
-                                   value={minOdds}
-                                   disabled={sending}
-                                   onChange={(e) => setMinOdds(e.target.value)}
-                                   placeholder="Fetching quotes…"
-                                />
+                                <span className="bet-modal-field-label">{minOddsLabel}</span>
+                                <OddsInputWithDecimal value={minOdds} onChange={setMinOdds} disabled={sending} />
                              </label>
                           )}
                        </div>
                        {sendErr != null && <p className="bet-modal-err">{sendErr}</p>}
                        <section className="rfq-modal-section">
-                          <div className="bet-modal-quote-head">Offchain quotes</div>
+                          <div className="bet-modal-quote-head">{t("slip.offchainQuotes")}</div>
                           {rfqStatus === "loading" && (
                              <p className="bet-modal-muted" role="status">
-                                Requesting offchain quotes
+                                {t("slip.requestingOffchain")}
                              </p>
                           )}
-                          {rfqErr != null && <p className="bet-modal-err">{rfqErr}</p>}
+                          {rfqErr != null && <p className="bet-modal-err">{slipReason(rfqErr)}</p>}
                           {rfqStatus === "ok" && rfqQuotes.length > 0 && (
                              <ul className="rfq-modal-quote-list">
                                 {rfqQuotes.map((quote, i) => {
@@ -1158,7 +1193,11 @@ export function BetSlipTray(): ReactElement | null {
                                          : rfqQuoteRejectReason(quote, amt, selectedFreebet?.data, nowSec);
                                    let oddsLabel = "—";
                                    try {
-                                      oddsLabel = oddsDecimalLabel(BigInt(quote.oddsScaled));
+                                      const scaled = BigInt(quote.oddsScaled);
+                                      oddsLabel =
+                                         scaled > 0n
+                                            ? formatSlipOdds(Number(scaled) / Number(ODDS_SCALE), oddsFormat)
+                                            : "—";
                                    } catch {
                                       oddsLabel = "—";
                                    }
@@ -1171,8 +1210,8 @@ export function BetSlipTray(): ReactElement | null {
                                                <span className="odds-value">{oddsLabel}</span>
                                             </div>
                                             <div className="rfq-modal-quote-row__expiry">
-                                               {rfqExpiryLabel(quote.offerExpiry, nowSec)}
-                                               {reject != null ? ` · ${reject}` : ""}
+                                               {slipReason(rfqExpiryLabel(quote.offerExpiry, nowSec))}
+                                               {reject != null ? ` · ${slipReason(reject)}` : ""}
                                             </div>
                                          </div>
                                          <button
@@ -1181,7 +1220,7 @@ export function BetSlipTray(): ReactElement | null {
                                             disabled={sending || !canAcceptRfq || reject != null || rfqStatus !== "ok"}
                                             onClick={() => void runSendPipeline("rfq", quote)}
                                          >
-                                            {sending ? "…" : "Accept"}
+                                            {sending ? "…" : t("slip.accept")}
                                          </button>
                                       </li>
                                    );
@@ -1189,23 +1228,23 @@ export function BetSlipTray(): ReactElement | null {
                              </ul>
                           )}
                           {rfqStatus === "ok" && rfqQuotes.length === 0 && rfqMmCount > 0 && rfqErr == null && (
-                             <p className="bet-modal-muted">No offchain quotes returned.</p>
+                             <p className="bet-modal-muted">{t("slip.noOffchain")}</p>
                           )}
                        </section>
                        <section className="rfq-modal-section">
-                          <div className="bet-modal-quote-head">Market offers</div>
+                          <div className="bet-modal-quote-head">{t("slip.marketOffers")}</div>
                           {rfqOnly && (
                              <p className="bet-modal-muted">
-                                Onchain quotes are unavailable above {MAX_PARLAY_LEGS} legs.
+                                {t("slip.onchainUnavailable", { count: MAX_PARLAY_LEGS })}
                              </p>
                           )}
                           {!rfqOnly && quoteStatus === "loading" && (
                              <p className="bet-modal-muted" role="status">
-                                Fetching best odds
+                                {t("slip.fetchingOdds")}
                              </p>
                           )}
                           {!rfqOnly && quoteStatus === "err" && quoteErr != null && (
-                             <p className="bet-modal-err">{quoteErr}</p>
+                             <p className="bet-modal-err">{slipReason(quoteErr)}</p>
                           )}
                           {!rfqOnly && quoteStatus === "ok" && quoteRows.length > 0 && (
                              <ul className="bet-modal-mm-list">
@@ -1221,8 +1260,8 @@ export function BetSlipTray(): ReactElement | null {
                                       >
                                          {i + 1}. {String(row.mmProgramAddress).slice(0, 8)}…{" "}
                                          {formatUsdcBaseUnitsForUi(row.maxAmount)} USDC @{" "}
-                                         <span className="odds-value">{dec.toFixed(3)}</span>
-                                         {isBest ? " (best)" : ""}
+                                         <span className="odds-value">{formatSlipOdds(dec, oddsFormat)}</span>
+                                         {isBest ? ` ${t("slip.best")}` : ""}
                                       </li>
                                    );
                                 })}
@@ -1232,7 +1271,7 @@ export function BetSlipTray(): ReactElement | null {
                     </div>
                     <footer className="bet-modal-footer rfq-modal-footer-actions">
                        <div className="bet-slip-tray__return">
-                          <span className="bet-slip-tray__return-label">Potential return</span>
+                          <span className="bet-slip-tray__return-label">{t("slip.potentialReturn")}</span>
                           <span className="bet-slip-tray__return-value">{potentialReturnLabel}</span>
                        </div>
                        <button
@@ -1241,7 +1280,7 @@ export function BetSlipTray(): ReactElement | null {
                           disabled={sending}
                           onClick={closeRfqModal}
                        >
-                          Close
+                          {t("buttons.close")}
                        </button>
                        {!rfqOnly && (
                           <button
@@ -1255,10 +1294,10 @@ export function BetSlipTray(): ReactElement | null {
                              onClick={() => void runSendPipeline("auction")}
                           >
                              {sendPhase === "signing"
-                                ? "Sign in wallet…"
+                                ? t("slip.signInWallet")
                                 : sendPhase === "confirming"
-                                  ? "Sending…"
-                                  : "Place Using Onchain Offers"}
+                                  ? t("buttons.sending")
+                                  : t("slip.placeOnchain")}
                           </button>
                        )}
                     </footer>
