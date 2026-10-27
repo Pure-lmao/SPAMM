@@ -60,7 +60,8 @@ fn freebet_fill_rfq_bet_success() {
       fill_bet_netting_placeholder(),
    ));
    assert_ok_record_cu("freebet_fill_rfq_bet/success", &r);
-   assert_eq!(decode_bet(&env, &bet).freebet_id, FREEBET_ID_BASIC);
+   assert_eq!(decode_bet(&env, &bet).promo_type, spamm_aggregator::state::PromoType::Freebet);
+   assert_eq!(decode_bet(&env, &bet).promo_account.as_ref(), crate::common::freebet_pda(FREEBET_ID_BASIC).as_ref());
 }
 
 #[test]

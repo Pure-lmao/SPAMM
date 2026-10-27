@@ -1,8 +1,10 @@
 import { address, type Address, type Rpc, type SolanaRpcApi } from "@solana/kit";
 import {
-   FreebetState,
+   PromoState,
    ODDS_SCALE,
+   getBoostsData,
    getFreebetsData,
+   type BoostAccountData,
    type FreebetAccountData,
 } from "spamm-aggregator-sdk";
 import type { BetSlipSelection } from "./types";
@@ -27,7 +29,7 @@ export async function fetchAvailableFreebets(
    user: Address,
    nowUnixSecs: number = Math.floor(Date.now() / 1000),
 ): Promise<readonly SlipFreebet[]> {
-   const rows = await getFreebetsData(rpc, { user, state: FreebetState.Available });
+   const rows = await getFreebetsData(rpc, { user, state: PromoState.Available });
    return rows
       .filter((r) => r.data.expiry > nowUnixSecs)
       .map((r) => ({
@@ -38,20 +40,21 @@ export async function fetchAvailableFreebets(
       }));
 }
 
-export async function mapFreebetIdToIssuerAuth(
+export async function mapFreebetAccountToIssuerAuth(
    rpc: Rpc<SolanaRpcApi>,
    user: Address,
-   freebetIds: readonly number[],
-): Promise<ReadonlyMap<number, Address>> {
-   const wanted = new Set(freebetIds.filter((id) => id !== 0));
-   const out = new Map<number, Address>();
+   freebetAccounts: readonly Address[],
+): Promise<ReadonlyMap<string, Address>> {
+   const wanted = new Set(freebetAccounts.map((a) => String(a)));
+   const out = new Map<string, Address>();
    if (wanted.size === 0) {
       return out;
    }
-   const rows = await getFreebetsData(rpc, { user, state: FreebetState.Used });
+   const rows = await getFreebetsData(rpc, { user, state: PromoState.Used });
    for (const row of rows) {
-      if (wanted.has(row.data.freebetId)) {
-         out.set(row.data.freebetId, row.data.issuerAuth);
+      const key = String(row.address);
+      if (wanted.has(key)) {
+         out.set(key, row.data.issuerAuth);
       }
    }
    return out;
@@ -62,7 +65,15 @@ export function addressInList(list: readonly Address[], needle: Address | string
    return list.some((a) => String(a) === n);
 }
 
-export function oddsInFreebetRange(oddsScaled: bigint, voucher: FreebetAccountData): boolean {
+export type PromoSlipLimits = {
+   minLegs: number;
+   minOddsScaled: bigint;
+   maxOddsScaled: bigint;
+   allowedMms: readonly Address[];
+   allowedOperators: readonly Address[];
+};
+
+export function oddsInFreebetRange(oddsScaled: bigint, voucher: PromoSlipLimits): boolean {
    return oddsScaled >= voucher.minOddsScaled && oddsScaled <= voucher.maxOddsScaled;
 }
 
@@ -72,7 +83,7 @@ function freebetOddsLabel(scaled: bigint, format: OddsFormat): string {
 
 export function explainFreebetOdds(
    oddsScaled: bigint,
-   voucher: FreebetAccountData,
+   voucher: PromoSlipLimits,
    format: OddsFormat = "decimal",
 ): string | null {
    if (oddsScaled < voucher.minOddsScaled) {
@@ -86,7 +97,7 @@ export function explainFreebetOdds(
 
 export function explainFreebetOddsForQuotes(
    rows: readonly FreebetQuoteRow[],
-   voucher: FreebetAccountData,
+   voucher: PromoSlipLimits,
    format: OddsFormat = "decimal",
 ): string | null {
    if (rows.some((r) => oddsInFreebetRange(r.oddsScaled, voucher))) {
@@ -126,7 +137,7 @@ export function combinedBoardOddsScaled(selections: readonly BetSlipSelection[])
 
 export function filterQuoteRowsForFreebet<T extends FreebetQuoteRow>(
    rows: readonly T[],
-   voucher: FreebetAccountData | null | undefined,
+   voucher: PromoSlipLimits | null | undefined,
 ): T[] {
    if (voucher == null) {
       return [...rows];
@@ -140,7 +151,7 @@ export function filterQuoteRowsForFreebet<T extends FreebetQuoteRow>(
 }
 
 export function assessFreebetForSlip(
-   voucher: FreebetAccountData,
+   voucher: PromoSlipLimits,
    selections: readonly BetSlipSelection[],
    ctx?: Readonly<{
       quoteRows?: readonly FreebetQuoteRow[];
@@ -225,6 +236,90 @@ export function freebetPickerLabel(v: SlipFreebet): string {
 
 export function freebetKey(v: SlipFreebet): string {
    return `${v.data.issuerAuth}:${v.data.freebetId}`;
+}
+
+export type SlipBoost = Readonly<{
+   address: Address;
+   data: BoostAccountData;
+   eligible: boolean;
+   reason: string | null;
+}>;
+
+export async function fetchAvailableBoosts(
+   rpc: Rpc<SolanaRpcApi>,
+   user: Address,
+   nowUnixSecs: number = Math.floor(Date.now() / 1000),
+): Promise<readonly SlipBoost[]> {
+   const rows = await getBoostsData(rpc, { user, state: PromoState.Available });
+   return rows
+      .filter((r) => r.data.expiry > nowUnixSecs)
+      .map((r) => ({
+         address: r.address,
+         data: r.data,
+         eligible: true,
+         reason: null,
+      }));
+}
+
+export async function mapBoostAccountToIssuerAuth(
+   rpc: Rpc<SolanaRpcApi>,
+   user: Address,
+   boostAccounts: readonly Address[],
+): Promise<ReadonlyMap<string, Address>> {
+   const wanted = new Set(boostAccounts.map((a) => String(a)));
+   const out = new Map<string, Address>();
+   if (wanted.size === 0) {
+      return out;
+   }
+   const rows = await getBoostsData(rpc, { user, state: PromoState.Used });
+   for (const row of rows) {
+      const key = String(row.address);
+      if (wanted.has(key)) {
+         out.set(key, row.data.issuerAuth);
+      }
+   }
+   return out;
+}
+
+export function boostKey(v: SlipBoost): string {
+   return `${v.data.issuerAuth}:${v.data.boostId}`;
+}
+
+export function boostPickerLabel(v: SlipBoost): string {
+   const max = formatUsdcBaseUnitsForUi(v.data.maxStake);
+   const extra = v.data.boostBps / 100;
+   const legs = v.data.minLegs > 1 ? ` · ${v.data.minLegs}+ legs` : "";
+   return `${extra}% extra · max ${max} USDC${legs}`;
+}
+
+export function withBoostEligibility(
+   vouchers: readonly SlipBoost[],
+   selections: readonly BetSlipSelection[],
+   ctx: Readonly<{
+      quoteRows: readonly FreebetQuoteRow[];
+      quotesAttempted: boolean;
+      selectedKey: string;
+      oddsFormat?: OddsFormat;
+   }>,
+): SlipBoost[] {
+   return vouchers.map((v) => {
+      const a = assessFreebetForSlip(v.data, selections, {
+         quoteRows: ctx.quoteRows,
+         quotesAttempted: ctx.quotesAttempted,
+         isSelected: boostKey(v) === ctx.selectedKey,
+         oddsFormat: ctx.oddsFormat,
+      });
+      return { ...v, eligible: a.eligible, reason: a.reason };
+   });
+}
+
+export function boostedPayoutBase(payout: bigint, amount: bigint, boostBps: number): bigint {
+   if (payout <= amount || boostBps <= 0) {
+      return payout;
+   }
+   const profit = payout - amount;
+   const topup = (profit * BigInt(boostBps)) / 10_000n;
+   return payout + topup;
 }
 
 export function parseFreebetKey(raw: string): { issuerAuth: Address; freebetId: number } | null {

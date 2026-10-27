@@ -59,10 +59,6 @@ export const RFQ_PARLAY_MESSAGE_KIND = 2;
 export const RFQ_CASHOUT_MESSAGE_KIND = 3;
 export const RFQ_CASHOUT_PARLAY_MESSAGE_KIND = 4;
 
-export const MINT_ID: Address = address(
-   'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr',
-);
-
 /** `constants::ODDS_SCALE` — scaled-odds basis where 10000 = 1.0x (e.g. 15000 = 1.5x). */
 export const ODDS_SCALE = 10000n;
 
@@ -86,12 +82,6 @@ export const MAX_RFQ_PARLAY_LEGS = 40;
 
 /** `constants::LIVE_CASHOUT_DELAY` — unix seconds between live cashout fill and permissionless escrow claim. */
 export const LIVE_CASHOUT_DELAY = 30;
-
-/** `constants::MIN_BET_AMOUNT` — $0.10 at 6-decimal USDC (`0.1 * 10**6`). */
-export const MIN_BET_AMOUNT = 100_000n;
-
-/** `constants::MIN_FILLER_AMOUNT` — skip auction slices below $0.10. */
-export const MIN_FILLER_AMOUNT = 100_000n;
 
 /** `constants::SETTLE_BET_TOKEN_BATCH_IX_CAP` */
 export const SETTLE_BET_TOKEN_BATCH_IX_CAP = 13;
@@ -117,11 +107,15 @@ export const MAX_PARLAY_QUOTE_CPI_ACCOUNTS = 4 + 2 * MAX_PARLAY_LEGS;
 /** `constants::MAX_RFQ_PARLAY_QUOTE_CPI_ACCOUNTS` — `4 + 2 * MAX_RFQ_PARLAY_LEGS`. */
 export const MAX_RFQ_PARLAY_QUOTE_CPI_ACCOUNTS = 4 + 2 * MAX_RFQ_PARLAY_LEGS;
 
-/** `constants::MAX_FREEBET_ALLOWED_MMS` */
-export const MAX_FREEBET_ALLOWED_MMS = 10;
+/** `constants::MAX_PROMO_ALLOWED_MMS` */
+export const MAX_PROMO_ALLOWED_MMS = 10;
+/** @deprecated Use {@link MAX_PROMO_ALLOWED_MMS}. */
+export const MAX_FREEBET_ALLOWED_MMS = MAX_PROMO_ALLOWED_MMS;
 
-/** `constants::MAX_FREEBET_ALLOWED_OPERATORS` */
-export const MAX_FREEBET_ALLOWED_OPERATORS = 5;
+/** `constants::MAX_PROMO_ALLOWED_OPERATORS` */
+export const MAX_PROMO_ALLOWED_OPERATORS = 5;
+/** @deprecated Use {@link MAX_PROMO_ALLOWED_OPERATORS}. */
+export const MAX_FREEBET_ALLOWED_OPERATORS = MAX_PROMO_ALLOWED_OPERATORS;
 
 /** `constants::FREEBET_REINSTATE_SECS` — Push / Cancelled / RolledBack / half-grade window. */
 export const FREEBET_REINSTATE_SECS = 3 * 86400;
@@ -171,7 +165,14 @@ export const CASHOUT_ESCROW_SEED = 'cashout_escrow' as const;
 export const CASHOUT_ACCOUNT_SEED = 'cashout' as const;
 /** Filling-MM parlay cashout ticket PDA (`account_cashout_parlay::CASHOUT_PARLAY_ACCOUNT_SEED`). */
 export const CASHOUT_PARLAY_ACCOUNT_SEED = 'cashout_parlay' as const;
-/** Freebet issuer PDA (`account_freebet_issuer::FREEBET_ISSUER_SEED`). */
-export const FREEBET_ISSUER_SEED = 'freebet_issuer' as const;
+/** Promo issuer PDA (`account_promo_issuer::PROMO_ISSUER_SEED`). */
+export const PROMO_ISSUER_SEED = 'promo_issuer' as const;
+/** @deprecated Use {@link PROMO_ISSUER_SEED}. */
+export const FREEBET_ISSUER_SEED = PROMO_ISSUER_SEED;
 /** Freebet PDA (`account_freebet::FREEBET_ACCOUNT_SEED`). */
 export const FREEBET_ACCOUNT_SEED = 'freebet' as const;
+/** Boost PDA (`account_boost::BOOST_ACCOUNT_SEED`). */
+export const BOOST_ACCOUNT_SEED = 'boost' as const;
+export const PROMO_NONE = 0;
+export const PROMO_FREEBET = 1;
+export const PROMO_BOOST = 2;

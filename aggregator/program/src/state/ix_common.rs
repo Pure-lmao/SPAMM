@@ -4,10 +4,10 @@ use pinocchio::{error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
 
 use crate::{
-   constants::{MIN_BET_AMOUNT, ODDS_SCALE},
+   constants::ODDS_SCALE,
    errors::SpammError,
    helpers::parlay_helpers::{
-      validate_parlay_same_event_odds, validate_unique_parlay_market_ids,
+      validate_parlay_same_event_odds_at, validate_unique_parlay_market_ids_at,
    },
 };
 
@@ -21,12 +21,18 @@ pub const FREEBET_ID_PREFIX_LEN: usize = 4;
 
 #[inline(always)]
 pub fn split_freebet_id_prefix(data: &[u8]) -> Result<(u32, &[u8]), ProgramError> {
+   split_promo_id_prefix(data, SpammError::InvalidFreebet)
+}
+
+/// `u32` promo id, then the rest of the instruction. `id == 0` is `empty`.
+#[inline(always)]
+pub fn split_promo_id_prefix(data: &[u8], empty: SpammError) -> Result<(u32, &[u8]), ProgramError> {
    if unlikely(data.len() < FREEBET_ID_PREFIX_LEN) {
       return Err(ProgramError::InvalidInstructionData);
    }
    let id = u32::from_le_bytes(data[0..4].try_into().unwrap());
    if unlikely(id == 0) {
-      return Err(SpammError::InvalidFreebet.into());
+      return Err(empty.into());
    }
    Ok((id, &data[FREEBET_ID_PREFIX_LEN..]))
 }
@@ -67,9 +73,9 @@ pub fn validate_event_state_sequence(
 }
 
 #[inline(always)]
-pub fn validate_amount_over_min(amount: u64, label: &str) -> Result<(), ProgramError> {
-   if unlikely(amount < MIN_BET_AMOUNT) {
-      log!("{}: amount must be >= MIN_BET_AMOUNT", label);
+pub fn validate_amount_over_min(amount: u64, min: u64, label: &str) -> Result<(), ProgramError> {
+   if unlikely(amount < min) {
+      log!("{}: amount below mint minimum", label);
       return Err(ProgramError::InvalidInstructionData);
    }
    Ok(())
@@ -84,25 +90,49 @@ pub fn validate_odds_above_scale(odds_scaled: u32, label: &str) -> Result<(), Pr
    Ok(())
 }
 
-#[inline(always)]
-pub fn validate_parlay_leg_sels(num: usize, legs: &[ParlayLegSel], label: &str) -> Result<(), ProgramError> {
+#[inline(never)]
+pub fn validate_parlay_leg_sels_at<F>(num: usize, mut leg_at: F, label: &str) -> Result<(), ProgramError>
+where
+   F: FnMut(usize) -> Result<ParlayLegSel, ProgramError>,
+{
    for i in 0..num {
-      let leg = legs.get(i).ok_or(ProgramError::InvalidInstructionData)?;
+      let leg = leg_at(i)?;
       validate_event_state_sequence(leg.event_state_sequence, leg.market_id.is_pregame(), label)?;
       validate_side_for_mkt(leg.side, leg.market_id.mkt, label)?;
    }
-   validate_unique_parlay_market_ids(num, legs)?;
+   validate_unique_parlay_market_ids_at(num, leg_at)?;
+   Ok(())
+}
+
+#[inline(always)]
+pub fn validate_parlay_leg_sels(num: usize, legs: &[ParlayLegSel], label: &str) -> Result<(), ProgramError> {
+   validate_parlay_leg_sels_at(
+      num,
+      |i| legs.get(i).copied().ok_or(ProgramError::InvalidInstructionData),
+      label,
+   )
+}
+
+#[inline(never)]
+pub fn validate_parlay_leg_quoted_at<F>(num: usize, mut leg_at: F, label: &str) -> Result<(), ProgramError>
+where
+   F: FnMut(usize) -> Result<ParlayLegQuoted, ProgramError>,
+{
+   for i in 0..num {
+      let leg = leg_at(i)?;
+      validate_event_state_sequence(leg.event_state_sequence, leg.market_id.is_pregame(), label)?;
+      validate_side_for_mkt(leg.side, leg.market_id.mkt, label)?;
+   }
+   validate_parlay_same_event_odds_at(num, &mut leg_at)?;
+   validate_unique_parlay_market_ids_at(num, leg_at)?;
    Ok(())
 }
 
 #[inline(always)]
 pub fn validate_parlay_leg_quoted(num: usize, legs: &[ParlayLegQuoted], label: &str) -> Result<(), ProgramError> {
-   for i in 0..num {
-      let leg = legs.get(i).ok_or(ProgramError::InvalidInstructionData)?;
-      validate_event_state_sequence(leg.event_state_sequence, leg.market_id.is_pregame(), label)?;
-      validate_side_for_mkt(leg.side, leg.market_id.mkt, label)?;
-   }
-   validate_parlay_same_event_odds(num, legs)?;
-   validate_unique_parlay_market_ids(num, legs)?;
-   Ok(())
+   validate_parlay_leg_quoted_at(
+      num,
+      |i| legs.get(i).copied().ok_or(ProgramError::InvalidInstructionData),
+      label,
+   )
 }

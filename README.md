@@ -15,7 +15,7 @@ In addition to the competitive, onchain `get_quote` / `fill_bet_quote` auction, 
 
 The aggregator also supports **cashout** for bets and parlays. For single bets, an onchain auction takes place between the 5 best offchain quotes and the bet is purchased by the highest bidding SPAMM. For parlays, the frontend gets the best quote and the cashout is purchased by that SPAMM. An RFQ path is also available for cashout.
 
-Freebets can be issued by any Freebet Issuer to any user. The freebets are PDA that allow for a user to place a bet without any risk to themselves. Funds are transferred from the Issuer to the bet at placement time. If the user wins, they get the profit from the market maker and the freebet funds are returned to the Issuers. If the user loses, the market maker gets the stake. For this reason, the Issuer can limit the use of the freebet to specific `Market Operators` (to ensure it is used with a trusted source) and market makers to allow for using it at an affiliated SPAMM(s) so the funds come back to the Issuer.
+A **promo issuer** can issue freebets or odds boosts to any user. A freebet is a PDA that lets a user place a bet without staking their own tokens: funds move from the issuer ATA to the bet at fill. If the user wins, they get the profit and the stake returns to the issuer. If the user loses, the market maker gets the stake. An odds boost is the same voucher shape, but the user pays the stake and the issuer ATA pays an extra slice of reserved profit only if the ticket wins. The issuer can limit either voucher to specific `Market Operators` and market makers.
 
 There are many ways SPAMMs could work:
 
@@ -45,11 +45,11 @@ For some example code, see the template SPAMM [README.md](https://github.com/pur
 | User | A wallet that places bets - usually via a `Frontend` but could be via pulling the API and building the transaction themselves. |
 | Frontend | A way to display markets, fetch quotes, and construct Solana transactions for placing bets. Frontends might act as a `Feepayer` for users, and call `settle_bet` on behalf of the user for a better experience. |
 | Feepayer | A key that pays the fees for transactions. The rent is returned to the Feepayer upon the bet being settled. |
-| Freebet Issuer | A key that issues and funds freebet to users (usually a `Frontend`). Since all bets are filled by a `SPAMM`, the funds for a freebet must be collateralised at fill time, meaning the Issuer must have funds to transfer. The freebet data can limit the use to specific `Market Operators` (to ensure it is used with a trusted source) and `SPAMM`s (to allow for using at affiliated SPAMMs so the funds are more circular if desired). |
+| Promo Issuer | A key that issues freebets and odds boosts (usually a `Frontend`). Freebet stake is taken from the issuer ATA at fill. Boost stake is paid by the user; the issuer ATA pays the extra profit at a winning settle. Vouchers can be limited to specific `Market Operator`s and `Market Maker`s. |
 
 ## Deployment
 
-The **SPAMM Aggregator** program is deployed to Solana **mainnet** at `5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H` with USDC as the betting token and a frontend is hosted at [automaticsportsmarkets.com](https://automaticsportsmarkets.com). It is also on **devnet** at the address `5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H`. The betting token is `Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr` which you can get [here](https://spl-token-faucet.com/). If the devnet SOL airdrop is 429, you can get some [here](https://faucet.solana.com/).
+The **SPAMM Aggregator** program is deployed to Solana **mainnet** at `5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H` and a frontend is hosted at [automaticsportsmarkets.com](https://automaticsportsmarkets.com). It is also on **devnet** at the same address. Each market settles in the SPL mint on its `MarketId`. A devnet USDC mint you can use is `Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr` ([faucet](https://spl-token-faucet.com/)). If the devnet SOL airdrop is 429, you can get some [here](https://faucet.solana.com/).
 
 **Breaking changes** are to be expected. The **aggregator admin** can delete Aggregator PDAs (like Bet Accounts) at any time.
 
@@ -644,7 +644,7 @@ struct MarketData {
 }
 ```
 
-It **MUST** have the seeds `["market_data", market_id_body_wire, operator]`. The full on-wire `MarketId` includes an `operator` address (see Market Operators under the aggregator). Because Solana PDA seeds are capped at 32 bytes each, the market-id body (everything before `operator`) is one seed and `operator` is a second seed — helpers: `market_id_pda_seed_parts` / SDK `getMmMarketDataPda`. The account can contain any data that you want to store for the market. The **aggregator verifies** the Market Data PDA exists with the expected seed..
+It **MUST** have the seeds `["market_data", market_id_body_wire, operator, mint]`. The full on-wire `MarketId` includes an `operator` and a `mint` (see Market Operators). Because Solana PDA seeds are capped at 32 bytes each, the market-id body (everything before those two addresses) is one seed — helpers: `market_id_pda_seed_parts` / SDK `getMmMarketDataPda`. The account can contain any data that you want to store for the market. The **aggregator verifies** the Market Data PDA exists with the expected seed.
 
 It is recommended you use something like Doppler ([https://github.com/blueshift-gg/doppler](https://github.com/blueshift-gg/doppler)) for 21 CU updates and incorporate it as a hot path into your program (although you must modify it to include the bump seed in the account data. This can be seen in the example market maker program). You can hot update the odds at the top of the account and then slow-update other data in the account via an instruction or the fill_bet_quote function.
 
@@ -780,23 +780,23 @@ valorant (sport_id = 104): {
 
 ## Accounts at a Glance
 
-MM-owned account discriminators are **≥ 100** so they are not confused with aggregator accounts.
+MM-owned account discriminators are **≥ 100** so they are not confused with aggregator accounts. A token account whose authority is a program PDA must be that PDA’s canonical ATA.
 
 | Account | Discriminator | Seed | Notes |
 | --- | --- | --- | --- |
-| MM Market Data PDA | 100 | ["market_data", market_id_body, market_operator] | created in init_market with a custom body |
+| MM Market Data PDA | 100 | ["market_data", market_id_body, operator, mint] | created in init_market with a custom body |
 | MM Config PDA | 101 | ["config"] | created in init_program |
 | MM Quote Buffer | 102 | ["mm_quote_buffer"] | created in init_program |
 | MM Parlay Quote Buffer | 103 | ["mm_parlay_quote_buffer"] | created in init_program |
 | MM Event State | 104 | ["event_state", event_id] | `EventStateData` header + optional MM body; created in `init_event` at **sequence 0**; admin advances `game_state` / `sequence` via `update_event_state` |
-| MM Token Account | n/a | n/a | authority is the MM Config PDA, created in init_program |
+| MM Token Account | n/a | ATA(config_pda, mint) | authority is the MM Config PDA; one per mint via `create_token_account` |
 
 MM accounts owned by the aggregator:
 
 | Account | Discriminator | Seed | Notes |
 | --- | --- | --- | --- |
-| MM Encumbrance PDA | 5 | ["encumbrance", mm_program_address] | created in register_mm |
-| MM Liability Token Account | n/a | n/a | authority is the MM Encumbrance PDA, created in register_mm |
+| MM Encumbrance PDA | 5 | ["encumbrance", mm_program_address, mint] | one per mint; `init_mm_mint_vault`; `encumbrance` plus `open_cashout_tickets` |
+| MM Liability Token Account | n/a | ATA(encumbrance_pda, mint) | authority is the MM Encumbrance PDA; created with the vault |
 
 ## MM program instruction discriminators (router)
 
@@ -806,10 +806,11 @@ The first byte of instruction data routes the MM program (oracle hot-path **0** 
 | Discriminator | Instruction | Notes |
 | --- | --- | --- |
 | 0 | Oracle hot path | Doppler / similar; **not** in the Pinocchio router. Triggered by **2 accounts**, not by this disc table |
-| 100 | `init_program` | Creates config PDA, single-leg quote buffer, parlay quote buffer, MM ATA; may set `rfq_signer` |
+| 100 | `init_program` | Creates config PDA and the two quote buffers; may set `rfq_signer` |
 | 101 | `set_rfq_signer` | Admin updates config `rfq_signer` |
+| 102 | `create_token_account` | MM config ATA for one mint |
 | 110 | `init_event` | Creates event state PDA `["event_state", event_id]` at **sequence 0**; optional extra body after the header |
-| 111 | `init_market` | Creates market/oracle body under `["market_data", market_id_body, operator]` |
+| 111 | `init_market` | Creates market/oracle body under `["market_data", market_id_body, operator, mint]` |
 | 112 | `close_event` | |
 | 113 | `close_market` | |
 | 114 | `update_event_state` | |
@@ -876,10 +877,11 @@ struct MarketId {
    period: u8,
    is_pregame: bool,
    operator: Address, // grades this market
+   mint: Address,     // classic SPL mint this market settles in
 }
 ```
 
-The operator is baked into the market id at fill time (auction and RFQ paths alike). MM market-data PDAs derive from `["market_data", market_id_body_wire, operator]` so two operators never collide on the same PDA for the same selection.
+The operator and mint are baked into the market id at fill time (auction and RFQ paths alike). MM market-data PDAs derive from `["market_data", market_id_body_wire, operator, mint]`. Mints are classic SPL Token only, with 1–10 decimals. The minimum stake or filler slice is `10^(decimals - 1)` (0.1 of the token). Every leg of a parlay must use that same mint.
 
 `grade_bets` and `grade_parlay` accept a signer that is either that market’s `operator` or the aggregator config `authority` (fallback). For parlays, authority is checked **per graded leg** against that leg’s `market_id.operator`.
 
@@ -927,17 +929,26 @@ RFQ is an alternate fill path for a **single MM** that has already signed a firm
 
 ### Freebet flow
 
-Issuer-sponsored stake: the **issuer ATA** (not the user ATA) funds the bet. Ticket headers store `freebet_id`. Fills are **all-or-nothing** (`ix.amount` must equal the freebet PDA amount and the auction/RFQ must fill that exact stake). Each fill is also gated by the voucher’s **MM whitelist** and **operator whitelist** (market `operator` on every leg). Freebets cannot be cashed out. Settle uses `settle_freebet` / `settle_freebet_parlay`: if the bet wins, the profit is paid to the user and the stake is returned to the issuer. If the bet loses, the stake goes to the market maker. Push / Cancelled / RolledBack reinstates the voucher (same amount, expiry `now + 3 days`). HalfWon / HalfLost reinstates at `amount / 2`.
+Issuer-sponsored stake: the **issuer ATA** (not the user ATA) funds the bet. Ticket headers store that freebet PDA in `promo_account`. Fills are **all-or-nothing** (`ix.amount` must equal the freebet PDA amount and the auction/RFQ must fill that exact stake). Each fill is also gated by the voucher’s **MM whitelist** and **operator whitelist** (market `operator` on every leg). Freebets cannot be cashed out. Settle uses `settle_freebet` / `settle_freebet_parlay`: if the bet wins, the profit is paid to the user and the stake is returned to the issuer. If the bet loses, the stake goes to the market maker. Push / Cancelled / RolledBack reinstates the voucher (same amount, expiry `now + 3 days`). HalfWon / HalfLost reinstates at `amount / 2`.
 
-1. Issuer auth calls `init_freebet_issuer`, deposits tokens, then `issue_freebet`.
+1. Issuer auth calls `init_freebet_issuer`, `create_promo_issuer_ata` for the mint, deposits tokens, then `issue_freebet`.
 2. User calls `freebet_fill_bet` / `freebet_fill_parlay` / RFQ siblings. Ix data is `freebet_id: u32` then the existing fill body; RFQ message signatures stay the same.
 3. Grade as usual (`grade_bets` / `grade_parlay`).
 4. Anyone calls `settle_freebet` / `settle_freebet_parlay`.
 
+### Boost flow
+
+The user pays the stake from their own ATA. The requested fill amount may be below `max_stake`, and the auction must fill that requested amount in full. At a winning settle the issuer ATA pays `actual_profit * boost_bps / 10_000`. `actual_profit` is the profit the market-maker liability ATA paid on that settle: each filler's win or half-win profit on a single, and the liability payment on a parlay, including a reduced `ModifiedWin`. `10_000` is 100% of that profit. Any non-zero `boost_bps` is accepted. Push / Cancelled / RolledBack reinstates the voucher (`expiry = now + 3 days`). Whitelists match freebets. Parlay odds are the product of each leg's `odds_scaled`. Boosts cannot be cashed out.
+
+1. Issuer auth calls `init_freebet_issuer`, `create_promo_issuer_ata`, deposits tokens, then `issue_boost`.
+2. User calls `boosted_fill_bet` / `boosted_fill_parlay` / RFQ siblings. Ix data is `boost_id: u32` then the existing fill body. The ticket stores that boost PDA in `promo_account`. Settle checks `issuer_auth` against the boost, and rent returns there.
+3. Grade as usual.
+4. Anyone calls `settle_boosted_bet` / `settle_boosted_parlay`, giving the user their usual profit from the market maker plus the extra profit from the issuer ATA.
+
 ## Liability Netting
 
 Liability netting is a **peak-reserve** feature in major **pre-game and live** markets (FT, BTTS (soccer), ML (non-soccer), Spread, Totals). Reserved collateral on a line is `max(open P on each outcome)`, not the sum of every ticket and not a mixed `+profit/−stake` book. A balanced 10@1.9/10@1.9 hedge posts **9**, not 18. A **rolled-back** live ticket is unwound on settle the same way as a void: that ticket’s profit is subtracted from the outcome it was filled on. Liability netting does **NOT** flatten the whole event: spread and total style netting is tracked per `(period, market)` line (`open_0` / `open_1`), while the main win market uses the header `open_home` / `open_away` / `open_draw`. For soccer, that header applies to `mkt` **1** `period` **1** (1X2). For non-soccer, it applies to `mkt` **0** `period` **0** (ML) (`open_draw` stays 0).
-This requires you to have created a **liability netting PDA** for the event via `create_netting_account`. The PDA is owned by the aggregator. It **MUST** be of the seeds `["netting", mm_program_address, event_id]`.
+This requires you to have created a **liability netting PDA** for the event via `create_netting_account`. The PDA is owned by the aggregator. It **MUST** be of the seeds `["netting", mm_program_address, event_id, operator, mint]`.
 
 The account is created with the win market in the header plus **10 spare line slots**. Fills **auto-insert** a new eligible `(period, mkt)` and **realloc** when those slots are full (**feepayer** pays the extra rent). Hard cap is **255**. MM admin can also `add_line_to_netting_account`, if you want to pre-declare lines you intend to quote.
 
@@ -994,15 +1005,16 @@ Offer expiry is the number of seconds from the current time that the offer is va
 | Bet Token Account | n/a | ATA(bet/parlay_pda, mint) | authority is the Bet PDA Account, created in fill_bet |
 | MM List PDA | 3 | ["mm_list"] | created in init_program, used by clients to find SPAMMs to reach for quotes |
 | Config PDA | 4 | ["config"] | created in init_program |
-| MM Encumbrance PDA | 5 | ["encumbrance", mm_program_address] | created in register_mm |
-| MM Liability Token Account | n/a | ATA(encumbrance_pda, mint) | authority is the MM Encumbrance PDA, created in register_mm |
-| MM Netting PDA | 6 | ["netting", mm_program_address, event_id] | created with create_netting_account; see Liability Netting for line layout |
+| MM Encumbrance PDA | 5 | ["encumbrance", mm_program_address, mint] | one per mint; `init_mm_mint_vault`; `encumbrance` plus `open_cashout_tickets` |
+| MM Liability Token Account | n/a | ATA(encumbrance_pda, mint) | authority is the MM Encumbrance PDA |
+| MM Netting PDA | 6 | ["netting", mm_program_address, event_id, operator, mint] | created with create_netting_account; see Liability Netting for line layout |
 | Cashout Escrow PDA | 7 | ["cashout_escrow", user_address, orig_bet_id] | live cashout delay escrow; holds payment until claim/revert |
 | Cashout Account PDA | 8 | ["cashout", filling_mm, cashout_id] | novated single-bet slice owned by filling MM; settleable like a bet |
 | Cashout Parlay Account PDA | 9 | ["cashout_parlay", filling_mm, cashout_id] | novated parlay slice owned by filling MM |
-| Freebet Issuer PDA | 10 | ["freebet_issuer", auth] | promo fund authority; `open_count` of in-flight freebets |
-| Freebet PDA | 11 | ["freebet", auth, freebet_id] | Available/Used voucher; trailing MM whitelist (`num_mms == 0` = any MM) then operator whitelist (`num_operators == 0` = any operator) |
-| Issuer Token Account | n/a | ATA(freebet_issuer_pda, mint) | funds bet atas at placement |
+| Promo Issuer PDA | 10 | ["promo_issuer", auth] | promo fund authority; `open_count` of in-flight freebets and boosts |
+| Freebet PDA | 11 | ["freebet", auth, mint, freebet_id] | Available/Used voucher; trailing MM whitelist (`num_mms == 0` = any MM) then operator whitelist (`num_operators == 0` = any operator) |
+| Boost PDA | 12 | ["boost", auth, mint, boost_id] | Same voucher shape as a freebet, plus `boost_bps` |
+| Issuer Token Account | n/a | ATA(promo_issuer_pda, mint) | one per mint; funds freebet stake at fill and boost profit at settle |
 
 ## Aggregator Instructions
 
@@ -1014,41 +1026,53 @@ The first byte of aggregator instruction `data` selects the handler.
 | 1 | `change_config_status` |
 | 2 | `register_mm` |
 | 3 | `deregister_mm` |
+| 4 | `init_mm_mint_vault` |
+| 5 | `close_mm_mint_vault` |
 | 10 | `fill_bet` |
 | 11 | `fill_parlay` |
 | 12 | `fill_rfq_bet` |
 | 13 | `fill_rfq_parlay` |
-| 15 | `freebet_fill_bet` |
-| 16 | `freebet_fill_parlay` |
-| 17 | `freebet_fill_rfq_bet` |
-| 18 | `freebet_fill_rfq_parlay` |
-| 20 | `grade_bets` |
-| 21 | `grade_parlay` |
-| 25 | `settle_bet` |
-| 26 | `settle_parlay` |
-| 27 | `settle_freebet` |
-| 28 | `settle_freebet_parlay` |
-| 30 | `get_quote_proxy` |
-| 31 | `get_parlay_quote_proxy` |
-| 32 | `get_market_quotes_proxy` |
-| 33 | `get_cashout_quote_proxy` |
-| 34 | `get_parlay_cashout_quote_proxy` |
-| 40 | `create_netting_account` |
-| 41 | `add_line_to_netting_account` |
-| 42 | `remove_line_from_netting_account` |
-| 43 | `close_netting_account` |
-| 50 | `withdraw_from_liability_account` |
-| 60 | `init_freebet_issuer` |
-| 61 | `remove_freebet_issuer` |
-| 62 | `withdraw_freebet_funds` |
-| 63 | `issue_freebet` |
-| 64 | `revoke_freebet` |
-| 70 | `fill_cashout` |
-| 71 | `fill_parlay_cashout` |
-| 72 | `fill_rfq_cashout` |
-| 73 | `fill_rfq_parlay_cashout` |
-| 74 | `claim_cashout_escrow` |
-| 75 | `revert_cashout` |
+| 20 | `freebet_fill_bet` |
+| 21 | `freebet_fill_parlay` |
+| 22 | `freebet_fill_rfq_bet` |
+| 23 | `freebet_fill_rfq_parlay` |
+| 30 | `boosted_fill_bet` |
+| 31 | `boosted_fill_parlay` |
+| 32 | `boosted_fill_rfq_bet` |
+| 33 | `boosted_fill_rfq_parlay` |
+| 90 | `fill_cashout` |
+| 91 | `fill_parlay_cashout` |
+| 92 | `fill_rfq_cashout` |
+| 93 | `fill_rfq_parlay_cashout` |
+| 94 | `claim_cashout_escrow` |
+| 95 | `revert_cashout` |
+| 100 | `grade_bets` |
+| 101 | `grade_parlay` |
+| 110 | `settle_bet` |
+| 111 | `settle_parlay` |
+| 112 | `settle_freebet` |
+| 113 | `settle_freebet_parlay` |
+| 114 | `settle_boosted_bet` |
+| 115 | `settle_boosted_parlay` |
+| 130 | `create_netting_account` |
+| 131 | `add_line_to_netting_account` |
+| 132 | `remove_line_from_netting_account` |
+| 133 | `close_netting_account` |
+| 150 | `withdraw_from_liability_account` |
+| 160 | `init_freebet_issuer` |
+| 161 | `remove_freebet_issuer` |
+| 162 | `withdraw_freebet_funds` |
+| 163 | `create_promo_issuer_ata` |
+| 164 | `close_promo_issuer_ata` |
+| 165 | `issue_freebet` |
+| 166 | `revoke_freebet` |
+| 167 | `issue_boost` |
+| 168 | `revoke_boost` |
+| 200 | `get_quote_proxy` |
+| 201 | `get_parlay_quote_proxy` |
+| 202 | `get_market_quotes_proxy` |
+| 203 | `get_cashout_quote_proxy` |
+| 204 | `get_parlay_cashout_quote_proxy` |
 | 254 | `write_arbitrary_data` |
 | 255 | `force_close_pda` |
 
@@ -1096,7 +1120,7 @@ Accounts:
 
 Discriminator: **2**
 
-This is called by a SPAMM admin to register the SPAMM with the aggregator. Registration **verifies** the signer matches the MM config `admin`; it does **not** set or change that field.
+This is called by a SPAMM admin to register the SPAMM with the aggregator. Registration **verifies** the signer matches the MM config `admin`; it does **not** set or change that field. It does **not** open a mint vault — call `init_mm_mint_vault` once per mint.
 
 Data: `None`
 
@@ -1104,27 +1128,21 @@ Accounts:
 
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
-| 0 | mm admin | writable, signer | Pays rent / resize; must match MM config `admin` (verified, not set by registration) |
+| 0 | mm admin | writable, signer | Pays list resize rent; must match MM config `admin` |
 | 1 | mm program | readonly | Must be executable (a program) |
 | 2 | mm config pda | readonly | Must be **initialized**; signer verified as MM config `admin` |
-| 3 | mm encumbrance pda | writable | Must be uninitialized |
-| 4 | mm liability token account | writable | Must be uninitialized; authority is the MM Encumbrance PDA |
-| 5 | aggregator config pda | readonly | Must be the Aggregator Config PDA |
-| 6 | mm list pda | writable | |
-| 7 | mint | readonly | Must be the mint |
-| 8 | token program | readonly | Must be the token program |
-| 9 | associated token program | readonly | Must be the associated token program |
-| 10 | rent sysvar | readonly | Must be the rent sysvar |
-| 11 | system program | readonly | Must be the system program |
-| 12 | mm token account | readonly | |
-| 13 | mm quote buffer | readonly | |
-| 14 | mm parlay quote buffer | readonly | |
+| 3 | aggregator config pda | readonly | Must be the Aggregator Config PDA |
+| 4 | mm list pda | writable | |
+| 5 | rent sysvar | readonly | Must be the rent sysvar |
+| 6 | system program | readonly | Must be the system program |
+| 7 | mm quote buffer | readonly | |
+| 8 | mm parlay quote buffer | readonly | |
 
 ### deregister_mm
 
 Discriminator: **3**
 
-Called by the aggregator admin after off-chain checks that the MM has no open bets. Reverses `register_mm`: sweeps liability tokens to the MM collateral ATA, closes the liability ATA and encumbrance PDA (rent to `mm_admin`), and removes the MM program id from `mm_list`.
+Called by the aggregator admin after off-chain checks that the MM has no open bets. Closes the remaining mint vault (sweep liability tokens to the MM collateral ATA, close the liability ATA and encumbrance PDA, rent to `mm_admin`) and removes the MM program id from `mm_list`. Close every other mint first with `close_mm_mint_vault`.
 
 Data: `None`
 
@@ -1136,7 +1154,7 @@ Accounts:
 | 1 | mm admin | writable | Receives rent from closed encumbrance PDA and liability ATA; must match MM config admin |
 | 2 | mm program | readonly | Must be executable |
 | 3 | mm config pda | readonly | |
-| 4 | mm encumbrance pda | writable | Must exist; `encumbrance` field must be **0** |
+| 4 | mm encumbrance pda | writable | Must exist; `encumbrance` and `open_cashout_tickets` must be **0** |
 | 5 | mm liability token account | writable | Closed after transferring tokens to MM collateral ATA |
 | 6 | aggregator config pda | readonly | |
 | 7 | mm list pda | writable | MM program id removed from list |
@@ -1149,11 +1167,59 @@ Accounts:
 | 14 | mm quote buffer | readonly | |
 | 15 | mm parlay quote buffer | readonly | |
 
+### init_mm_mint_vault
+
+Discriminator: **4**
+
+Called by the MM admin, once per mint, after `register_mm`. The MM config ATA for that mint must already exist (`create_token_account`). Opens the encumbrance PDA and its liability ATA.
+
+Data: `None`
+
+Accounts:
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | mm admin | writable, signer | Must match MM config `admin` |
+| 1 | mm program | readonly | Must be executable and on `mm_list` |
+| 2 | mm config pda | readonly | |
+| 3 | mm list pda | readonly | |
+| 4 | mm encumbrance pda | writable | Must be uninitialized; seeds `["encumbrance", mm_program, mint]` |
+| 5 | mm liability token account | writable | Must be uninitialized; ATA of the encumbrance PDA |
+| 6 | mm token account | readonly | Existing config ATA for this mint |
+| 7 | mint | readonly | Classic SPL mint |
+| 8 | token program | readonly | |
+| 9 | associated token program | readonly | |
+| 10 | rent sysvar | readonly | |
+| 11 | system program | readonly | |
+
+### close_mm_mint_vault
+
+Discriminator: **5**
+
+Called by the MM admin to close one mint vault without removing the MM from the list. `encumbrance` and `open_cashout_tickets` must be **0**.
+
+Data: `None`
+
+Accounts:
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | mm admin | writable, signer | Receives ATA dust and PDA rent |
+| 1 | mm program | readonly | |
+| 2 | mm config pda | readonly | |
+| 3 | mm encumbrance pda | writable | |
+| 4 | mm liability token account | writable | Closed after the token balance moves to the config ATA |
+| 5 | mm token account | writable | Config ATA; receives leftover tokens |
+| 6 | mint | readonly | |
+| 7 | token program | readonly | |
+| 8 | associated token program | readonly | |
+| 9 | system program | readonly | |
+
 ### init_freebet_issuer
 
-Discriminator: **60**
+Discriminator: **160**
 
-Called by an issuer authority to create the Freebet Issuer PDA and its classic ATA. Auth pays rent.
+Called by an issuer authority to create the promo issuer PDA. Auth pays rent. Create each mint's ATA with `create_promo_issuer_ata`.
 
 Data: `None`
 
@@ -1162,19 +1228,15 @@ Accounts:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | auth | writable, signer | Pays rent; becomes issuer `auth` |
-| 1 | issuer pda | writable | Must be uninitialized; seeds `["freebet_issuer", auth]` |
-| 2 | issuer ata | writable | Must be uninitialized; classic ATA of issuer PDA |
-| 3 | mint | readonly | |
-| 4 | token program | readonly | |
-| 5 | associated token program | readonly | |
-| 6 | rent sysvar | readonly | |
-| 7 | system program | readonly | |
+| 1 | issuer pda | writable | Must be uninitialized; seeds `["promo_issuer", auth]` |
+| 2 | rent sysvar | readonly | |
+| 3 | system program | readonly | |
 
 ### remove_freebet_issuer
 
-Discriminator: **61**
+Discriminator: **161**
 
-Requires `open_count == 0`. Drains the issuer ATA to the auth ATA, then closes the ATA and issuer PDA (rent to auth).
+Requires `open_count == 0`. Closes the issuer PDA (rent to auth). Close every issuer ATA first with `close_promo_issuer_ata`.
 
 Data: `None`
 
@@ -1183,17 +1245,50 @@ Accounts:
 | Index | Account | Role | Notes |
 | --- | --- | --- | --- |
 | 0 | auth | writable, signer | Must match issuer PDA `auth`; receives rent |
-| 1 | issuer pda | writable | Closed after drain |
+| 1 | issuer pda | writable | Closed |
+
+### create_promo_issuer_ata
+
+Discriminator: **163**
+
+Called by the issuer auth to create the issuer ATA for one mint. Call again for each extra mint.
+
+Data: `None`
+
+Accounts:
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | auth | writable, signer | Pays rent |
+| 1 | issuer pda | readonly | ATA wallet |
+| 2 | issuer ata | writable | Must be uninitialized |
+| 3 | mint | readonly | |
+| 4 | token program | readonly | |
+| 5 | associated token program | readonly | |
+| 6 | system program | readonly | |
+
+### close_promo_issuer_ata
+
+Discriminator: **164**
+
+Drains one issuer ATA to `dest_ata` and closes it. Requires `open_count == 0`.
+
+Data: `None`
+
+Accounts:
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | auth | writable, signer | Must match issuer PDA `auth` |
+| 1 | issuer pda | readonly | Signs the close |
 | 2 | issuer ata | writable | Drained then closed |
-| 3 | auth ata | writable | Receives issuer ATA token balance |
+| 3 | dest ata | writable | Receives the token balance |
 | 4 | mint | readonly | |
 | 5 | token program | readonly | |
-| 6 | associated token program | readonly | |
-| 7 | system program | readonly | |
 
 ### withdraw_freebet_funds
 
-Discriminator: **62**
+Discriminator: **162**
 
 Transfers `amount` from the issuer ATA to the dest ATA (issuer PDA signs). No encumbrance math.
 
@@ -1201,7 +1296,7 @@ Data:
 
 ```rust
 struct WithdrawFreebetFundsIxData {
-   discriminator: u8, // 62
+   discriminator: u8, // 162
    amount: u64,
 }
 ```
@@ -1219,7 +1314,7 @@ Accounts:
 
 ### issue_freebet
 
-Discriminator: **63**
+Discriminator: **165**
 
 Creates a freebet PDA for `user` and increments issuer `open_count`. Max **10** MMs and **5** operators.
 
@@ -1227,7 +1322,7 @@ Data:
 
 ```rust
 struct IssueFreebetIxData {
-   discriminator: u8, // 63
+   discriminator: u8, // 165
    freebet_id: u32,   // must be > 0
    expiry: u32,       // unix seconds; must be > now
    amount: u64,
@@ -1248,14 +1343,15 @@ Accounts:
 | 0 | auth | writable, signer | Must match issuer PDA `auth` |
 | 1 | issuer pda | writable | |
 | 2 | user | readonly | Recipient; not required to sign |
-| 3 | freebet pda | writable | Must be uninitialized; seeds `["freebet", auth, freebet_id]` |
-| 4 | rent sysvar | readonly | |
-| 5 | system program | readonly | |
-| 6 | clock sysvar | readonly | Expiry must be in the future |
+| 3 | freebet pda | writable | Must be uninitialized; seeds `["freebet", auth, mint, freebet_id]` |
+| 4 | mint | readonly | |
+| 5 | rent sysvar | readonly | |
+| 6 | system program | readonly | |
+| 7 | clock sysvar | readonly | Expiry must be in the future |
 
 ### revoke_freebet
 
-Discriminator: **64**
+Discriminator: **166**
 
 Auth-only revoke.
 
@@ -1263,7 +1359,7 @@ Data:
 
 ```rust
 struct RevokeFreebetIxData {
-   discriminator: u8, // 64
+   discriminator: u8, // 166
    freebet_id: u32,
 }
 ```
@@ -1275,6 +1371,68 @@ Accounts:
 | 0 | auth | writable, signer | Must match freebet `issuer_auth`; receives rent |
 | 1 | issuer pda | writable | |
 | 2 | freebet pda | writable | Must be `Available` |
+
+### issue_boost
+
+Discriminator: **167**
+
+Creates a boost PDA for `user` and increments issuer `open_count`. Max **10** MMs and **5** operators. See Boost flow for `boost_bps`.
+
+Data:
+
+```rust
+struct IssueBoostIxData {
+   discriminator: u8, // 167
+   boost_id: u32,     // must be > 0
+   expiry: u32,       // unix seconds; must be > now
+   max_stake: u64,
+   min_odds_scaled: u32,
+   max_odds_scaled: u32,
+   boost_bps: u32,    // must be > 0; 10_000 = 100% of reserved profit
+   min_legs: u8,
+   num_mms: u8,       // 0..=10; 0 = any MM
+   num_operators: u8, // 0..=5; 0 = any market operator
+   allowed_mms: [Address; num_mms],
+   allowed_operators: [Address; num_operators],
+}
+```
+
+Accounts:
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | auth | writable, signer | Must match issuer PDA `auth` |
+| 1 | issuer pda | writable | |
+| 2 | user | readonly | Recipient; not required to sign |
+| 3 | boost pda | writable | Must be uninitialized; seeds `["boost", auth, mint, boost_id]` |
+| 4 | mint | readonly | |
+| 5 | rent sysvar | readonly | |
+| 6 | system program | readonly | |
+| 7 | clock sysvar | readonly | Expiry must be in the future |
+
+### revoke_boost
+
+Discriminator: **168**
+
+Auth-only revoke of an `Available` boost. Decrements issuer `open_count`.
+
+Data:
+
+```rust
+struct RevokeBoostIxData {
+   discriminator: u8, // 168
+   boost_id: u32,
+}
+```
+
+Accounts:
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | auth | writable, signer | Must match boost `issuer_auth`; receives rent |
+| 1 | issuer pda | writable | |
+| 2 | boost pda | writable | Must be `Available` |
+| 3 | mint | readonly | |
 
 ### fill_bet
 
@@ -1500,7 +1658,7 @@ Then the MM:
 
 ### fill_cashout
 
-Discriminator: **70**
+Discriminator: **90**
 
 Auction cashout of an open single-bet ticket. CPIs each MM’s `get_cashout_quote`, picks the best **payment**, then pays that amount to the dest (user ATA pregame, or escrow ATA when live delay applies): the aggregator spends **free** tokens on the filling MM’s liability ATA first (`balance − max(encumbrance, 0)`), then CPIs `fill_cashout_quote` with `amount_to_send` = remainder from the MM token ATA (CPI still runs when remainder is 0 so the quote buffer is marked used). Dest must rise by the **full** quoted payment. Novates the cashed slice onto a **Cashout Account** owned by the filling MM, and moves stake from the bet ATA to the cashout ATA. Encumbrance is not written.
 
@@ -1558,7 +1716,7 @@ Then for each MM:
 
 ### fill_parlay_cashout
 
-Discriminator: **71**
+Discriminator: **91**
 
 Single-MM cashout of an open parlay. Same delay / escrow / novation rules; cashout PDA seeds `["cashout_parlay", filling_mm, cashout_id]`. Same free-liability-then-remainder payment as `fill_cashout`.
 
@@ -1622,7 +1780,7 @@ Then for each leg:
 
 ### fill_rfq_cashout
 
-Discriminator: **72**
+Discriminator: **92**
 
 Signed RFQ cashout of a single bet against one MM. Verifies ed25519 over the cashout RFQ message (signed `max_payment` is the **full** cash). The aggregator spends free liability first, then CPIs MM `fill_cashout_rfq` (disc **144**) with `amount_to_send` = remainder.
 
@@ -1680,7 +1838,7 @@ Then the MM:
 
 ### fill_rfq_parlay_cashout
 
-Discriminator: **73**
+Discriminator: **93**
 
 Signed RFQ cashout of a parlay. CPIs MM `fill_cashout_parlay_rfq` with `amount_to_send` remainder after free liability. Signed `max_payment` is the full cash.
 
@@ -1736,7 +1894,7 @@ Then the MM (**5** — no per-leg PDAs):
 
 ### claim_cashout_escrow
 
-Discriminator: **74**
+Discriminator: **94**
 
 Permissionless claim after `LIVE_CASHOUT_DELAY`. Closes escrow ATA → user ATA and escrow PDA → `rent_recipient` (must equal stored `escrow.feepayer`). If original ticket `result == CashedOut`, closes the original bet ATA (any leftover dust → user ATA) **then** the original bet PDA. Fails with `CashoutDelayNotElapsed` too early; `CashoutMustRevert` if original or cashout is `RolledBack`.
 
@@ -1764,7 +1922,7 @@ Accounts:
 
 ### revert_cashout
 
-Discriminator: **75**
+Discriminator: **95**
 
 Permissionless when original or cashout is `RolledBack`. Restores stake/fillers onto the original ticket, returns escrowed payment to the filling MM **liability ATA**, closes cashout + escrow PDAs/ATAs.
 
@@ -1786,7 +1944,7 @@ Accounts:
 | 9 | escrow ata | writable | |
 | 10 | mm program | readonly | Filling MM |
 | 11 | mm config pda | readonly | |
-| 12 | mm encumbrance pda | readonly | Authority of the liability ATA |
+| 12 | mm encumbrance pda | writable | Filling MM vault; `open_cashout_tickets` decrements when the cashout closes |
 | 13 | mm liability token account | writable | Receives escrowed payment |
 | 14 | config pda | readonly | |
 | 15 | mint | readonly | |
@@ -1795,7 +1953,7 @@ Accounts:
 
 ### get_quote_proxy
 
-Discriminator: **30**
+Discriminator: **200**
 
 Read-only quote aggregation for the UI: CPI each MM’s `get_quote`, collect valid quotes, and return them via `sol_set_return_data` (no bet PDA, no token moves). `bet_id` is decoded but **not used**.
 
@@ -1844,7 +2002,7 @@ Invalid or empty MM quotes are skipped; duplicate MM program ids fail the instru
 
 ### get_market_quotes_proxy
 
-Discriminator: **32**
+Discriminator: **202**
 
 Like `get_quote_proxy`, but CPIs each MM’s `get_quote` once per side for the market (`mkt` → side count per `id-system.md`).
 
@@ -1894,7 +2052,7 @@ MMs with no valid quote on any side are omitted. Failed sides for an included MM
 
 ### get_parlay_quote_proxy
 
-Discriminator: **31**
+Discriminator: **201**
 
 CPIs MM `get_quote_parlay` for each registered MM. `bet_id` is decoded but unused.
 
@@ -1946,7 +2104,7 @@ struct ProxyParlayQuoteData {
 
 ### get_cashout_quote_proxy
 
-Discriminator: **33**
+Discriminator: **203**
 
 Simulate-only auction for cashout of an open single ticket. Soft-fails dead MMs (same as other proxies). `cashout_id` is decoded but unused.
 
@@ -1992,7 +2150,7 @@ struct ProxyCashoutQuoteData {
 
 ### get_parlay_cashout_quote_proxy
 
-Discriminator: **34**
+Discriminator: **204**
 
 Simulate-only auction for cashout of an open parlay. Soft-fails dead MMs (same as other proxies).
 
@@ -2043,7 +2201,7 @@ struct ProxyCashoutQuoteData {
 
 ### grade_bets
 
-Discriminator: **20**
+Discriminator: **100**
 
 Grades **Bet** PDAs (disc **1**) and **Cashout** PDAs (disc **8**). `CashedOut` / `Pending` / `ModifiedWin` are invalid grade targets for cashouts.
 
@@ -2051,7 +2209,7 @@ Data:
 
 ```rust
 struct GradeBetsIxData {
-   discriminator: u8, // 20
+   discriminator: u8, // 100
    results: [u8; N], // N = number of bet accounts; each byte is BetResult
 }
 ```
@@ -2090,7 +2248,7 @@ enum BetResult {
 
 ### grade_parlay
 
-Discriminator: **21**
+Discriminator: **101**
 
 Grades **one** parlay bet PDA (disc **2**) or **cashout-parlay** PDA (disc **9**) **leg by leg**, then folds the ticket-level `result`.
 
@@ -2098,7 +2256,7 @@ Data:
 
 ```rust
 struct GradeParlayIxData {
-   discriminator: u8, // 21
+   discriminator: u8, // 101
    results: [u8; num_legs], // data.len() == num_legs; no padding to 20/40
 }
 ```
@@ -2125,7 +2283,7 @@ Rules:
 
 ### settle_bet
 
-Discriminator: **25**
+Discriminator: **110**
 
 This is called by **anyone** to settle a bet which has been graded. The last account in each filler block is the netting PDA for the event of the bet or the system program if not netted. Lost / void leftovers go to the **liability ATA**. Lamports go to the original bet fee payer.
 
@@ -2145,7 +2303,7 @@ Accounts (fixed prefix, **11**):
 | 7 | mint | readonly | |
 | 8 | token program | readonly | |
 | 9 | cashout escrow pda | readonly | Must be unused for this ticket (`["cashout_escrow", owner, bet_id]`; cashout uses orig owner + orig bet id) |
-| 10 | dest encumbrance | readonly | Filling MM encumbrance when settling a cashout; ignored otherwise |
+| 10 | dest encumbrance | writable on cashout | Filling MM encumbrance when settling a cashout; `open_cashout_tickets` decrements |
 
 Then for each filler. Pass only live fillers — no padded unused slots.
 
@@ -2159,7 +2317,7 @@ Then for each filler. Pass only live fillers — no padded unused slots.
 
 ### settle_parlay
 
-Discriminator: **26**
+Discriminator: **111**
 
 This is called by **anyone** to settle a graded parlay. Lost stake and leftover profit stay in the **liability ATA**. Won profit is paid from the liability ATA to the user (or issuer) ATA.
 
@@ -2183,11 +2341,11 @@ Accounts (**15**):
 | 11 | mm encumbrance pda | writable | |
 | 12 | mm liability token account | writable | |
 | 13 | cashout escrow pda | readonly | Must be unused for this ticket |
-| 14 | dest encumbrance | readonly | Filling MM encumbrance on cashout settle; ignored otherwise |
+| 14 | dest encumbrance | writable on cashout | Filling MM encumbrance on cashout settle; `open_cashout_tickets` decrements |
 
 ### settle_freebet
 
-Discriminator: **27**
+Discriminator: **112**
 
 Requires `freebet_id != 0`. Stake from the bet ATA go to the **issuer ATA** if user won; profit still goes **user ATA**. Then reinstates or consumes the freebet PDA (see Freebet flow). Freebets cannot be cashed out so no `cashout_escrow_pda` or `dest_encumbrance`.
 
@@ -2224,7 +2382,7 @@ Then for each live filler:
 
 ### settle_freebet_parlay
 
-Discriminator: **28**
+Discriminator: **113**
 
 Data: `None`
 
@@ -2251,9 +2409,54 @@ Accounts (**18**):
 | 16 | mm encumbrance pda | writable | |
 | 17 | mm liability token account | writable | |
 
+### settle_boosted_bet
+
+Discriminator: **114**
+
+Same shape as `settle_freebet`, with `boost_pda` in the freebet slot. The user ATA receives the stake, the market-maker profit, and the boost. See Boost flow.
+
+Data: `None`
+
+Accounts (fixed prefix, **14**):
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | signer | writable, signer | Anyone; pays tx fees |
+| 1 | bet pda | writable | |
+| 2 | bet ata | writable | |
+| 3 | bet feepayer | writable | Must match `feepayer` stored on bet |
+| 4 | user | readonly | Ticket owner |
+| 5 | user ata | writable | Stake, market-maker profit, and boost |
+| 6 | issuer auth | writable | |
+| 7 | issuer pda | writable | Signs the boost transfer |
+| 8 | issuer ata | writable | Boost profit source |
+| 9 | boost pda | writable | |
+| 10 | config pda | readonly | |
+| 11 | mint | readonly | |
+| 12 | token program | readonly | |
+| 13 | clock sysvar | readonly | Reinstatement expiry math |
+
+Per filler (**5** each, `N` = `num_fillers`):
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | mm address | readonly | |
+| 1 | mm config pda | readonly | |
+| 2 | mm encumbrance pda | writable | |
+| 3 | mm liability token account | writable | |
+| 4 | mm netting pda | writable | Real netting PDA if the fill was netted, else system program |
+
+### settle_boosted_parlay
+
+Discriminator: **115**
+
+Same accounts as `settle_freebet_parlay`, with `boost_pda` in the freebet slot. The user ATA receives the stake, the market-maker profit, and the boost. No cashout escrow. See Boost flow.
+
+Data: `None`
+
 ### freebet_fill_bet
 
-Discriminator: **15**
+Discriminator: **20**
 
 Same as `fill_bet`, except stake comes from the issuer ATA and:
 - All-or-nothing: `ix.amount` must equal the voucher and the tx must fill that exact stake.
@@ -2311,7 +2514,7 @@ Then for each MM:
 
 ### freebet_fill_parlay
 
-Discriminator: **16**
+Discriminator: **21**
 
 Same as `fill_parlay`, except stake comes from the issuer ATA.
 
@@ -2367,7 +2570,7 @@ Then for each leg:
 
 ### freebet_fill_rfq_bet
 
-Discriminator: **17**
+Discriminator: **22**
 
 Same as `fill_rfq_bet`, except stake comes from the issuer ATA. RFQ ed25519 still verifies the **unprefixed** message (no `freebet_id` in the signed bytes).
 
@@ -2423,7 +2626,7 @@ Then the MM:
 
 ### freebet_fill_rfq_parlay
 
-Discriminator: **18**
+Discriminator: **23**
 
 Same as `fill_rfq_parlay`, except stake comes from the issuer ATA. RFQ ed25519 still verifies the **unprefixed** message (no `freebet_id` in the signed bytes).
 
@@ -2472,9 +2675,70 @@ Then the MM (**5** — no per-leg PDAs):
 | 3 | mm liability token account | writable | |
 | 4 | mm token account | writable | |
 
+### boosted_fill_bet
+
+Discriminator: **30**
+
+Same as `fill_bet`, except the user pays the stake and the issuer ATA is checked, not debited. See Boost flow.
+
+Data:
+
+```rust
+struct BoostedFillBetIxData {
+   boost_id: u32,                    // must be > 0
+   bet_id: u64,
+   market_id: MarketId,
+   side: u8,
+   amount: u64,
+   min_odds_scaled: u32,
+   event_state_sequence: u16,
+   event_game_state: EventGameState,
+}
+```
+
+Accounts (**15** fixed — `fill_bet`'s 12 with issuer + boost accounts after `user_ata`):
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | feepayer | writable, signer | Pays netting PDA rent if a fill inserts a new line |
+| 1 | user | readonly, signer | |
+| 2 | user ata | writable | Stake source |
+| 3 | issuer pda | readonly | |
+| 4 | issuer ata | readonly | Checked, not debited |
+| 5 | boost pda | writable | Marked used after a successful fill |
+| 6 | bet pda | writable | |
+| 7 | bet ata | writable | |
+| 8 | config pda | readonly | |
+| 9 | mint | readonly | |
+| 10 | token program | readonly | |
+| 11 | associated token program | readonly | |
+| 12 | rent sysvar | readonly | |
+| 13 | system program | readonly | |
+| 14 | clock sysvar | readonly | |
+
+Per MM accounts match `fill_bet` (**9** each).
+
+### boosted_fill_parlay
+
+Discriminator: **31**
+
+Same fixed accounts as `boosted_fill_bet`. Per-MM accounts match `fill_parlay` (**6 + 2 × L**). Data is `boost_id: u32` then `FillParlayIxData`.
+
+### boosted_fill_rfq_bet
+
+Discriminator: **32**
+
+Same fixed accounts as `boosted_fill_bet`. The MM tail matches `fill_rfq_bet` (**8**). Data is `boost_id: u32` then the RFQ fill body. The ed25519 signature stays over the unprefixed message.
+
+### boosted_fill_rfq_parlay
+
+Discriminator: **33**
+
+Same fixed accounts as `boosted_fill_bet`. The MM tail matches `fill_rfq_parlay` (**5**, no per-leg PDAs). Data is `boost_id: u32` then the RFQ parlay fill body.
+
 ### create_netting_account
 
-Discriminator: **40**
+Discriminator: **130**
 
 This is called by the SPAMM admin to create a liability netting account for an event.
 
@@ -2482,8 +2746,10 @@ Data:
 
 ```rust
 struct CreateNettingAccountIxData {
-   discriminator: u8, // 40
+   discriminator: u8, // 130
    event_id: EventId,
+   operator: Address,
+   mint: Address,
 }
 ```
 
@@ -2500,7 +2766,7 @@ Accounts:
 
 ### add_line_to_netting_account
 
-Discriminator: **41**
+Discriminator: **131**
 
 This is called by the SPAMM admin to add a line to the liability netting account for an event.
 
@@ -2508,8 +2774,10 @@ Data:
 
 ```rust
 struct AddLineToNettingIxData {
-   discriminator: u8, // 41
+   discriminator: u8, // 131
    event_id: EventId,
+   operator: Address,
+   mint: Address,
    period: u8,
    mkt: u16,
 }
@@ -2528,7 +2796,7 @@ Accounts:
 
 ### remove_line_from_netting_account
 
-Discriminator: **42**
+Discriminator: **132**
 
 This is called by the SPAMM admin to remove a line from the liability netting account for an event.
 
@@ -2536,8 +2804,10 @@ Data:
 
 ```rust
 struct RemoveLineFromNettingIxData {
-   discriminator: u8, // 42
+   discriminator: u8, // 132
    event_id: EventId,
+   operator: Address,
+   mint: Address,
    period: u8,
    mkt: u16,
 }
@@ -2554,7 +2824,7 @@ Accounts:
 
 ### close_netting_account
 
-Discriminator: **43**
+Discriminator: **133**
 
 This is called by the SPAMM admin to close the liability netting account for an event.
 
@@ -2562,8 +2832,10 @@ Data:
 
 ```rust
 struct CloseNettingAccountIxData {
-   discriminator: u8, // 43
+   discriminator: u8, // 133
    event_id: EventId,
+   operator: Address,
+   mint: Address,
 }
 ```
 
@@ -2579,7 +2851,7 @@ Accounts:
 
 ### withdraw_from_liability_account
 
-Discriminator: **50**
+Discriminator: **150**
 
 This is called by the SPAMM admin to withdraw excess funds from the liability token account.
 
@@ -2587,7 +2859,7 @@ Data:
 
 ```rust
 struct WithdrawFromLiabilityAccountIxData {
-   discriminator: u8, // 50
+   discriminator: u8, // 150
    amount: u64,
 }
 ```
@@ -2676,6 +2948,14 @@ Failures a client is expected to branch on return `ProgramError::Custom(code)`. 
 | 22 | `FreebetMmNotAllowed` | Filling MM is not on the freebet allow list |
 | 23 | `InvalidFreebet` | Wrong settle/cashout path, or freebet accounts mismatch |
 | 24 | `FreebetOperatorNotAllowed` | Market operator is not on the freebet allow list |
+| 25 | `BoostExpired` | Boost `expiry` is in the past |
+| 26 | `BoostNotAvailable` | Boost is `Used` (or not `Available`) |
+| 27 | `BoostAmountMismatch` | Fill stake is above the boost `max_stake` |
+| 28 | `BoostOddsOutOfRange` | Quoted / filled odds outside `[min_odds, max_odds]` |
+| 29 | `BoostLegCount` | Ticket has fewer legs than the boost requires |
+| 30 | `BoostMmNotAllowed` | Filling MM is not on the boost allow list |
+| 31 | `InvalidBoost` | Wrong settle path, or boost accounts mismatch |
+| 32 | `BoostOperatorNotAllowed` | Market operator is not on the boost allow list |
 
 ## Tests
 
@@ -2700,7 +2980,7 @@ cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --tes
 
 On Windows use `--test-threads=1` to avoid file-lock errors while the harness copies `spamm_market_maker.so` into `aggregator/program/target/deploy/`. The harness prefers the MM artifact at `market_maker/program/target/deploy/spamm_market_maker.so` — rebuild the MM crate after MM changes, not only the aggregator.
 
-Coverage is decent for fill/settle/RFQ/cashout/freebet paths via the example SPAMM; routing across multiple real MM programs is not exercised. See also `.cursor/rules/mollusk-tests.mdc` and `SYSTEM_OVERVIEW.md` §22.
+Coverage is decent for fill/settle/RFQ/cashout/freebet/boost paths via the example SPAMM; routing across multiple real MM programs is not exercised. See also `.cursor/rules/mollusk-tests.mdc` and `SYSTEM_OVERVIEW.md` §22.
 
 ## Token
 

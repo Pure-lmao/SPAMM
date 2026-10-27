@@ -33,7 +33,6 @@ import {
    maxProxyMmsForMarketQuotes,
    MAX_NUMBER_OF_MMS_PROXY,
    memcmp,
-   MIN_BET_AMOUNT,
    MM_MARKET_DATA_PDA_DISCRIMINATOR,
    MM_QUOTE_BUFFER_DISCRIMINATOR,
    MM_QUOTE_BUFFER_LEN,
@@ -250,6 +249,7 @@ function dbMarketToWireId(market: DbMarket): MarketId {
       },
       isPregame: true,
       operator: address(market.operator),
+      mint: address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"),
    };
 }
 
@@ -280,7 +280,7 @@ export async function simulateMarketQuotesLocally(
          betId: QUOTE_PROBE_BET_ID,
          marketId: dbMarketToWireId(market),
          side: 0,
-         amount: MIN_BET_AMOUNT,
+         amount: 100_000n,
          minOddsScaled: QUOTE_PROBE_MIN_ODDS,
          eventGameState: getEventGameState("PG", 0, 0, 0, 0),
          eventStateSequence: 1,

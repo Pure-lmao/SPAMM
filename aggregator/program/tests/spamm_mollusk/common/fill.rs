@@ -324,11 +324,11 @@ pub fn parlay_leg(market_id: MarketId, side: u8, seq: u16, game_state: EventGame
 }
 
 /// Pack live legs into a fixed `fill_parlay` / get-quote buffer array (unused slots are placeholders).
-pub fn parlay_legs_fill(legs: &[ParlayLegSel]) -> [ParlayLegSel; MAX_PARLAY_LEGS] {
+pub fn parlay_legs_fill(legs: &[ParlayLegSel]) -> Box<[ParlayLegSel; MAX_PARLAY_LEGS]> {
    assert!(legs.len() <= MAX_PARLAY_LEGS, "too many legs for fill_parlay");
    let mut out = [ParlayLegSel::placeholder(); MAX_PARLAY_LEGS];
    out[..legs.len()].copy_from_slice(legs);
-   out
+   Box::new(out)
 }
 
 /// Pack live legs into a fixed RFQ parlay ix / bet PDA array (unused slots are placeholders).

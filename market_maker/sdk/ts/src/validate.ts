@@ -137,6 +137,7 @@ export function validateAddress(addr: string, label = 'address'): void {
 export function validateMarketId(m: MarketId, label = 'marketId'): void {
    validateEventId(m.eventId, `${label}.eventId`);
    validateAddress(m.operator, `${label}.operator`);
+   validateAddress(m.mint, `${label}.mint`);
    validateU64(m.player, `${label}.player`);
    validateU16(m.mkt, `${label}.mkt`);
    validateU8(m.period, `${label}.period`);

@@ -7,7 +7,7 @@ use spamm_aggregator::errors::SpammError;
 use spamm_aggregator::helpers::calc_potential_profit;
 use spamm_aggregator::instructions::{FillBetIxData, GRADE_BETS_IX_DISCRIMINATOR};
 use spamm_aggregator::state::account_bet::BetResult;
-use spamm_aggregator::state::{EventGameState, FreebetState};
+use spamm_aggregator::state::{EventGameState, PromoState};
 
 use crate::common::{
    admin, agg_program_id, assert_account_closed_or_system_empty, assert_ok_record_cu, assert_spamm_err,
@@ -115,7 +115,7 @@ fn settle_freebet_cancel_reinstates() {
    assert_ok_record_cu("settle_freebet/cancel", &r);
    assert_eq!(read_token_balance(&env, &issuer_ata()), pre_i + STAKE);
    let fb = decode_freebet(&env, FREEBET_ID_BASIC);
-   assert_eq!(fb.state, FreebetState::Available);
+   assert_eq!(fb.state, PromoState::Available);
    assert_eq!(fb.amount, STAKE);
    assert_eq!(fb.expiry, 10 + FREEBET_REINSTATE_SECS);
    assert_eq!(decode_issuer(&env).open_count, 1);
@@ -134,7 +134,7 @@ fn settle_freebet_half_lost_halves_amount() {
    let r = env.run_ix(settle_freebet_instruction(bet, bat, FREEBET_ID_BASIC));
    assert_ok_record_cu("settle_freebet/half_lost", &r);
    let fb = decode_freebet(&env, FREEBET_ID_BASIC);
-   assert_eq!(fb.state, FreebetState::Available);
+   assert_eq!(fb.state, PromoState::Available);
    assert_eq!(fb.amount, STAKE / 2);
    assert_eq!(fb.expiry, 20 + FREEBET_REINSTATE_SECS);
 }

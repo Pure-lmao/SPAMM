@@ -1,4 +1,4 @@
-//! Settle a graded freebet parlay (disc 28).
+//! Settle a graded freebet parlay (disc 113).
 //! Stake / dust → issuer ATA; profit → user ATA. Then reinstate or consume the freebet PDA.
 //!
 //! Accounts: **18**
@@ -37,7 +37,7 @@ use crate::{
    instructions::settle_parlay::{decode_settle_parlay_ticket, settle_parlay_core},
 };
 
-pub const SETTLE_FREEBET_PARLAY_IX_DISCRIMINATOR: u8 = 28;
+pub const SETTLE_FREEBET_PARLAY_IX_DISCRIMINATOR: u8 = 113;
 
 pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    let [
@@ -67,9 +67,9 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    verify_clock_sysvar(clock_sysvar)?;
 
    let (ticket, _is_cashout) = decode_settle_parlay_ticket(bet_account, true)?;
-   require_is_freebet(ticket.freebet_id)?;
+   require_is_freebet(ticket.promo_type)?;
    verify_freebet_settle_preamble(
-      ticket.freebet_id,
+      &ticket.promo_account,
       user,
       issuer_auth,
       issuer_pda,

@@ -7,7 +7,6 @@ use crate::constants::{MM_PARLAY_QUOTE_BUFFER_SEED, MM_QUOTE_BUFFER_SEED};
 use crate::errors::TemplateError;
 use crate::state::{Config, EventState, Market, QuoteBuffer};
 use spamm_aggregator::{
-   constants::MINT,
    state::{
       other::{MM_MARKET_DATA_PDA_MIN_LEN, MM_MARKET_DATA_PDA_SEED},
       EVENT_STATE_HEADER_LEN, EVENT_STATE_SEED, MM_ACCOUNT_CONFIG_SEED, MM_CONFIG_PDA_HEADER_LEN,
@@ -27,14 +26,26 @@ pub struct InitProgram<'info> {
    /// CHECK: parlay quote buffer is a raw leg table, not a Borsh account
    #[account(init, payer = feepayer, space = MM_PARLAY_QUOTE_BUFFER_LEN, seeds = [MM_PARLAY_QUOTE_BUFFER_SEED], bump)]
    pub parlay_buffer: UncheckedAccount<'info>,
+   pub system_program: Program<'info, System>,
+}
+
+#[derive(Accounts)]
+pub struct CreateTokenAccount<'info> {
+   #[account(mut)]
+   pub admin: Signer<'info>,
    #[account(
-      init,
-      payer = feepayer,
+      seeds = [MM_ACCOUNT_CONFIG_SEED],
+      bump = config.bump,
+      constraint = config.admin == admin.key() @ TemplateError::NotAdmin
+   )]
+   pub config: Account<'info, Config>,
+   #[account(
+      init_if_needed,
+      payer = admin,
       associated_token::mint = mint,
       associated_token::authority = config,
    )]
    pub token_account: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
    pub associated_token_program: Program<'info, AssociatedToken>,
@@ -92,7 +103,7 @@ pub struct InitMarket<'info> {
       init,
       payer = feepayer,
       space = MM_MARKET_DATA_PDA_MIN_LEN,
-      seeds = [MM_MARKET_DATA_PDA_SEED, market_id.body(), market_id.operator()],
+      seeds = [MM_MARKET_DATA_PDA_SEED, market_id.body(), market_id.operator(), market_id.mint()],
       bump
    )]
    pub market: Account<'info, Market>,
@@ -132,7 +143,7 @@ pub struct CloseMarket<'info> {
    pub config: Account<'info, Config>,
    #[account(
       mut,
-      seeds = [MM_MARKET_DATA_PDA_SEED, market_id.body(), market_id.operator()],
+      seeds = [MM_MARKET_DATA_PDA_SEED, market_id.body(), market_id.operator(), market_id.mint()],
       bump = market.bump,
       close = admin
    )]
@@ -169,7 +180,7 @@ pub struct UpdateMarket<'info> {
    pub config: Account<'info, Config>,
    #[account(
       mut,
-      seeds = [MM_MARKET_DATA_PDA_SEED, market_id.body(), market_id.operator()],
+      seeds = [MM_MARKET_DATA_PDA_SEED, market_id.body(), market_id.operator(), market_id.mint()],
       bump = market.bump
    )]
    pub market: Account<'info, Market>,
@@ -250,10 +261,9 @@ pub struct FillBetQuote<'info> {
    #[account(
       mut,
       token::mint = mint,
-      constraint = liability.owner == crate::constants::ENCUMBRANCE_PDA
+      constraint = liability.owner == crate::checks::encumbrance_pda(mint.key())
    )]
    pub liability: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
 }
@@ -275,10 +285,9 @@ pub struct FillBetRfq<'info> {
    #[account(
       mut,
       token::mint = mint,
-      constraint = liability.owner == crate::constants::ENCUMBRANCE_PDA
+      constraint = liability.owner == crate::checks::encumbrance_pda(mint.key())
    )]
    pub liability: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
 }
@@ -299,10 +308,9 @@ pub struct FillParlayQuote<'info> {
    #[account(
       mut,
       token::mint = mint,
-      constraint = liability.owner == crate::constants::ENCUMBRANCE_PDA
+      constraint = liability.owner == crate::checks::encumbrance_pda(mint.key())
    )]
    pub liability: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
 }
@@ -320,10 +328,9 @@ pub struct FillParlayRfq<'info> {
    #[account(
       mut,
       token::mint = mint,
-      constraint = liability.owner == crate::constants::ENCUMBRANCE_PDA
+      constraint = liability.owner == crate::checks::encumbrance_pda(mint.key())
    )]
    pub liability: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
 }
@@ -346,7 +353,6 @@ pub struct FillCashoutQuote<'info> {
    pub source: Account<'info, TokenAccount>,
    #[account(mut, token::mint = mint)]
    pub payment_dest: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
 }
@@ -367,7 +373,6 @@ pub struct FillCashoutRfq<'info> {
    pub source: Account<'info, TokenAccount>,
    #[account(mut, token::mint = mint)]
    pub payment_dest: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
 }
@@ -387,7 +392,6 @@ pub struct FillCashoutParlayQuote<'info> {
    pub source: Account<'info, TokenAccount>,
    #[account(mut, token::mint = mint)]
    pub payment_dest: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
 }
@@ -404,7 +408,6 @@ pub struct FillCashoutParlayRfq<'info> {
    pub source: Account<'info, TokenAccount>,
    #[account(mut, token::mint = mint)]
    pub payment_dest: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
 }
@@ -420,7 +423,6 @@ pub struct Withdraw<'info> {
    pub config: Account<'info, Config>,
    #[account(mut, token::mint = mint, token::authority = config)]
    pub source: Account<'info, TokenAccount>,
-   #[account(constraint = mint.key().as_ref() == MINT.as_ref())]
    pub mint: Account<'info, Mint>,
    pub token_program: Program<'info, Token>,
    #[account(mut, token::mint = mint)]

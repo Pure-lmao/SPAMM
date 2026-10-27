@@ -1,4 +1,4 @@
-import { ODDS_SCALE, MAX_RFQ_PARLAY_LEGS, LIVE_CASHOUT_DELAY, MAX_FREEBET_ALLOWED_MMS, MAX_FREEBET_ALLOWED_OPERATORS, MIN_BET_AMOUNT } from './constants.js';
+import { ODDS_SCALE, MAX_RFQ_PARLAY_LEGS, LIVE_CASHOUT_DELAY, MAX_PROMO_ALLOWED_MMS, MAX_PROMO_ALLOWED_OPERATORS } from './constants.js';
 import { numSidesForMkt } from './helpers.js';
 import {
    MAX_PARLAY_LEGS,
@@ -18,6 +18,7 @@ import {
    type FillCashoutQuoteIxData,
    type FillCashoutParlayQuoteIxData,
    type GetCashoutQuoteIxData,
+   type IssueBoostIxData,
    type IssueFreebetIxData,
    type MarketId,
    type ParlayLegQuoted,
@@ -37,7 +38,8 @@ function marketIdsEqual(a: MarketId, b: MarketId): boolean {
       a.mkt === b.mkt &&
       a.period === b.period &&
       a.isPregame === b.isPregame &&
-      a.operator === b.operator
+      a.operator === b.operator &&
+      a.mint === b.mint
    );
 }
 
@@ -191,12 +193,12 @@ export function validatePositiveU64(n: bigint, label = 'value'): void {
    }
 }
 
-/** Fill / issue stake must be at least {@link MIN_BET_AMOUNT}. Cashout remainder is not gated. */
+/**
+ * Fill / issue stake must be a positive `u64`.
+ * The on-chain floor is 0.1 of the mint (`helpers::min_amount_for_decimals`) and is checked against the mint account.
+ */
 export function validateMinBetAmount(n: bigint, label = 'amount'): void {
    validatePositiveU64(n, label);
-   if (n < MIN_BET_AMOUNT) {
-      throw new RangeError(`${label} must be >= MIN_BET_AMOUNT (${MIN_BET_AMOUNT}, $${Number(MIN_BET_AMOUNT)/10**6})`);
-   }
 }
 
 export function validateI64(n: bigint, label = 'value'): void {
@@ -237,6 +239,7 @@ export function validateAddress(addr: string, label = 'address'): void {
 export function validateMarketId(m: MarketId, label = 'marketId'): void {
    validateEventId(m.eventId, `${label}.eventId`);
    validateAddress(m.operator, `${label}.operator`);
+   validateAddress(m.mint, `${label}.mint`);
    validateU64(m.player, `${label}.player`);
    validateU16(m.mkt, `${label}.mkt`);
    validateU8(m.period, `${label}.period`);
@@ -769,12 +772,42 @@ export function validateIssueFreebetIxData(data: IssueFreebetIxData, label = 'is
       throw new RangeError(`${label}.maxOddsScaled must be >= minOddsScaled`);
    }
    validateU8(data.minLegs, `${label}.minLegs`);
-   if (data.allowedMms.length > MAX_FREEBET_ALLOWED_MMS) {
-      throw new RangeError(`${label}.allowedMms length must be <= ${MAX_FREEBET_ALLOWED_MMS}`);
+   if (data.allowedMms.length > MAX_PROMO_ALLOWED_MMS) {
+      throw new RangeError(`${label}.allowedMms length must be <= ${MAX_PROMO_ALLOWED_MMS}`);
    }
-   if (data.allowedOperators.length > MAX_FREEBET_ALLOWED_OPERATORS) {
+   if (data.allowedOperators.length > MAX_PROMO_ALLOWED_OPERATORS) {
       throw new RangeError(
-         `${label}.allowedOperators length must be <= ${MAX_FREEBET_ALLOWED_OPERATORS}`,
+         `${label}.allowedOperators length must be <= ${MAX_PROMO_ALLOWED_OPERATORS}`,
+      );
+   }
+}
+
+export function validateIssueBoostIxData(data: IssueBoostIxData, label = 'issueBoost'): void {
+   validateU32Number(data.boostId, `${label}.boostId`);
+   if (data.boostId === 0) {
+      throw new RangeError(`${label}.boostId 0 is reserved`);
+   }
+   validateU32Number(data.expiry, `${label}.expiry`);
+   validateMinBetAmount(data.maxStake, `${label}.maxStake`);
+   validateU32Bigint(data.minOddsScaled, `${label}.minOddsScaled`);
+   validateU32Bigint(data.maxOddsScaled, `${label}.maxOddsScaled`);
+   if (data.minOddsScaled === 0n) {
+      throw new RangeError(`${label}.minOddsScaled must be > 0`);
+   }
+   if (data.maxOddsScaled < data.minOddsScaled) {
+      throw new RangeError(`${label}.maxOddsScaled must be >= minOddsScaled`);
+   }
+   validateU32Number(data.boostBps, `${label}.boostBps`);
+   if (data.boostBps === 0) {
+      throw new RangeError(`${label}.boostBps must be > 0`);
+   }
+   validateU8(data.minLegs, `${label}.minLegs`);
+   if (data.allowedMms.length > MAX_PROMO_ALLOWED_MMS) {
+      throw new RangeError(`${label}.allowedMms length must be <= ${MAX_PROMO_ALLOWED_MMS}`);
+   }
+   if (data.allowedOperators.length > MAX_PROMO_ALLOWED_OPERATORS) {
+      throw new RangeError(
+         `${label}.allowedOperators length must be <= ${MAX_PROMO_ALLOWED_OPERATORS}`,
       );
    }
 }

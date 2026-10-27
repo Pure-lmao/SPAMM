@@ -9,7 +9,7 @@ use pinocchio::{
    error::ProgramError,
    hint::unlikely,
 };
-use pinocchio_associated_token_account::instructions::Create;
+use pinocchio_associated_token_account::instructions::CreateIdempotent;
 use pinocchio_log::log;
 use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token::instructions::Transfer;
@@ -19,13 +19,13 @@ use super::derive_pdas::{
    find_cashout_escrow_pda, find_cashout_parlay_pda, find_cashout_pda,
 };
 use super::fill_helpers::{mm_cpi_return_data, require_exact_token_increase};
-use super::freebet_helpers::require_not_freebet;
+use super::freebet_helpers::require_not_promo;
 use crate::{
    ID,
-   constants::{MAX_NUMBER_OF_MMS, MAX_RFQ_PARLAY_LEGS},
+   constants::MAX_NUMBER_OF_MMS,
    errors::SpammError,
    helpers::{
-      calc_potential_payout, calc_potential_profit, close_pda_return_rent, ensure_pda_unused,
+      bump_open_cashout_tickets, calc_potential_payout, calc_potential_profit, close_pda_return_rent, ensure_pda_unused,
       get_encumbrance, get_rent, get_token_account_balance, safe_close_ata,
       verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state,
       verify_mint, verify_mm_encumbrance_pda, verify_mm_market_data_pda,
@@ -44,7 +44,7 @@ use crate::{
       },
       cashout_account_len, cashout_parlay_account_len,
       other::{EventGameState, MM_ENCUMBRANCE_PDA_SEED},
-      CASHOUT_ACCOUNT_DISCRIMINATOR, CASHOUT_ACCOUNT_SEED, CASHOUT_ESCROW_LEN,
+      CASHOUT_ACCOUNT_DISCRIMINATOR, CASHOUT_ACCOUNT_SEED, CASHOUT_ESCROW_DISCRIMINATOR, CASHOUT_ESCROW_LEN,
       CASHOUT_ESCROW_SEED, CASHOUT_PARLAY_ACCOUNT_DISCRIMINATOR, CASHOUT_PARLAY_ACCOUNT_SEED,
       CashoutAccountData, CashoutAccountHeader, CashoutEscrow, CashoutParlayAccountData,
       CashoutParlayHeader, CashoutParlayLeg, CashoutQuoteReturn,
@@ -243,8 +243,8 @@ pub fn verify_cashout_fill_preamble(
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_clock_sysvar(clock_sysvar)?;
-   verify_mint(mint)?;
-   verify_token_account(true, user_ata, user, mint, token_program)?;
+   verify_mint(mint, mint.address())?;
+   verify_token_account(true, user_ata, user, mint, token_program, false)?;
    verify_config_pda(config_pda, true)?;
    ensure_pda_unused(cashout_pda, label)?;
    Ok(())
@@ -274,7 +274,7 @@ pub fn maybe_open_live_cashout_escrow(
       return Ok(());
    }
    let escrow = CashoutEscrow {
-      discriminator: crate::state::CASHOUT_ESCROW_DISCRIMINATOR,
+      discriminator: CASHOUT_ESCROW_DISCRIMINATOR,
       bump: 0,
       owner: *user.address(),
       feepayer: *feepayer.address(),
@@ -352,7 +352,22 @@ pub struct ParlayCashoutOrigTicket {
    pub orig_bump: u8,
    pub orig_feepayer: Address,
    pub orig_filler: Address,
-   pub legs: [CashoutParlayLeg; MAX_RFQ_PARLAY_LEGS],
+}
+
+impl ParlayCashoutOrigTicket {
+   #[inline(always)]
+   pub fn blank() -> Self {
+      Self {
+         payout_removed: 0,
+         delay: false,
+         orig_amount: 0,
+         orig_payout: 0,
+         orig_bet_id: 0,
+         orig_bump: 0,
+         orig_feepayer: Address::default(),
+         orig_filler: Address::default(),
+      }
+   }
 }
 
 /// Shared original parlay ticket validation for auction and RFQ parlay cashout.
@@ -377,7 +392,9 @@ pub fn validate_parlay_cashout_orig_ticket(
    let n = num_legs as usize;
    let raw = bet_pda.try_borrow()?;
    let header = ParlayBetAccountData::decode_header(raw.as_ref())?;
-   require_not_freebet(header.freebet_id)?;
+   let bet_mint = *ParlayBetAccountData::read_leg_mint(raw.as_ref(), 0)?;
+   verify_mint(mint, &bet_mint)?;
+   require_not_promo(header.promo_type)?;
    if unlikely(!address_eq(&header.owner, user.address()) || header.bet_id != orig_bet_id) {
       return Err(ProgramError::InvalidInstructionData);
    }
@@ -391,7 +408,7 @@ pub fn validate_parlay_cashout_orig_ticket(
       return Err(SpammError::InvalidCashout.into());
    }
    validate_cashout_size(header.amount, cashout_amount)?;
-   verify_token_account(true, bet_ata, bet_pda, mint, token_program)?;
+   verify_token_account(true, bet_ata, bet_pda, mint, token_program, true)?;
 
    out.payout_removed = 0;
    out.delay = false;
@@ -401,9 +418,6 @@ pub fn validate_parlay_cashout_orig_ticket(
    out.orig_bump = header.bump;
    out.orig_feepayer = header.feepayer;
    out.orig_filler = header.filler_address;
-   unsafe {
-      core::ptr::write_bytes(out.legs.as_mut_ptr(), 0, MAX_RFQ_PARLAY_LEGS);
-   }
    for i in 0..n {
       let leg = ParlayBetAccountData::decode_leg(raw.as_ref(), i)?;
       if leg.result != BetResult::Pending {
@@ -431,16 +445,6 @@ pub fn validate_parlay_cashout_orig_ticket(
       ) {
          out.delay = true;
       }
-      out.legs[i] = CashoutParlayLeg {
-         market_id: leg.market_id,
-         side: leg.side,
-         orig_event_state_sequence: leg.event_state_sequence,
-         orig_event_game_state: leg.event_game_state,
-         cashout_event_state_sequence: snapshots[i].event_state_sequence,
-         cashout_event_game_state: snapshots[i].event_game_state,
-         odds_scaled: leg.odds_scaled,
-         result: BetResult::Pending,
-      };
    }
    drop(raw);
 
@@ -506,7 +510,7 @@ pub fn create_cashout_account(
       header.bump = bump;
       CashoutAccountData::write_header_and_fillers(&mut data, &header, fillers)?;
    }
-   Create {
+   CreateIdempotent {
       funding_account: feepayer,
       account: cashout_ata,
       wallet: cashout_pda,
@@ -515,11 +519,11 @@ pub fn create_cashout_account(
       token_program,
    }
    .invoke()?;
-   verify_token_account(true, cashout_ata, cashout_pda, mint, token_program)?;
+   verify_token_account(true, cashout_ata, cashout_pda, mint, token_program, true)?;
    Ok(())
 }
 
-pub fn create_cashout_parlay_account(
+pub fn create_cashout_parlay_account<F>(
    feepayer: &AccountView,
    filling_mm: &Address,
    cashout_pda: &mut AccountView,
@@ -529,8 +533,11 @@ pub fn create_cashout_parlay_account(
    rent_sysvar: &AccountView,
    system_program: &AccountView,
    header: &CashoutParlayHeader,
-   legs: &[CashoutParlayLeg],
-) -> ProgramResult {
+   leg_at: F,
+) -> ProgramResult
+where
+   F: FnMut(usize) -> Result<CashoutParlayLeg, ProgramError>,
+{
    let cashout_id_bytes = header.cashout_id.to_le_bytes();
    let (expected, bump) = find_cashout_parlay_pda(filling_mm, header.cashout_id);
    if !address_eq(cashout_pda.address(), &expected) {
@@ -559,9 +566,9 @@ pub fn create_cashout_parlay_account(
       let mut data = cashout_pda.try_borrow_mut()?;
       let mut header = *header;
       header.bump = bump;
-      CashoutParlayAccountData::write_header_and_legs(&mut data, &header, legs)?;
+      CashoutParlayAccountData::write_header_and_legs_with(&mut data, &header, leg_at)?;
    }
-   Create {
+   CreateIdempotent {
       funding_account: feepayer,
       account: cashout_ata,
       wallet: cashout_pda,
@@ -570,7 +577,7 @@ pub fn create_cashout_parlay_account(
       token_program,
    }
    .invoke()?;
-   verify_token_account(true, cashout_ata, cashout_pda, mint, token_program)?;
+   verify_token_account(true, cashout_ata, cashout_pda, mint, token_program, true)?;
    Ok(())
 }
 
@@ -615,7 +622,7 @@ pub fn create_cashout_escrow(
       escrow.bump = bump;
       escrow.write_to_account(&mut data)?;
    }
-   Create {
+   CreateIdempotent {
       funding_account: feepayer,
       account: escrow_ata,
       wallet: escrow_pda,
@@ -624,7 +631,7 @@ pub fn create_cashout_escrow(
       token_program,
    }
    .invoke()?;
-   verify_token_account(true, escrow_ata, escrow_pda, mint, token_program)?;
+   verify_token_account(true, escrow_ata, escrow_pda, mint, token_program, true)?;
    Ok(())
 }
 
@@ -769,7 +776,7 @@ pub fn verify_cashout_mm_encumbrance(
    mint: &AccountView,
    token_program: &AccountView,
 ) -> Result<Option<u8>, ProgramError> {
-   let Some(encumbrance_pda_bump) = verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program) else {
+   let Some(encumbrance_pda_bump) = verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program, mint.address()) else {
       return Ok(None);
    };
    if !verify_token_account(
@@ -778,6 +785,7 @@ pub fn verify_cashout_mm_encumbrance(
       mm_encumbrance_pda,
       mint,
       token_program,
+      true,
    )? {
       return Ok(None);
    }
@@ -807,6 +815,7 @@ pub fn pay_cashout_from_free_liability(
    mm_encumbrance_pda: &AccountView,
    encumbrance_pda_bump: u8,
    mm_program: &Address,
+   mint: &Address,
    mm_liability_token_account: &AccountView,
    payment_dest: &AccountView,
    cashout_payment: u64,
@@ -830,6 +839,7 @@ pub fn pay_cashout_from_free_liability(
       let encumbrance_pda_seeds = [
          Seed::from(MM_ENCUMBRANCE_PDA_SEED),
          Seed::from(mm_program.as_ref()),
+         Seed::from(mint.as_ref()),
          Seed::from(&mm_encumbrance_pda_bump_seed),
       ];
       let encumbrance_pda_signer = Signer::from(&encumbrance_pda_seeds);
@@ -859,6 +869,7 @@ pub fn finish_cashout_single(
    token_program: &AccountView,
    rent_sysvar: &AccountView,
    system_program: &AccountView,
+   filling_encumbrance: &AccountView,
    filling_mm: &Address,
    orig: &BetAccountHeader,
    cashout_id: u64,
@@ -911,6 +922,7 @@ pub fn finish_cashout_single(
       &header,
       &cashed[..orig.num_fillers as usize],
    )?;
+   bump_open_cashout_tickets(filling_encumbrance, 1)?;
    let bet_id_bytes = orig.bet_id.to_le_bytes();
    transfer_stake_to_cashout(
       bet_ata,
@@ -979,11 +991,12 @@ pub fn finish_cashout_parlay(
    token_program: &AccountView,
    rent_sysvar: &AccountView,
    system_program: &AccountView,
+   filling_encumbrance: &AccountView,
    filling_mm: &Address,
    cashout_id: u64,
    amount: u64,
    num_legs: u8,
-   legs: &[CashoutParlayLeg],
+   snapshots: &[CashoutSnapshot],
    payout_removed: u64,
    delay: bool,
    orig_amount: u64,
@@ -1011,7 +1024,7 @@ pub fn finish_cashout_parlay(
       )?;
    }
    let n = num_legs as usize;
-   if unlikely(legs.len() < n) {
+   if unlikely(snapshots.len() < n) {
       return Err(ProgramError::InvalidInstructionData);
    }
    let header = CashoutParlayHeader {
@@ -1039,8 +1052,23 @@ pub fn finish_cashout_parlay(
       rent_sysvar,
       system_program,
       &header,
-      &legs[..n],
+      |i| {
+         let raw = bet_pda.try_borrow()?;
+         let leg = ParlayBetAccountData::decode_leg(raw.as_ref(), i)?;
+         let snap = snapshots.get(i).ok_or(ProgramError::InvalidInstructionData)?;
+         Ok(CashoutParlayLeg {
+            market_id: leg.market_id,
+            side: leg.side,
+            orig_event_state_sequence: leg.event_state_sequence,
+            orig_event_game_state: leg.event_game_state,
+            cashout_event_state_sequence: snap.event_state_sequence,
+            cashout_event_game_state: snap.event_game_state,
+            odds_scaled: leg.odds_scaled,
+            result: BetResult::Pending,
+         })
+      },
    )?;
+   bump_open_cashout_tickets(filling_encumbrance, 1)?;
    let bet_id_bytes = orig_bet_id.to_le_bytes();
    transfer_stake_to_cashout(
       bet_ata,

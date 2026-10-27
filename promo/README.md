@@ -3,9 +3,10 @@
 Separate SPAMM MM for ASM promo markets (`GET /promos?active=true`).
 
 Promo markets are **mkt 9**, **side 0** only. Each market PDA is
-`["market_data", market_id_body, operator]`. The operator is **not** part of the
-SLEPMP market key — pass it as `--operator` (and the same pubkey must be on
-`MarketId.operator` when the aggregator quotes/fills).
+`["market_data", market_id_body, operator, mint]`. The operator and mint are **not**
+part of the SLEPMP market key. Pass the operator as `--operator` (default
+`DEFAULT_MARKET_OPERATOR`). Pass the mint as `--mint` (default devnet USDC).
+The same pubkeys must be on `MarketId` when the aggregator quotes or fills.
 
 On `init_market`, an optional **allowlist** of user wallets is stored on the
 market-data PDA. Empty allowlist (`allowed_count == 0`) means anyone may
@@ -36,6 +37,7 @@ After setup and funding collateral:
 bun run init-promo -- \
   --market-key 1:1:12345:0:9: \
   --operator <operator_pubkey> \
+  --mint <mint_pubkey> \
   --allow <user_pk>[,user_pk…] \
   --start 1730000000 \
   --max-usdc 25 --max-total-usdc 5000 \
@@ -43,7 +45,7 @@ bun run init-promo -- \
 ```
 
 `--allow` may be repeated (`--allow pk1 --allow pk2`) and/or comma-separated
-(1–150 unique pubkeys). Optional: `--odds1`, `--odds2`, `--outcomes 2|3`,
+(1–150 unique pubkeys). Optional: `--mint`, `--odds1`, `--odds2`, `--outcomes 2|3`,
 `--dry-run`.
 
 One tx: init-event (if needed) → update-event-state (seq 1, PG 0-0) →
@@ -56,7 +58,7 @@ Build and deploy `promo/program`, then set `PROMO_MM_PROGRAM_ID` if needed
 
 ## Admin CLI
 
-Every market command needs `--market-key` **and** `--operator`.
+Every market command needs `--market-key`. `--operator` and `--mint` are optional.
 
 ```bash
 bun run promo-admin init-market --market-key 1:1:123:0:9: \

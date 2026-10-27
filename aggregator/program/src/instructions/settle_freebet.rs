@@ -1,4 +1,4 @@
-//! Settle a graded freebet single ticket (disc 27).
+//! Settle a graded freebet single ticket (disc 112).
 //! Stake / dust → issuer ATA; profit → user ATA. Then reinstate or consume the freebet PDA.
 //!
 //! Accounts: **14** then **5 × N** (`N` = `num_fillers` on the bet).
@@ -49,7 +49,7 @@ use crate::{
    state::{BetFiller, BET_ACCOUNT_SEED},
 };
 
-pub const SETTLE_FREEBET_IX_DISCRIMINATOR: u8 = 27;
+pub const SETTLE_FREEBET_IX_DISCRIMINATOR: u8 = 112;
 
 pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    let [
@@ -76,7 +76,7 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    verify_signer(signer)?;
    verify_config_pda(our_config_pda, true)?;
    verify_token_program(token_program)?;
-   verify_mint(mint)?;
+   verify_mint(mint, mint.address())?;
    verify_clock_sysvar(clock_sysvar)?;
 
    let mut fillers_buf = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
@@ -86,9 +86,9 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    let fillers = unsafe {
       core::slice::from_raw_parts(fillers_buf.as_ptr().cast::<BetFiller>(), num_fillers)
    };
-   require_is_freebet(header.freebet_id)?;
+   require_is_freebet(header.promo_type)?;
    verify_freebet_settle_preamble(
-      header.freebet_id,
+      &header.promo_account,
       user,
       issuer_auth,
       issuer_pda,
@@ -99,8 +99,8 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    )?;
    validate_settle_bet_ticket(&header, bet_feepayer, user, filler_accounts)?;
 
-   verify_token_account(true, user_ata, user, mint, token_program)?;
-   verify_token_account(true, bet_ata, bet_account, mint, token_program)?;
+   verify_token_account(true, user_ata, user, mint, token_program, false)?;
+   verify_token_account(true, bet_ata, bet_account, mint, token_program, true)?;
 
    let amount_to_stake_dest = user_stake_from_bet_ata(header.result, header.amount)?;
    let bet_ata_start = get_token_account_balance(bet_ata)?;

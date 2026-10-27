@@ -20,8 +20,6 @@ pub use constants::ID;
 
 use doppler;
 
-pinocchio::no_allocator!();
-
 #[no_mangle]
 pub unsafe extern "C" fn entrypoint(input: *mut u8) -> u64 {
    // Oracle refresh: same `Instruction` the TS SDK builds (`getUpdateOracleIx`, see `market_maker/client/admin.ts`

@@ -3,11 +3,11 @@
 use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
 
-use spamm_aggregator::state::FreebetState;
+use spamm_aggregator::state::PromoState;
 
 use crate::common::{
    admin, assert_account_closed_or_system_empty, assert_ok_record_cu, assert_program_err,
-   bootstrap_issued_freebet, decode_freebet, decode_issuer, freebet_pda, init_freebet_issuer_instruction,
+   bootstrap_issued_freebet, create_promo_issuer_ata_instruction, decode_freebet, decode_issuer, freebet_pda, init_freebet_issuer_instruction,
    issue_freebet_instruction, issuer_ata, issuer_auth, issuer_auth_ata, issuer_pda, mint_pubkey,
    mm_program_id, read_token_balance, remove_freebet_issuer_instruction, revoke_freebet_instruction,
    rich_signer_account, system_owned_empty, withdraw_freebet_funds_instruction, wrong_signer, Env,
@@ -57,7 +57,7 @@ fn init_issue_revoke_success() {
    assert_ok_record_cu("issue_freebet", &r);
    assert_eq!(decode_issuer(&env).open_count, 1);
    let fb = decode_freebet(&env, FREEBET_ID_BASIC);
-   assert_eq!(fb.state, FreebetState::Available);
+   assert_eq!(fb.state, PromoState::Available);
    assert_eq!(fb.amount, 10_000_000);
    assert_eq!(fb.num_mms, 0);
    assert_eq!(fb.num_operators, 0);
@@ -77,6 +77,7 @@ fn withdraw_and_remove_success() {
    env.upsert(issuer_ata(), system_owned_empty());
    let r = env.run_ix(init_freebet_issuer_instruction());
    assert!(r.program_result.is_ok(), "{:?}", r);
+   assert!(env.run_ix(create_promo_issuer_ata_instruction()).program_result.is_ok());
    env.patch_spl_token_balance(issuer_ata(), USER_COLLATERAL_TOKENS);
    upsert_issuer_auth_ata(&mut env, 0);
    let out = 1_000_000u64;

@@ -59,6 +59,22 @@ pub enum SpammError {
    InvalidFreebet = 23,
    /// Market `operator` is not on the freebet `allowed_operators` list.
    FreebetOperatorNotAllowed = 24,
+   /// Boost `expiry` is in the past.
+   BoostExpired = 25,
+   /// Boost is `Used` (or not `Available`) for this action.
+   BoostNotAvailable = 26,
+   /// Fill stake is above the boost `max_stake`, or the auction filled less than requested.
+   BoostAmountMismatch = 27,
+   /// Quoted / filled odds are outside the boost `[min_odds, max_odds]` range.
+   BoostOddsOutOfRange = 28,
+   /// Ticket leg count is below the boost `min_legs`.
+   BoostLegCount = 29,
+   /// Filling MM is not on the boost `allowed_mms` list.
+   BoostMmNotAllowed = 30,
+   /// Wrong settle path, or boost PDA / issuer accounts do not match the ticket.
+   InvalidBoost = 31,
+   /// Market `operator` is not on the boost `allowed_operators` list.
+   BoostOperatorNotAllowed = 32,
 }
 
 impl From<SpammError> for ProgramError {

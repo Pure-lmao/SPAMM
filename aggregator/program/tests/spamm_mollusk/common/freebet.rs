@@ -9,14 +9,14 @@ use spamm_aggregator::instructions::{
    FillBetIxData, FillParlayIxData, FillRfqBetIxData, FillRfqParlayIxData, FILL_BET_IX_DATA_LEN,
    FILL_RFQ_BET_IX_DATA_LEN, FREEBET_FILL_BET_IX_DISCRIMINATOR, FREEBET_FILL_PARLAY_IX_DISCRIMINATOR,
    FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR, FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR,
-   INIT_FREEBET_ISSUER_IX_DISCRIMINATOR, ISSUE_FREEBET_IX_DISCRIMINATOR, ISSUE_FREEBET_IX_HEADER_LEN,
-   IssueFreebetIxData, REMOVE_FREEBET_ISSUER_IX_DISCRIMINATOR, REVOKE_FREEBET_IX_DISCRIMINATOR,
+   CREATE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR, INIT_PROMO_ISSUER_IX_DISCRIMINATOR, ISSUE_FREEBET_IX_DISCRIMINATOR, ISSUE_FREEBET_IX_HEADER_LEN,
+   IssueFreebetIxData, REMOVE_PROMO_ISSUER_IX_DISCRIMINATOR, REVOKE_FREEBET_IX_DISCRIMINATOR,
    SETTLE_FREEBET_IX_DISCRIMINATOR, SETTLE_FREEBET_PARLAY_IX_DISCRIMINATOR,
    WITHDRAW_FREEBET_FUNDS_IX_DISCRIMINATOR,
 };
-use spamm_aggregator::constants::{ADDRESS_LEN, MAX_FREEBET_ALLOWED_MMS, MAX_FREEBET_ALLOWED_OPERATORS};
+use spamm_aggregator::constants::{ADDRESS_LEN, MAX_PROMO_ALLOWED_MMS, MAX_PROMO_ALLOWED_OPERATORS};
 use spamm_aggregator::state::{
-   FreebetAccountData, FreebetIssuer, MarketId, FREEBET_ISSUER_SEED, FREEBET_ACCOUNT_SEED,
+   FreebetAccountData, MarketId, PROMO_ISSUER_SEED, FREEBET_ACCOUNT_SEED, PromoIssuer as FreebetIssuer,
 };
 
 use super::env::{rich_signer_account, system_owned_empty, Env, USER_COLLATERAL_TOKENS};
@@ -34,7 +34,7 @@ pub fn issuer_auth() -> Pubkey {
 }
 
 pub fn issuer_pda() -> Pubkey {
-   Pubkey::find_program_address(&[FREEBET_ISSUER_SEED, issuer_auth().as_ref()], &agg_program_id()).0
+   Pubkey::find_program_address(&[PROMO_ISSUER_SEED, issuer_auth().as_ref()], &agg_program_id()).0
 }
 
 pub fn issuer_ata() -> Pubkey {
@@ -58,6 +58,7 @@ pub fn freebet_pda(freebet_id: u32) -> Pubkey {
       &[
          FREEBET_ACCOUNT_SEED,
          issuer_auth().as_ref(),
+         mint_pubkey().as_ref(),
          &freebet_id.to_le_bytes(),
       ],
       &agg_program_id(),
@@ -105,14 +106,10 @@ pub fn init_freebet_issuer_instruction() -> Instruction {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    Instruction::new_with_bytes(
       agg_program_id(),
-      &[INIT_FREEBET_ISSUER_IX_DISCRIMINATOR],
+      &[INIT_PROMO_ISSUER_IX_DISCRIMINATOR],
       vec![
          AccountMeta::new(issuer_auth(), true),
          AccountMeta::new(issuer_pda(), false),
-         AccountMeta::new(issuer_ata(), false),
-         AccountMeta::new_readonly(mint_pubkey(), false),
-         AccountMeta::new_readonly(token::ID, false),
-         AccountMeta::new_readonly(associated_token::ID, false),
          AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
          AccountMeta::new_readonly(sys, false),
       ],
@@ -136,20 +133,30 @@ pub fn withdraw_freebet_funds_instruction(amount: u64) -> Instruction {
    )
 }
 
-pub fn remove_freebet_issuer_instruction() -> Instruction {
+pub fn create_promo_issuer_ata_instruction() -> Instruction {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    Instruction::new_with_bytes(
       agg_program_id(),
-      &[REMOVE_FREEBET_ISSUER_IX_DISCRIMINATOR],
+      &[CREATE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR],
       vec![
          AccountMeta::new(issuer_auth(), true),
-         AccountMeta::new(issuer_pda(), false),
+         AccountMeta::new_readonly(issuer_pda(), false),
          AccountMeta::new(issuer_ata(), false),
-         AccountMeta::new(issuer_auth_ata(), false),
          AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(token::ID, false),
          AccountMeta::new_readonly(associated_token::ID, false),
          AccountMeta::new_readonly(sys, false),
+      ],
+   )
+}
+
+pub fn remove_freebet_issuer_instruction() -> Instruction {
+   Instruction::new_with_bytes(
+      agg_program_id(),
+      &[REMOVE_PROMO_ISSUER_IX_DISCRIMINATOR],
+      vec![
+         AccountMeta::new(issuer_auth(), true),
+         AccountMeta::new(issuer_pda(), false),
       ],
    )
 }
@@ -182,8 +189,8 @@ pub fn issue_freebet_ix_data(
       min_legs,
       num_mms: allowed_mms.len() as u8,
       num_operators: allowed_operators.len() as u8,
-      allowed_mms: copy_addrs::<MAX_FREEBET_ALLOWED_MMS>(allowed_mms),
-      allowed_operators: copy_addrs::<MAX_FREEBET_ALLOWED_OPERATORS>(allowed_operators),
+      allowed_mms: copy_addrs::<MAX_PROMO_ALLOWED_MMS>(allowed_mms),
+      allowed_operators: copy_addrs::<MAX_PROMO_ALLOWED_OPERATORS>(allowed_operators),
    };
    let mut data = vec![
       0u8;
@@ -223,6 +230,7 @@ pub fn issue_freebet_instruction(
          AccountMeta::new(issuer_pda(), false),
          AccountMeta::new_readonly(user(), false),
          AccountMeta::new(freebet_pda(freebet_id), false),
+         AccountMeta::new_readonly(mint_pubkey(), false),
          AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
          AccountMeta::new_readonly(sys, false),
          AccountMeta::new_readonly(clock_sysvar_pubkey(), false),
@@ -395,6 +403,8 @@ pub fn bootstrap_issued_freebet(
    env.set_clock_unix_timestamp(1);
    let r = env.run_ix(init_freebet_issuer_instruction());
    assert!(r.program_result.is_ok(), "init_freebet_issuer {:?}", r);
+   let r = env.run_ix(create_promo_issuer_ata_instruction());
+   assert!(r.program_result.is_ok(), "create_promo_issuer_ata {:?}", r);
    env.patch_spl_token_balance(issuer_ata(), USER_COLLATERAL_TOKENS);
    let r = env.run_ix(issue_freebet_instruction(
       freebet_id,

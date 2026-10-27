@@ -23,7 +23,6 @@ use pinocchio::{
    hint::unlikely,
 };
 use pinocchio_log::log;
-use pinocchio_associated_token_account::instructions::Create as CreateAssociatedTokenAccount;
 use pinocchio_system::instructions::CreateAccount;
 
 use crate::{
@@ -32,8 +31,7 @@ use crate::{
 };
 use spamm_aggregator::{
    helpers::{
-      get_rent, verify_associated_token_program, verify_rent_sysvar, verify_signer,
-      verify_system_program, verify_token_program,
+      get_rent, verify_rent_sysvar, verify_signer, verify_system_program,
    },
    state::{
       MmAccountConfigZc, MM_CONFIG_PDA_HEADER_LEN, MM_ACCOUNT_CONFIG_SEED,
@@ -52,10 +50,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       config_pda,
       mm_quote_buffer_pda,
       mm_parlay_quote_buffer_pda,
-      token_account,
-      mint,
-      token_program,
-      associated_token_program,
       rent_sysvar,
       system_program,
    ] = accounts else {
@@ -66,8 +60,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    verify_signer(feepayer)?;
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
-   verify_token_program(token_program)?;
-   verify_associated_token_program(associated_token_program)?;
 
    // Example MM: single admin pays setup; avoids arbitrary `admin` in data without that key signing.
    if unlikely(!address_eq(feepayer.address(), &parsed.admin)) {
@@ -187,16 +179,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
          );
       }
    }
-
-   CreateAssociatedTokenAccount {
-      funding_account: feepayer,
-      account: token_account,
-      wallet: config_pda,
-      mint,
-      token_program,
-      system_program,
-   }
-   .invoke()?;
 
    Ok(())
 }

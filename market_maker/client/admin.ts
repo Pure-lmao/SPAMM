@@ -1,5 +1,5 @@
-import { getCloseEventIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmMarketData, getMmReturnDataDecoder, getSetRfqSignerIx, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, type EventId, type MarketId, type Sport, getWithdrawFromTokenAccountIx, ODDS_SCALE, getMmGetQuoteParlayIx } from 'spamm-market-maker-sdk';
-import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda, getEventGameState, decodeGetParlayQuoteReturnWire, getGetParlayQuoteReturnWireDecoder, type RfqBetMessageInput, signRfqBetQuote, signRfqParlayQuote, type RfqParlayMessageInput } from 'spamm-aggregator-sdk';
+import { getCloseEventIx, getCreateTokenAccountIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmMarketData, getMmReturnDataDecoder, getSetRfqSignerIx, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, type EventId, type MarketId, type Sport, getWithdrawFromTokenAccountIx, ODDS_SCALE, getMmGetQuoteParlayIx } from 'spamm-market-maker-sdk';
+import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getInitMmMintVaultIx, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda, getEventGameState, decodeGetParlayQuoteReturnWire, getGetParlayQuoteReturnWireDecoder, type RfqBetMessageInput, signRfqBetQuote, signRfqParlayQuote, type RfqParlayMessageInput } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from './utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
@@ -23,15 +23,17 @@ async function initProgram() {
 
 async function withdrawFromTokenAccount() {
    const ix = await getWithdrawFromTokenAccountIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
-      "5ahzN9xmBBEyFfMxEUw4X6X6FYGDPfQPq8BSqCSKcULm" as Address);
+      "5ahzN9xmBBEyFfMxEUw4X6X6FYGDPfQPq8BSqCSKcULm" as Address, mint);
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
 // withdrawFromTokenAccount().catch(console.error);
 
 async function registerMM() {
-   const ix = await getRegisterMmIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   const registerIx = await getRegisterMmIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const tokenIx = await getCreateTokenAccountIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, mint);
+   const vaultIx = await getInitMmMintVaultIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, mint);
+   const txResult = await sendAndConfirmInstructions([registerIx, tokenIx, vaultIx], [ADMIN_SIGNER]);
    console.log(txResult);
 }
 // registerMM().catch(console.error);
@@ -48,9 +50,10 @@ const eventId = {
    event,
 } as EventId;
 const operator = "3z6QBMEUjJubCwbKUsMKFnKnf1twyc5bZ9gaWHNAn1nP" as Address;
+const mint = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr" as Address;
 async function initEvent() {
    const eventStateIx = await getInitEventIx(ADMIN_SIGNER.address, eventId, MARKET_MAKER_PROGRAM_ID);
-   const nettingPdaIx = await getCreateNettingAccountIx(eventId, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const nettingPdaIx = await getCreateNettingAccountIx(eventId, operator, mint, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
    const txResult = await sendAndConfirmInstructions([
       eventStateIx, 
       nettingPdaIx
@@ -64,6 +67,8 @@ async function initEvent() {
 async function addLineToNettingAccount() {
    const ix = await getAddLineToNettingAccountIx(
       eventId,
+      operator,
+      mint,
       1, 4, 
       ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
    );
@@ -75,6 +80,8 @@ async function addLineToNettingAccount() {
 async function removeLineFromNettingAccount() {
    const ix = await getRemoveLineFromNettingAccountIx(
       eventId,
+      operator,
+      mint,
       1, 4, 
       ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
    );
@@ -84,7 +91,7 @@ async function removeLineFromNettingAccount() {
 // removeLineFromNettingAccount().catch(console.error);
 
 async function closeNettingAccount() {
-   const ix = await getCloseNettingAccountIx(eventId, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const ix = await getCloseNettingAccountIx(eventId, operator, mint, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }
@@ -121,7 +128,7 @@ async function updateEventState(
 
 async function closeEvent() {
    const closeEventIx = await getCloseEventIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, eventId);
-   const closeNettingPdaIx = await getCloseNettingAccountIx(eventId, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const closeNettingPdaIx = await getCloseNettingAccountIx(eventId, operator, mint, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
    const txResult = await sendAndConfirmInstructions([
       closeEventIx, 
       closeNettingPdaIx
@@ -140,6 +147,7 @@ const marketId = {
    period,
    isPregame: true,
    operator,
+   mint,
 } as MarketId;
 const marketIdSame = {
    eventId,
@@ -148,6 +156,7 @@ const marketIdSame = {
    period,
    isPregame: true,
    operator,
+   mint,
 } as MarketId;
 const oracleBody = new Uint8Array([
    ...getU32Encoder().encode(20n*ODDS_SCALE/10n), //odds0 = 2.0
@@ -238,10 +247,10 @@ async function getParlayQuote() {
 // getMmQuoteBufferData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
 async function withdrawFreeBalance() {
-   const balance = await getMmLiabilityAtaBalance(clients.rpc, MARKET_MAKER_PROGRAM_ID);
-   const encumbrance = await getMmEncumbranceData(clients.rpc, MARKET_MAKER_PROGRAM_ID);
+   const balance = await getMmLiabilityAtaBalance(clients.rpc, MARKET_MAKER_PROGRAM_ID, mint);
+   const encumbrance = await getMmEncumbranceData(clients.rpc, MARKET_MAKER_PROGRAM_ID, mint);
    const withdrawAmount = balance - encumbrance.encumbrance;
-   const withdrawIx = await getWithdrawFromLiabilityAccountIx(withdrawAmount, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
+   const withdrawIx = await getWithdrawFromLiabilityAccountIx(withdrawAmount, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, mint);
    const txResult = await sendAndConfirmInstructions([withdrawIx], [ADMIN_SIGNER]);
    console.log(txResult);
 }

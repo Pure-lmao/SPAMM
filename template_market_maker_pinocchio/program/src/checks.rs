@@ -76,9 +76,9 @@ pub fn market_ok(market: &AccountView, program_id: &Address, market_id: &MarketI
    }
    let bump = unsafe { read_u8_unchecked(market.data_ptr(), MM_MARKET_DATA_PDA_BUMP_OFFSET) };
    let wire = market_id.as_bytes();
-   let (body, operator) = market_id_pda_seed_parts(&wire);
+   let (body, operator, mint) = market_id_pda_seed_parts(&wire);
    let expected = Address::derive_address(
-      &[MM_MARKET_DATA_PDA_SEED, body, operator],
+      &[MM_MARKET_DATA_PDA_SEED, body, operator, mint],
       Some(bump),
       program_id,
    );
@@ -142,7 +142,7 @@ pub fn token_account(
    token_program: &AccountView,
    owner: Option<&Address>,
 ) -> Result<(), ProgramError> {
-   verify_mint(mint)?;
+   verify_mint(mint, mint.address())?;
    verify_token_program(token_program)?;
    if unlikely(!address_eq(token.owner(), token_program.address())) {
       return Err(ProgramError::InvalidAccountOwner);

@@ -1,13 +1,14 @@
 //! Create a freebet PDA for `user` (account meta, not ix data). Increments issuer `open_count`.
 //!
-//! Accounts: **7**
+//! Accounts: **8**
 //! 0. `auth` (writable signer)
 //! 1. `issuer_pda` (writable)
 //! 2. `user` (readonly)
 //! 3. `freebet_pda` (writable)
-//! 4. `rent_sysvar` (readonly)
-//! 5. `system_program` (readonly)
-//! 6. `clock_sysvar` (readonly)
+//! 4. `mint` (readonly)
+//! 5. `rent_sysvar` (readonly)
+//! 6. `system_program` (readonly)
+//! 7. `clock_sysvar` (readonly)
 //!
 //! Data: `freebet_id u32`, `expiry u32`, `amount u64`, `min_odds_scaled u32`, `max_odds_scaled u32`,
 //! `min_legs u8`, `num_mms u8`, `num_operators u8`, then `Address × num_mms`, then `Address × num_operators`.
@@ -21,13 +22,15 @@ use pinocchio_system::instructions::CreateAccount;
 
 use crate::{
    ID, helpers::{
-      clock_unix_timestamp_u32, ensure_pda_unused, find_freebet_pda, freebet_helpers::{freebet_space, verify_freebet_issuer_pda}, get_rent, verify_clock_sysvar, verify_rent_sysvar, verify_signer, verify_system_program,
+      min_amount_for_decimals,
+      clock_unix_timestamp_u32, ensure_pda_unused, find_freebet_pda, freebet_helpers::{freebet_space, verify_freebet_issuer_pda}, get_rent, verify_clock_sysvar, verify_mint, verify_rent_sysvar, verify_signer, verify_system_program,
    }, state::{
-      FREEBET_ACCOUNT_DISCRIMINATOR, FREEBET_ACCOUNT_SEED, FreebetAccountData, FreebetAccountHeader, FreebetState, IssueFreebetIxData, bump_open_count,
+      validate_amount_over_min,
+      FREEBET_ACCOUNT_DISCRIMINATOR, FREEBET_ACCOUNT_SEED, FreebetAccountData, FreebetAccountHeader, PromoState, IssueFreebetIxData, bump_open_count,
    },
 };
 
-pub const ISSUE_FREEBET_IX_DISCRIMINATOR: u8 = 63;
+pub const ISSUE_FREEBET_IX_DISCRIMINATOR: u8 = 165;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -35,6 +38,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       issuer_pda,
       user,
       freebet_pda,
+      mint,
       rent_sysvar,
       system_program,
       clock_sysvar,
@@ -48,6 +52,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_system_program(system_program)?;
    verify_clock_sysvar(clock_sysvar)?;
    verify_freebet_issuer_pda(issuer_pda, auth.address())?;
+   let decimals = verify_mint(mint, mint.address())?;
+   let min_stake = min_amount_for_decimals(decimals);
    ensure_pda_unused(freebet_pda, "issue_freebet")?;
 
    let parsed = IssueFreebetIxData::decode(data)?;
@@ -62,6 +68,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let allowed_mms = parsed.allowed_mms;
    let allowed_operators = parsed.allowed_operators;
 
+   validate_amount_over_min(amount, min_stake, "issue_freebet")?;
    let now = clock_unix_timestamp_u32(clock_sysvar)?;
    if unlikely(now >= expiry) {
       log!("issue_freebet: expiry not in the future");
@@ -69,7 +76,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    }
 
    let id_bytes = freebet_id.to_le_bytes();
-   let (expected, bump) = find_freebet_pda(auth.address(), freebet_id);
+   let (expected, bump) = find_freebet_pda(auth.address(), mint.address(), freebet_id);
    if unlikely(!address_eq(freebet_pda.address(), &expected)) {
       log!("issue_freebet: pda mismatch");
       return Err(ProgramError::InvalidSeeds);
@@ -79,6 +86,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let signer_seeds = [
       Seed::from(FREEBET_ACCOUNT_SEED),
       Seed::from(auth.address().as_ref()),
+      Seed::from(mint.address().as_ref()),
       Seed::from(&id_bytes),
       Seed::from(&bump_bytes),
    ];
@@ -96,7 +104,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let header = FreebetAccountHeader {
       discriminator: FREEBET_ACCOUNT_DISCRIMINATOR,
       bump,
-      state: FreebetState::Available,
+      state: PromoState::Available,
       num_mms: num_mms as u8,
       min_legs,
       num_operators: num_operators as u8,
@@ -107,6 +115,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       amount,
       issuer_auth: *auth.address(),
       user: *user.address(),
+      mint: *mint.address(),
    };
    {
       let mut acc = freebet_pda.try_borrow_mut()?;

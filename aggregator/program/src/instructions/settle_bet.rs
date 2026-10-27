@@ -17,7 +17,7 @@
 //! 7. `mint` (readonly)
 //! 8. `token_program` (readonly)
 //! 9. `cashout_escrow_pda` (readonly) — must be unused for this ticket
-//! 10. `dest_encumbrance` (readonly) — filling MM encumbrance when settling a cashout; ignored otherwise
+//! 10. `dest_encumbrance` (writable on cashout) — filling MM encumbrance when settling a cashout; ignored otherwise
 //!
 //! Per filler:
 //! 0. `mm_address` (readonly)
@@ -38,31 +38,17 @@ use pinocchio_system::ID as SYSTEM_ID;
 use pinocchio_token::instructions::{Batch, CloseAccount, IntoBatch, Transfer};
 use pinocchio::{cpi::CpiAccount, instruction::InstructionAccount};
 use crate::{
-   ID,
-   constants::{
+   ID, constants::{
       MAX_NUMBER_OF_MMS, SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS, SETTLE_BET_TOKEN_BATCH_IX_CAP,
       SETTLE_TOKEN_BATCH_MAX_INNER_DATA,
-   },
-   errors::SpammError,
-   helpers::{
-      calc_potential_profit, close_pda_return_rent, get_encumbrance, get_token_account_balance, push_bet_ata_out, verify_config_pda, verify_mint,
-      verify_mm_config_pda, verify_mm_encumbrance_pda, verify_netting_pda, verify_signer, verify_token_account,
-      verify_token_program,
-      cashout_helpers::require_no_live_cashout_escrow,
-      verify_bet_pda, verify_cashout_pda,
-      freebet_helpers::require_not_freebet,
-   },
-   state::{
-      BET_ACCOUNT_SEED, BetAccountData, BetAccountHeader, BetFiller, CashoutAccountData, CASHOUT_ACCOUNT_DISCRIMINATOR,
-      CASHOUT_ACCOUNT_SEED,
-      account_bet::BetResult,
-      account_netting::apply_settle_netting,
-      other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED},
-   },
-   writers::write_u64_le_unchecked,
+   }, errors::SpammError, helpers::{
+      bump_open_cashout_tickets, calc_potential_profit, cashout_helpers::require_no_live_cashout_escrow, close_pda_return_rent, freebet_helpers::require_not_promo, get_encumbrance, get_token_account_balance, push_bet_ata_out, verify_bet_pda, verify_cashout_pda, verify_config_pda, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_netting_pda, verify_signer, verify_token_account, verify_token_program,
+   }, state::{
+      BET_ACCOUNT_SEED, BetAccountData, BetAccountHeader, BetFiller, CASHOUT_ACCOUNT_DISCRIMINATOR, CASHOUT_ACCOUNT_SEED, CashoutAccountData, account_bet::BetResult, account_netting::apply_settle_netting, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED},
+   }, writers::write_u64_le_unchecked,
 };
 
-pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 25;
+pub const SETTLE_BET_IX_DISCRIMINATOR: u8 = 110;
 
 pub(crate) const ACCOUNTS_PER_FILLER: usize = 5;
 
@@ -180,7 +166,6 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    verify_signer(&signer)?;
    verify_config_pda(&our_config_pda, true)?;
    verify_token_program(token_program)?;
-   verify_mint(&mint)?;
 
    let mut fillers_buf = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
    let SettleBetTicket {
@@ -189,6 +174,7 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
       escrow_owner,
       escrow_bet_id,
    } = decode_settle_bet_ticket(bet_account, &mut fillers_buf, true)?;
+   verify_mint(&mint, &header.market_id.mint)?;
    require_no_live_cashout_escrow(cashout_escrow_pda, &escrow_owner, escrow_bet_id)?;
    let num_fillers = header.num_fillers as usize;
    let fillers = unsafe {
@@ -197,18 +183,18 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    validate_settle_bet_ticket(&header, bet_feepayer, user, filler_accounts)?;
 
    let account_seed = if is_cashout {
-      if verify_mm_encumbrance_pda(dest_encumbrance, user).is_none() {
+      if verify_mm_encumbrance_pda(dest_encumbrance, user, mint.address()).is_none() {
          log!("settle_bet: cashout dest encumbrance invalid");
          return Err(ProgramError::InvalidAccountData);
       }
-      verify_token_account(true, &user_ata, dest_encumbrance, &mint, &token_program)?;
+      verify_token_account(true, &user_ata, dest_encumbrance, &mint, &token_program, true)?;
       CASHOUT_ACCOUNT_SEED
    } else {
-      require_not_freebet(header.freebet_id)?;
-      verify_token_account(true, &user_ata, &user, &mint, &token_program)?;
+      require_not_promo(header.promo_type)?;
+      verify_token_account(true, &user_ata, &user, &mint, &token_program, false)?;
       BET_ACCOUNT_SEED
    };
-   verify_token_account(true, &bet_ata, bet_account, &mint, &token_program)?;
+   verify_token_account(true, &bet_ata, bet_account, &mint, &token_program, true)?;
 
    let amount_to_user_from_bet_ata = user_stake_from_bet_ata(header.result, header.amount)?;
    let bet_ata_start = get_token_account_balance(bet_ata)?;
@@ -233,6 +219,10 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
 
    unwind_fillers_encumbrance_after_settle(&header, fillers, filler_accounts)?;
 
+   if is_cashout {
+      bump_open_cashout_tickets(dest_encumbrance, -1)?;
+   }
+
    close_pda_return_rent(bet_account, bet_feepayer)?;
    Ok(())
 }
@@ -251,6 +241,16 @@ pub(crate) fn user_stake_from_bet_ata(result: BetResult, amount: u64) -> Result<
       // process() already rejected Pending / CashedOut.
       _ => Err(ProgramError::InvalidAccountData),
    }
+}
+
+/// Profit the market-maker liability ATAs pay the user for this result.
+pub(crate) fn sum_mm_profit_paid(result: BetResult, fillers: &[BetFiller]) -> Result<u64, ProgramError> {
+   let mut sum = 0u64;
+   for filler in fillers {
+      let (profit, _) = filler_token_amounts(result, filler)?;
+      sum = sum.checked_add(profit).ok_or(ProgramError::ArithmeticOverflow)?;
+   }
+   Ok(sum)
 }
 
 /// Per-filler token legs: `(liability → user, bet ATA → liability ATA)`.
@@ -320,6 +320,8 @@ pub(crate) fn unwind_fillers_encumbrance_after_settle(
             &filler_accounts[base + 4],
             &filler_accounts[base],
             &event_id_wire,
+            &header.market_id.operator,
+            &header.market_id.mint,
          ) {
             log!("settle_bet: invalid netting pda");
             return Err(ProgramError::InvalidAccountData);
@@ -374,7 +376,7 @@ pub(crate) fn settle_fillers<'a>(
    let mut bet_ata_remaining = bet_ata_start;
    let mut enc_needed = [false; MAX_NUMBER_OF_MMS];
    let mut enc_bumps = [0u8; MAX_NUMBER_OF_MMS];
-   let mut enc_seed_bufs = [const { MaybeUninit::<[Seed; 3]>::uninit() }; MAX_NUMBER_OF_MMS];
+   let mut enc_seed_bufs = [const { MaybeUninit::<[Seed; 4]>::uninit() }; MAX_NUMBER_OF_MMS];
 
    let mut batch_data = [const { MaybeUninit::<u8>::uninit() }; 1 + SETTLE_BET_TOKEN_BATCH_IX_CAP * (2 + SETTLE_TOKEN_BATCH_MAX_INNER_DATA)];
    let mut batch_ix_accounts = [const { MaybeUninit::<InstructionAccount>::uninit() }; SETTLE_BET_TOKEN_BATCH_CPI_ACCOUNTS];
@@ -411,10 +413,10 @@ pub(crate) fn settle_fillers<'a>(
          log!("settle_bet: invalid mm config pda");
          return Err(ProgramError::InvalidAccountData);
       }
-      let Some(enc_bump) = verify_mm_encumbrance_pda(mm_enc, mm) else {
+      let Some(enc_bump) = verify_mm_encumbrance_pda(mm_enc, mm, mint.address()) else {
          return Err(ProgramError::InvalidAccountData);
       };
-      verify_token_account(true, mm_liab, mm_enc, mint, token_program)?;
+      verify_token_account(true, mm_liab, mm_enc, mint, token_program, true)?;
 
       let (liability_to_user, bet_to_liability) =
          filler_token_amounts(header.result, &filler)?;
@@ -471,6 +473,7 @@ pub(crate) fn settle_fillers<'a>(
          enc_seed_bufs[i].write([
             Seed::from(MM_ENCUMBRANCE_PDA_SEED),
             Seed::from(mm.address().as_ref()),
+            Seed::from(header.market_id.mint.as_ref()),
             Seed::from(core::slice::from_ref(&enc_bumps[i])),
          ]);
       }

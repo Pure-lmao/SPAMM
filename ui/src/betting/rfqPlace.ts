@@ -2,7 +2,6 @@ import type { Address } from "@solana/kit";
 import {
    marketIdToJson,
    rfqRequestAndQuoteToFillIxData,
-   type FreebetAccountData,
    type RfqFillIxFromQuote,
    type RfqHttpRequestJson,
    type RfqHttpResponseJson,
@@ -11,7 +10,7 @@ import {
 } from "spamm-aggregator-sdk";
 import type { BetSlipSelection } from "./types";
 import { parlayLegFromSelection } from "./betSlipUtils";
-import { addressInList, oddsInFreebetRange } from "./freebets";
+import { addressInList, oddsInFreebetRange, type PromoSlipLimits } from "./freebets";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
@@ -30,7 +29,7 @@ export function rfqSelectionsFromSlip(selections: readonly BetSlipSelection[]): 
 export function rfqQuoteRejectReason(
    quote: RfqQuoteJson,
    amount: bigint,
-   voucher?: FreebetAccountData | null,
+   voucher?: PromoSlipLimits | null,
    nowUnixSecs: number = Math.floor(Date.now() / 1000),
 ): string | null {
    try {
@@ -68,7 +67,7 @@ export function sortRfqQuotes(quotes: readonly RfqQuoteJson[]): RfqQuoteJson[] {
 export function pickBestRfqQuote(
    quotes: readonly RfqQuoteJson[],
    amount: bigint,
-   voucher?: FreebetAccountData | null,
+   voucher?: PromoSlipLimits | null,
 ): RfqQuoteJson | null {
    const ok = quotes.filter((q) => rfqQuoteRejectReason(q, amount, voucher) == null);
    if (ok.length === 0) {

@@ -174,7 +174,7 @@ pub fn settle_cashout_metas(
       AccountMeta::new_readonly(mint_pubkey(), false),
       AccountMeta::new_readonly(tok, false),
       AccountMeta::new_readonly(cashout_escrow_pda_for(&user(), orig_bet_id), false),
-      AccountMeta::new_readonly(encumbrance_pda(), false),
+      AccountMeta::new(encumbrance_pda(), false),
       AccountMeta::new_readonly(mm, false),
       AccountMeta::new_readonly(mm_config_pda(), false),
       AccountMeta::new(encumbrance_pda(), false),

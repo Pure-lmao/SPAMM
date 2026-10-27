@@ -27,8 +27,6 @@ use spamm_aggregator::{
    },
 };
 
-pinocchio::no_allocator!();
-
 #[no_mangle]
 pub unsafe extern "C" fn entrypoint(input: *mut u8) -> u64 {
    match deserialize_and_route(input) {

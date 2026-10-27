@@ -14,7 +14,7 @@ import {
    runPromoInitProgram,
    runPromoRegisterMm,
 } from '../adminRun';
-import { PROMO_PROGRAM_ID } from '../constants';
+import { DEFAULT_PROMO_MINT, PROMO_PROGRAM_ID } from '../constants';
 import { decodePromoConfigAccount } from '../codex';
 import { getAta, getMmConfigPda, readAccountDataRaw } from '../spammSdk';
 import { parseFlags, parseSendOptions } from './cliFlags';
@@ -67,7 +67,7 @@ async function main(): Promise<void> {
       console.log('[promo/setup] skip register-mm');
    }
 
-   const collateralAta = await getAta(configPda);
+   const collateralAta = await getAta(configPda, DEFAULT_PROMO_MINT);
    console.log('[promo/setup] done');
    console.log(`  config:     ${configPda}`);
    console.log(`  collateral: ${collateralAta}  ← fund USDC here before taking bets`);

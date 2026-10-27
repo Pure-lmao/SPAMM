@@ -34,11 +34,12 @@ use pinocchio_log::log;
 
 use crate::{
    errors::SpammError, helpers::{
+      min_amount_for_decimals,
       calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, get_encumbrance, get_token_account_balance, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_netting_pda_or_placeholder, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
       fill_helpers::{compute_liability_shortfall, create_single_bet_account, require_exact_token_increase},
       freebet_helpers::{odds_in_freebet_range, require_freebet_mm_allowed, require_freebet_operator_allowed, verify_freebet_for_fill},
    }, instructions::fill_bet::FillBetStake, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
-      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_RFQ_IX_DISCRIMINATOR, FillRfqBetIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, build_rfq_bet_message, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds}, rfq_message::RFQ_BET_MESSAGE_LEN,
+      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_RFQ_IX_DISCRIMINATOR, FillRfqBetIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, PromoType, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, build_rfq_bet_message, validate_amount_over_min, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds}, rfq_message::RFQ_BET_MESSAGE_LEN,
    }, writers::write_u64_le_unchecked,
 };
 
@@ -112,7 +113,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_account: user_ata,
          authority: user,
          issuer_sign: None,
-         freebet_id: 0,
+         promo_type: PromoType::None,
+         promo_account: Address::default(),
          freebet: None,
       },
    )
@@ -157,14 +159,16 @@ pub(crate) fn run_fill_rfq_bet(
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_clock_sysvar(clock_sysvar)?;
-   verify_mint(mint)?;
-   verify_token_account(true, stake.token_account, stake.authority, mint, token_program)?;
+   verify_token_account(true, stake.token_account, stake.authority, mint, token_program, stake.issuer_sign.is_some())?;
    verify_config_pda(config_pda, true)?;
    ensure_pda_unused(bet_pda, "fill_rfq_bet")?;
 
    let bet_id = parsed.bet_id;
    let amount = parsed.amount;
    let market_id = parsed.market_id;
+   let decimals = verify_mint(mint, &market_id.mint)?;
+   let min_stake = min_amount_for_decimals(decimals);
+   validate_amount_over_min(amount, min_stake, "fill_rfq_bet")?;
    let side = parsed.side;
    let event_game_state = parsed.event_game_state;
    let event_state_sequence = parsed.event_state_sequence;
@@ -180,7 +184,7 @@ pub(crate) fn run_fill_rfq_bet(
    let mm_address = *mm_program_account.address();
 
    if let Some(fb) = stake.freebet {
-      verify_freebet_for_fill(fb, user.address(), amount, 1, now)?;
+      verify_freebet_for_fill(fb, user.address(), &market_id.mint, amount, 1, now)?;
       require_freebet_mm_allowed(fb, &mm_address)?;
       require_freebet_operator_allowed(fb, &market_id.operator)?;
       if !odds_in_freebet_range(odds_scaled, fb) {
@@ -221,12 +225,12 @@ pub(crate) fn run_fill_rfq_bet(
       return Err(ProgramError::InvalidAccountData);
    }
 
-   if unlikely(!verify_token_account(false, mm_token_account, mm_config_pda, mint, token_program)?) {
+   if unlikely(!verify_token_account(false, mm_token_account, mm_config_pda, mint, token_program, true)?) {
       log!("fill_rfq_bet: invalid mm token account");
       return Err(ProgramError::InvalidAccountData);
    }
 
-   if verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account).is_none() {
+   if verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account, mint.address()).is_none() {
       log!("fill_rfq_bet: invalid encumbrance pda");
       return Err(ProgramError::InvalidAccountData);
    }
@@ -237,12 +241,19 @@ pub(crate) fn run_fill_rfq_bet(
       mm_encumbrance_pda,
       mint,
       token_program,
+      true,
    )?) {
       log!("fill_rfq_bet: invalid mm liability token account");
       return Err(ProgramError::InvalidAccountData);
    }
 
-   if unlikely(!verify_netting_pda_or_placeholder(mm_netting_pda, mm_program_account, &market_id.event_id.as_wire_bytes())) {
+   if unlikely(!verify_netting_pda_or_placeholder(
+      mm_netting_pda,
+      mm_program_account,
+      &market_id.event_id.as_wire_bytes(),
+      &market_id.operator,
+      &market_id.mint,
+   )) {
       log!("fill_rfq_bet: invalid netting pda");
       return Err(ProgramError::InvalidAccountData);
    }
@@ -369,7 +380,8 @@ pub(crate) fn run_fill_rfq_bet(
       amount,
       payout: filled_payout,
       timestamp: now,
-      freebet_id: stake.freebet_id,
+      promo_type: stake.promo_type,
+      promo_account: stake.promo_account,
       event_state_sequence,
       event_game_state,
       result: BetResult::Pending,

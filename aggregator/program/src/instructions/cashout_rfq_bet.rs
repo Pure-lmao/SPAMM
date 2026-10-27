@@ -41,19 +41,19 @@ use pinocchio_log::log;
 use crate::{
    constants::MAX_NUMBER_OF_MMS,
    errors::SpammError, helpers::{
-      clock_unix_timestamp_u32, get_token_account_balance, verify_event_state, verify_mm_config_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_token_account,
+      clock_unix_timestamp_u32, get_token_account_balance, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_token_account,
       cashout_helpers::{
          accept_cashout_payment, cashout_payment_dest, cashout_requires_delay, finish_cashout_single, maybe_open_live_cashout_escrow, pay_cashout_from_free_liability, require_cashout_sequence_at_least, split_fillers,
          validate_cashout_size, verify_cashout_fill_preamble, verify_cashout_mm_encumbrance,
          verify_ticket_feepayer,
       },
-      freebet_helpers::require_not_freebet, verify_bet_pda,
+      freebet_helpers::require_not_promo, verify_bet_pda,
    }, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
       BetAccountData, FILL_CASHOUT_RFQ_IX_DISCRIMINATOR, FillRfqCashoutIxData, FillRfqIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, RFQ_CASHOUT_MESSAGE_LEN, account_bet::{BetFiller, BetResult}, build_rfq_cashout_message, other::config_signer_seeds,
    },
 };
 
-pub const FILL_RFQ_CASHOUT_IX_DISCRIMINATOR: u8 = 72;
+pub const FILL_RFQ_CASHOUT_IX_DISCRIMINATOR: u8 = 92;
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -111,7 +111,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       BetAccountData::decode_fillers_into(raw.as_ref(), n, &mut orig_fillers_buf)?;
       h
    };
-   require_not_freebet(orig.freebet_id)?;
+   require_not_promo(orig.promo_type)?;
+   verify_mint(mint, &orig.market_id.mint)?;
    verify_ticket_feepayer(ticket_feepayer, &orig.feepayer)?;
    if unlikely(!address_eq(&orig.owner, user.address()) || orig.bet_id != parsed.orig_bet_id) {
       return Err(ProgramError::InvalidInstructionData);
@@ -122,7 +123,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    validate_cashout_size(orig.amount, parsed.amount)?;
    require_cashout_sequence_at_least(parsed.event_state_sequence, orig.event_state_sequence)?;
    verify_bet_pda(bet_pda, user.address(), orig.bet_id, orig.bump)?;
-   verify_token_account(true, bet_ata, bet_pda, mint, token_program)?;
+   verify_token_account(true, bet_ata, bet_pda, mint, token_program, true)?;
    if !verify_mm_config_pda(mm_config, mm_program) {
       return Err(SpammError::MmNotRegistered.into());
    }
@@ -139,7 +140,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    ) {
       return Err(ProgramError::InvalidAccountData);
    }
-   if !verify_token_account(false, mm_token_account, mm_config, mint, token_program)? {
+   if !verify_token_account(false, mm_token_account, mm_config, mint, token_program, true)? {
       return Err(ProgramError::InvalidAccountData);
    }
    let Some(encumbrance_pda_bump) = verify_cashout_mm_encumbrance(
@@ -213,6 +214,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          mm_encumbrance_pda,
          encumbrance_pda_bump,
          mm_program.address(),
+         mint.address(),
          mm_liability_token_account,
          payment_dest,
          parsed.max_payment,
@@ -267,6 +269,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_program,
          rent_sysvar,
          system_program,
+         mm_encumbrance_pda,
          &filling_mm,
          &orig,
          parsed.cashout_id,

@@ -1,5 +1,5 @@
 ﻿//! Create the MM market-data PDA for one promo market:
-//! `["market_data", market_id_body_wire, operator]`.
+//! `["market_data", market_id_body, operator, mint]`.
 //!
 //! Accounts **(5)**
 //! 0. `feepayer` (signer) — must match `admin` for `config_pda`
@@ -88,11 +88,12 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
 
    {
       let b = [bump];
-      let (body, operator) = market_id_pda_seed_parts(&market_id_bytes);
+      let (body, operator, mint) = market_id_pda_seed_parts(&market_id_bytes);
       let signer = [
          Seed::from(MM_MARKET_DATA_PDA_SEED),
          Seed::from(body),
          Seed::from(operator),
+         Seed::from(mint),
          Seed::from(&b as &[u8]),
       ];
       let signers = [Signer::from(&signer)];

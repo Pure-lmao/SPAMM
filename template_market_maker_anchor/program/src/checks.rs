@@ -20,6 +20,14 @@ use spamm_aggregator::state::{
    MM_PARLAY_QUOTE_BUFFER_LEN, MM_QUOTE_BUFFER_DISCRIMINATOR, MM_QUOTE_BUFFER_LEN,
 };
 
+pub fn encumbrance_pda(mint: Pubkey) -> Pubkey {
+   let aggregator = Pubkey::new_from_array(spamm_aggregator::ID.to_bytes());
+   Pubkey::find_program_address(
+      &[b"encumbrance", crate::ID.as_ref(), mint.as_ref()],
+      &aggregator,
+   ).0
+}
+
 #[inline(always)]
 fn keys_eq(a: &Pubkey, b: &Pubkey) -> bool {
    sol_memcmp(a.as_ref(), b.as_ref(), PUBKEY_BYTES) == 0
@@ -65,9 +73,9 @@ pub fn market_ok(market: &AccountInfo, program_id: &Pubkey, market_id: &MarketId
    }
    let bump = data[MM_MARKET_DATA_PDA_BUMP_OFFSET];
    let wire = market_id.as_bytes();
-   let (body, operator) = market_id_pda_seed_parts(&wire);
+   let (body, operator, mint) = market_id_pda_seed_parts(&wire);
    let Ok(expected) = Pubkey::create_program_address(
-      &[MM_MARKET_DATA_PDA_SEED, body, operator, &[bump]],
+      &[MM_MARKET_DATA_PDA_SEED, body, operator, mint, &[bump]],
       program_id,
    ) else {
       return false;

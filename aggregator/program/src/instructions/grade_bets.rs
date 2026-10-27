@@ -18,7 +18,7 @@ use crate::{
    }, writers::write_u8_unchecked,
 };
 
-pub const GRADE_BETS_IX_DISCRIMINATOR: u8 = 20;
+pub const GRADE_BETS_IX_DISCRIMINATOR: u8 = 100;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [

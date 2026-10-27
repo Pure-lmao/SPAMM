@@ -43,16 +43,23 @@ import {
    buildAndSignFillRfqTx,
    runMmParlayQuoteFlow,
    runMmQuoteFlow,
+   type BoostFillRef,
    type FreebetFillRef,
 } from "./quoteAndFill";
 import {
+   boostKey,
+   boostPickerLabel,
+   boostedPayoutBase,
    explainFreebetOdds,
    explainFreebetOddsForQuotes,
+   fetchAvailableBoosts,
    fetchAvailableFreebets,
    filterQuoteRowsForFreebet,
    freebetKey,
    freebetPickerLabel,
+   withBoostEligibility,
    withSlipEligibility,
+   type SlipBoost,
    type SlipFreebet,
 } from "./freebets";
 import { subscribeFreebetRefresh } from "./freebetRefresh";
@@ -118,6 +125,8 @@ export function BetSlipTray(): ReactElement | null {
    const [placedBetSummary, setPlacedBetSummary] = useState<PlacedBetSummary | null>(null);
    const [freebets, setFreebets] = useState<readonly SlipFreebet[]>([]);
    const [selectedFreebetKey, setSelectedFreebetKey] = useState<string>("");
+   const [boosts, setBoosts] = useState<readonly SlipBoost[]>([]);
+   const [selectedBoostKey, setSelectedBoostKey] = useState<string>("");
    const [quoteScopeKey, setQuoteScopeKey] = useState<string | null>(null);
    const [rfqOpen, setRfqOpen] = useState(false);
    const [rfqStatus, setRfqStatus] = useState<"idle" | "loading" | "ok" | "err">("idle");
@@ -178,6 +187,7 @@ export function BetSlipTray(): ReactElement | null {
          setRfqMmCount(0);
          prevCountRef.current = 0;
          setSelectedFreebetKey("");
+         setSelectedBoostKey("");
          return;
       }
       if (prevCountRef.current === 0) {
@@ -198,8 +208,9 @@ export function BetSlipTray(): ReactElement | null {
       setRfqMmCount(0);
    }, [selections.length, selections.map((s) => s.id).join("|")]);
 
+   const promoQuoteKey = selectedBoostKey || selectedFreebetKey;
    const quotesAttempted =
-      (quoteStatus === "ok" || quoteStatus === "err") && quoteScopeKey === selectedFreebetKey;
+      (quoteStatus === "ok" || quoteStatus === "err") && quoteScopeKey === promoQuoteKey;
    const assessedFreebets = useMemo(
       () =>
          withSlipEligibility(freebets, selections, {
@@ -224,18 +235,51 @@ export function BetSlipTray(): ReactElement | null {
    }, [freebets, selectedFreebetKey]);
    const usingFreebet = selectedFreebetKey !== "";
    const anyEligibleFreebet = assessedFreebets.some((v) => v.eligible);
+   const boostQuotesAttempted =
+      (quoteStatus === "ok" || quoteStatus === "err") && quoteScopeKey === selectedBoostKey;
+   const assessedBoosts = useMemo(
+      () =>
+         withBoostEligibility(boosts, selections, {
+            quoteRows,
+            quotesAttempted: boostQuotesAttempted,
+            selectedKey: selectedBoostKey,
+            oddsFormat,
+         }),
+      [boosts, selections, quoteRows, boostQuotesAttempted, selectedBoostKey, oddsFormat],
+   );
+   const selectedBoost = useMemo(() => {
+      if (selectedBoostKey === "") {
+         return null;
+      }
+      return assessedBoosts.find((v) => boostKey(v) === selectedBoostKey) ?? null;
+   }, [assessedBoosts, selectedBoostKey]);
+   const selectedBoostVoucher = useMemo(() => {
+      if (selectedBoostKey === "") {
+         return null;
+      }
+      return boosts.find((v) => boostKey(v) === selectedBoostKey)?.data ?? null;
+   }, [boosts, selectedBoostKey]);
+   const usingBoost = selectedBoostKey !== "";
+   const anyEligibleBoost = assessedBoosts.some((v) => v.eligible);
 
    const refreshFreebets = useCallback(async () => {
       if (!isConnected || account == null) {
          setFreebets([]);
          setSelectedFreebetKey("");
+         setBoosts([]);
+         setSelectedBoostKey("");
          return;
       }
       try {
-         const list = await fetchAvailableFreebets(rpc, address(account));
-         setFreebets(list);
+         const [freebetList, boostList] = await Promise.all([
+            fetchAvailableFreebets(rpc, address(account)),
+            fetchAvailableBoosts(rpc, address(account)),
+         ]);
+         setFreebets(freebetList);
+         setBoosts(boostList);
       } catch {
          setFreebets([]);
+         setBoosts([]);
       }
    }, [account, isConnected, rpc]);
 
@@ -272,8 +316,8 @@ export function BetSlipTray(): ReactElement | null {
       setQuoteScopeKey(null);
       const userAddress = isConnected && account != null ? address(account) : SIM_FEE_PAYER_ADDRESS;
 
-      const voucher = selectedVoucher;
-      const quoteKey = selectedFreebetKey;
+      const voucher = selectedBoostVoucher ?? selectedVoucher;
+      const quoteKey = selectedBoostKey || selectedFreebetKey;
       const allowedMms =
          voucher != null && voucher.allowedMms.length > 0 ? voucher.allowedMms : undefined;
       const fallbackNoQuote =
@@ -363,7 +407,7 @@ export function BetSlipTray(): ReactElement | null {
          setBestParlayMm(null);
          setQuoteScopeKey(quoteKey);
       }
-   }, [selections, isConnected, account, amount, rpc, selectedVoucher, selectedFreebetKey]);
+   }, [selections, isConnected, account, amount, rpc, selectedVoucher, selectedFreebetKey, selectedBoostVoucher, selectedBoostKey]);
 
    const fetchRfqQuotes = useCallback(async () => {
       const amt = parseUsdcAmountUiToBaseUnits(amount);
@@ -412,7 +456,7 @@ export function BetSlipTray(): ReactElement | null {
          void fetchRfqQuotes();
       }, 350);
       return () => window.clearTimeout(t);
-   }, [rfqOpen, amount, selections, fetchRfqQuotes, selectedFreebetKey]);
+   }, [rfqOpen, amount, selections, fetchRfqQuotes, selectedFreebetKey, selectedBoostKey]);
 
    useEffect(() => {
       if (!rfqOpen) {
@@ -473,15 +517,18 @@ export function BetSlipTray(): ReactElement | null {
       if (amt === null || amt <= 0n || minOddsScaled <= ODDS_SCALE) {
          return "—";
       }
+      const basePayout = usingFreebet
+         ? calcPotentialProfitBase(amt, minOddsScaled)
+         : calcPotentialPayoutBase(amt, minOddsScaled);
       const payout =
-         usingFreebet
-            ? calcPotentialProfitBase(amt, minOddsScaled)
-            : calcPotentialPayoutBase(amt, minOddsScaled);
+         usingBoost && selectedBoost != null && basePayout != null
+            ? boostedPayoutBase(basePayout, amt, selectedBoost.data.boostBps)
+            : basePayout;
       if (payout === null) {
          return "—";
       }
       return `${formatUsdcBaseUnitsForUi(payout)} USDC`;
-   }, [amount, minOddsScaled, placedBetSummary?.filledPayoutLabel, usingFreebet]);
+   }, [amount, minOddsScaled, placedBetSummary?.filledPayoutLabel, usingFreebet, usingBoost, selectedBoost]);
 
    const onConnectClick = useCallback(() => {
       resetError();
@@ -562,18 +609,31 @@ export function BetSlipTray(): ReactElement | null {
             selectedFreebet != null && selectedFreebet.eligible
                ? { issuerAuth: selectedFreebet.data.issuerAuth, freebetId: selectedFreebet.data.freebetId }
                : undefined;
+         const boost: BoostFillRef | undefined =
+            selectedBoost != null && selectedBoost.eligible
+               ? { issuerAuth: selectedBoost.data.issuerAuth, boostId: selectedBoost.data.boostId }
+               : undefined;
          if (selectedFreebet != null && !selectedFreebet.eligible) {
             setSendErr(selectedFreebet.reason ?? "Freebet cannot be used on this slip.");
+            return;
+         }
+         if (selectedBoost != null && !selectedBoost.eligible) {
+            setSendErr(selectedBoost.reason ?? "Boost cannot be used on this slip.");
             return;
          }
          if (freebet != null && amt !== selectedFreebet!.data.amount) {
             setSendErr("Freebet stake must match the voucher amount.");
             return;
          }
+         if (boost != null && amt > selectedBoost!.data.maxStake) {
+            setSendErr("Stake is above the boost maximum.");
+            return;
+         }
 
          let minScaled = parseMinOddsScaled(minOdds, conservativeMin, oddsFormatRef.current);
-         if (selectedFreebet != null) {
-            const oddsReason = explainFreebetOdds(minScaled, selectedFreebet.data, oddsFormatRef.current);
+         const promoLimits = selectedFreebet?.data ?? selectedBoost?.data;
+         if (promoLimits != null) {
+            const oddsReason = explainFreebetOdds(minScaled, promoLimits, oddsFormatRef.current);
             if (oddsReason != null) {
                setSendErr(oddsReason);
                return;
@@ -613,7 +673,7 @@ export function BetSlipTray(): ReactElement | null {
                if (BigInt(request.amount) !== amt) {
                   throw new Error("Stake changed — request offchain quotes again.");
                }
-               const reject = rfqQuoteRejectReason(quote, amt, selectedFreebet?.data);
+               const reject = rfqQuoteRejectReason(quote, amt, selectedFreebet?.data ?? selectedBoost?.data);
                if (reject != null) {
                   throw new Error(reject);
                }
@@ -624,6 +684,7 @@ export function BetSlipTray(): ReactElement | null {
                   userAddress,
                   fill,
                   freebet,
+                  boost,
                });
             } else if (isParlay) {
                signed = await buildAndSignFillParlayTx({
@@ -632,6 +693,7 @@ export function BetSlipTray(): ReactElement | null {
                   userAddress,
                   mmProgram: bestParlayMm!,
                   freebet,
+                  boost,
                   fill: {
                      betId,
                      amount: amt,
@@ -657,6 +719,7 @@ export function BetSlipTray(): ReactElement | null {
                   },
                   mmPrograms: quoteRows.map((r) => r.mmProgramAddress),
                   freebet,
+                  boost,
                });
             }
 
@@ -680,7 +743,9 @@ export function BetSlipTray(): ReactElement | null {
                   stakeLabel = formatUsdcBaseUnitsForUi(bet.amount);
                   if (bet.payout > 0n) {
                      const odds = bet.amount > 0n ? (bet.payout * ODDS_SCALE) / bet.amount : null;
-                     filledPayoutLabel = `${formatUsdcBaseUnitsForUi(userWinCreditBase(bet.amount, bet.payout, odds, isFreebetFill))} USDC`;
+                     const credit = userWinCreditBase(bet.amount, bet.payout, odds, isFreebetFill);
+                     const shown = boost != null ? boostedPayoutBase(bet.payout, bet.amount, selectedBoost!.data.boostBps) : credit;
+                     filledPayoutLabel = `${formatUsdcBaseUnitsForUi(shown)} USDC`;
                   }
                   if (bet.amount > 0n && bet.payout > 0n) {
                      filledOddsScaled = (bet.payout * ODDS_SCALE) / bet.amount;
@@ -691,7 +756,9 @@ export function BetSlipTray(): ReactElement | null {
                   const fill = primaryFill(bet);
                   const fillOdds = fill !== undefined && fill.oddsScaled > 0n ? fill.oddsScaled : null;
                   if (bet.payout > 0n) {
-                     filledPayoutLabel = `${formatUsdcBaseUnitsForUi(userWinCreditBase(bet.amount, bet.payout, fillOdds, isFreebetFill))} USDC`;
+                     const credit = userWinCreditBase(bet.amount, bet.payout, fillOdds, isFreebetFill);
+                     const shown = boost != null ? boostedPayoutBase(bet.payout, bet.amount, selectedBoost!.data.boostBps) : credit;
+                     filledPayoutLabel = `${formatUsdcBaseUnitsForUi(shown)} USDC`;
                   }
                   if (fill !== undefined && fill.oddsScaled > 0n) {
                      filledOddsScaled = fill.oddsScaled;
@@ -723,8 +790,9 @@ export function BetSlipTray(): ReactElement | null {
             setSendPhase("done");
             setRfqOpen(false);
             setSelectedFreebetKey("");
+            setSelectedBoostKey("");
             if (isConnected && account != null) {
-               void fetchAvailableFreebets(rpc, address(account)).then(setFreebets).catch(() => undefined);
+               void refreshFreebets();
             }
          } catch (e) {
             setSendErr(signErrorMessageForUi(e, { walletName }));
@@ -914,6 +982,7 @@ export function BetSlipTray(): ReactElement | null {
                                     }
                                     const pick =
                                        assessedFreebets.find((v) => v.eligible) ?? assessedFreebets[0]!;
+                                    setSelectedBoostKey("");
                                     setSelectedFreebetKey(freebetKey(pick));
                                  }}
                               />
@@ -942,6 +1011,49 @@ export function BetSlipTray(): ReactElement | null {
                                        disabled={!v.eligible}
                                     >
                                        {freebetPickerLabel(v)}
+                                       {v.eligible ? "" : ` (${slipReason(v.reason ?? t("slip.unavailable"))})`}
+                                    </option>
+                                 ))}
+                              </select>
+                           </label>
+                        )}
+                        {assessedBoosts.length > 0 && (
+                           <label className="bet-slip-tray__freebet bet-slip-tray__freebet-check">
+                              <input
+                                 type="checkbox"
+                                 checked={usingBoost}
+                                 disabled={!anyEligibleBoost && !usingBoost}
+                                 onChange={(e) => {
+                                    if (!e.target.checked) {
+                                       setSelectedBoostKey("");
+                                       return;
+                                    }
+                                    const pick = assessedBoosts.find((v) => v.eligible) ?? assessedBoosts[0]!;
+                                    setSelectedFreebetKey("");
+                                    setSelectedBoostKey(boostKey(pick));
+                                 }}
+                              />
+                              <span>
+                                 {t("slip.useBoost")}
+                                 {assessedBoosts.length === 1
+                                    ? assessedBoosts[0]!.eligible
+                                       ? ` · ${boostPickerLabel(assessedBoosts[0]!)}`
+                                       : ` (${slipReason(assessedBoosts[0]!.reason ?? t("slip.unavailable"))})`
+                                    : null}
+                              </span>
+                           </label>
+                        )}
+                        {usingBoost && assessedBoosts.length > 1 && (
+                           <label className="bet-modal-field bet-slip-tray__freebet">
+                              <span className="bet-modal-field-label">{t("slip.boost")}</span>
+                              <select
+                                 className="bet-modal-input"
+                                 value={selectedBoostKey}
+                                 onChange={(e) => setSelectedBoostKey(e.target.value)}
+                              >
+                                 {assessedBoosts.map((v) => (
+                                    <option key={boostKey(v)} value={boostKey(v)} disabled={!v.eligible}>
+                                       {boostPickerLabel(v)}
                                        {v.eligible ? "" : ` (${slipReason(v.reason ?? t("slip.unavailable"))})`}
                                     </option>
                                  ))}
@@ -1190,7 +1302,7 @@ export function BetSlipTray(): ReactElement | null {
                                    const reject =
                                       amt == null || amt <= 0n
                                          ? "Enter a valid stake amount."
-                                         : rfqQuoteRejectReason(quote, amt, selectedFreebet?.data, nowSec);
+                                         : rfqQuoteRejectReason(quote, amt, selectedFreebet?.data ?? selectedBoost?.data, nowSec);
                                    let oddsLabel = "—";
                                    try {
                                       const scaled = BigInt(quote.oddsScaled);

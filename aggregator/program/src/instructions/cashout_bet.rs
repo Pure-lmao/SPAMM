@@ -41,7 +41,7 @@ use pinocchio_log::log;
 
 use crate::{
    constants::MAX_NUMBER_OF_MMS, errors::SpammError, helpers::{
-      clock_unix_timestamp_u32, get_token_account_balance, verify_event_state, verify_mm_config_pda,
+      clock_unix_timestamp_u32, get_token_account_balance, verify_event_state, verify_mint, verify_mm_config_pda,
       verify_mm_market_data_pda, verify_mm_program_executable, verify_quote_buffer, verify_token_account,
       reject_duplicate_mm_programs,
       cashout_helpers::{
@@ -49,13 +49,13 @@ use crate::{
          maybe_open_live_cashout_escrow, parse_cashout_quote_return_for_mm, pay_cashout_from_free_liability, require_cashout_sequence_at_least, split_fillers,
          validate_cashout_size, verify_cashout_fill_preamble, verify_cashout_mm_encumbrance,
          verify_ticket_feepayer,
-      }, freebet_helpers::require_not_freebet, verify_bet_pda,
+      }, freebet_helpers::require_not_promo, verify_bet_pda,
    }, state::{
       BetAccountData, FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR, FillCashoutIxData, FillCashoutQuoteIxData, GET_CASHOUT_QUOTE_IX_DISCRIMINATOR, GetCashoutQuoteIxData, account_bet::{BetFiller, BetResult}, event_id_wire_from_market_wire, other::config_signer_seeds,
    },
 };
 
-pub const FILL_CASHOUT_IX_DISCRIMINATOR: u8 = 70;
+pub const FILL_CASHOUT_IX_DISCRIMINATOR: u8 = 90;
 const MM_ACCOUNTS_PER_MM: usize = 8;
 
 struct CashoutQuote<'a> {
@@ -131,7 +131,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       BetAccountData::decode_fillers_into(raw.as_ref(), n, &mut orig_fillers_buf)?;
       h
    };
-   require_not_freebet(orig.freebet_id)?;
+   verify_mint(mint, &orig.market_id.mint)?;
+   require_not_promo(orig.promo_type)?;
    verify_ticket_feepayer(ticket_feepayer, &orig.feepayer)?;
    if unlikely(!address_eq(&orig.owner, user.address())) {
       log!("fill_cashout: user is not owner");
@@ -146,7 +147,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    }
    validate_cashout_size(orig.amount, parsed.amount)?;
    require_cashout_sequence_at_least(parsed.event_state_sequence, orig.event_state_sequence)?;
-   verify_token_account(true, bet_ata, bet_pda, mint, token_program)?;
+   verify_token_account(true, bet_ata, bet_pda, mint, token_program, true)?;
 
    verify_bet_pda(bet_pda, user.address(), orig.bet_id, orig.bump)?;
 
@@ -220,7 +221,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       if !verify_event_state(mm_event_state_pda, mm_program_account, event_id_wire, &event_game_state, event_state_sequence) {
          continue;
       }
-      if !verify_token_account(false, mm_token_account, mm_config_pda, mint, token_program)? {
+      if !verify_token_account(false, mm_token_account, mm_config_pda, mint, token_program, true)? {
          continue;
       }
       let Some(encumbrance_pda_bump) = verify_cashout_mm_encumbrance(
@@ -330,6 +331,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       winner.mm_encumbrance_pda,
       winner.encumbrance_pda_bump,
       winner.mm_address,
+      mint.address(),
       winner.mm_liability_token_account,
       payment_dest,
       winner.max_payment,
@@ -395,6 +397,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       token_program,
       rent_sysvar,
       system_program,
+      winner.mm_encumbrance_pda,
       winner.mm_address,
       &orig,
       parsed.cashout_id,

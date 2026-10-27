@@ -17,7 +17,7 @@ use super::derive_pdas::{
 };
 use crate::{
    ID, constants::{
-      ADDRESS_LEN, CONFIG_PDA, MAX_NUMBER_OF_MMS_PROXY, MINT, MM_LIST_PDA,
+      ADDRESS_LEN, CONFIG_PDA, MAX_MINT_DECIMALS, MAX_NUMBER_OF_MMS_PROXY, MIN_MINT_DECIMALS, MM_LIST_PDA,
    }, errors::SpammError, readers::{read_address_ref_unchecked, read_u8_unchecked, read_u16_le_unchecked, read_u64_le_unchecked}, 
    state::{
       EVENT_STATE_BUMP_OFFSET, EVENT_STATE_DISCRIMINATOR, EVENT_STATE_GAME_STATE_OFFSET, EVENT_STATE_HEADER_LEN, 
@@ -145,13 +145,57 @@ pub fn verify_token_program(token_program: &AccountView) -> ProgramResult {
    Ok(())
 }
 
+const SPL_MINT_LEN: usize = 82;
+const SPL_MINT_DECIMALS_OFFSET: usize = 44;
+const SPL_MINT_INITIALIZED_OFFSET: usize = 45;
+
+/// Real classic-SPL mint whose address is `expected`. Returns decimals in `1..=10`.
 #[inline(always)]
-pub fn verify_mint(mint: &AccountView) -> ProgramResult {
-   if unlikely(!address_eq(mint.address(), &MINT)) {
-      log!("verify_mint: mint must be defined mint");
+pub fn verify_mint(mint: &AccountView, expected: &Address) -> Result<u8, ProgramError> {
+   if unlikely(!address_eq(mint.address(), expected)) {
+      log!("verify_mint: mint address mismatch");
       return Err(ProgramError::InvalidAccountData);
    }
-   Ok(())
+   if unlikely(!address_eq(mint.owner(), &TOKEN_PROGRAM_ID)) {
+      log!("verify_mint: mint owner");
+      return Err(ProgramError::InvalidAccountOwner);
+   }
+   if unlikely(mint.data_len() != SPL_MINT_LEN) {
+      log!("verify_mint: mint len");
+      return Err(ProgramError::InvalidAccountData);
+   }
+   let decimals = unsafe { read_u8_unchecked(mint.data_ptr(), SPL_MINT_DECIMALS_OFFSET) };
+   let initialized = unsafe { read_u8_unchecked(mint.data_ptr(), SPL_MINT_INITIALIZED_OFFSET) };
+   if unlikely(initialized != 1) {
+      log!("verify_mint: mint not initialized");
+      return Err(ProgramError::InvalidAccountData);
+   }
+   if unlikely(decimals < MIN_MINT_DECIMALS || decimals > MAX_MINT_DECIMALS) {
+      log!("verify_mint: decimals out of range");
+      return Err(ProgramError::InvalidAccountData);
+   }
+   Ok(decimals)
+}
+
+/// `10^(decimals - 1)` for `decimals` in `MIN_MINT_DECIMALS..=MAX_MINT_DECIMALS`.
+const MIN_AMOUNT_BY_DECIMALS: [u64; MAX_MINT_DECIMALS as usize] = [
+   1,
+   10,
+   100,
+   1_000,
+   10_000,
+   100_000,
+   1_000_000,
+   10_000_000,
+   100_000_000,
+   1_000_000_000,
+];
+
+/// Minimum stake or filler slice: 0.1 of the mint (`10^(decimals - 1)`).
+/// `decimals` is the value `verify_mint` already returned.
+#[inline(always)]
+pub fn min_amount_for_decimals(decimals: u8) -> u64 {
+   MIN_AMOUNT_BY_DECIMALS[(decimals - 1) as usize]
 }
 
 pub fn verify_associated_token_program(associated_token_program: &AccountView) -> ProgramResult {
@@ -225,13 +269,13 @@ pub fn verify_mm_market_data_pda(
 }
 
 
-
 pub fn verify_token_account(
    throw_error: bool,
-   token_account: &AccountView, 
-   owner: &AccountView, 
-   mint: &AccountView, 
-   token_program: &AccountView, 
+   token_account: &AccountView,
+   owner: &AccountView,
+   mint: &AccountView,
+   token_program: &AccountView,
+   must_be_ata: bool,
 ) -> Result<bool, ProgramError> {
    const TOKEN_ACCOUNT_LEN: usize = 165;
    const TOKEN_ACCOUNT_MINT_OFFSET: usize = 0;
@@ -241,7 +285,7 @@ pub fn verify_token_account(
       if throw_error {
          log!("verify_token_account: token account must be owned by the token program");
          return Err(ProgramError::InvalidAccountOwner);
-      } 
+      }
       return Ok(false);
    }
 
@@ -274,6 +318,23 @@ pub fn verify_token_account(
       }
       return Ok(false);
    }
+   if must_be_ata {
+      let (expected, _) = Address::find_program_address(
+         &[
+            owner.address().as_ref(), 
+            token_program.address().as_ref(), 
+            mint.address().as_ref(),
+         ],
+         &ASSOCIATED_TOKEN_PROGRAM_ID,
+      );
+      if unlikely(!address_eq(token_account.address(), &expected)) {
+         if throw_error {
+            log!("verify_token_account: token account is not the canonical ata");
+            return Err(ProgramError::InvalidAccountData);
+         }
+         return Ok(false);
+      }
+   }
    Ok(true)
 }
 
@@ -281,6 +342,8 @@ pub fn verify_netting_pda(
    netting_pda: &AccountView,
    mm_program_account: &AccountView,
    event_id_wire: &[u8; EventId::WIRE_SIZE],
+   operator: &Address,
+   mint: &Address,
 ) -> bool {
    if unlikely(!address_eq(netting_pda.owner(), &ID)) {
       return false;
@@ -293,7 +356,13 @@ pub fn verify_netting_pda(
       return false;
    }
    let bump = unsafe { read_u8_unchecked(netting_pda.data_ptr(), 1) };
-   let expected_pda = derive_netting_pda(mm_program_account.address(), event_id_wire, bump);
+   let expected_pda = derive_netting_pda(
+      mm_program_account.address(),
+      event_id_wire,
+      operator,
+      mint,
+      bump,
+   );
    address_eq(netting_pda.address(), &expected_pda)
 }
 
@@ -304,11 +373,13 @@ pub fn verify_netting_pda_or_placeholder(
    netting_pda: &AccountView,
    mm_program_account: &AccountView,
    event_id_wire: &[u8; EventId::WIRE_SIZE],
+   operator: &Address,
+   mint: &Address,
 ) -> bool {
    if address_eq(netting_pda.address(), &SYSTEM_ID) {
       return true;
    }
-   verify_netting_pda(netting_pda, mm_program_account, event_id_wire)
+   verify_netting_pda(netting_pda, mm_program_account, event_id_wire, operator, mint)
 }
 
 pub fn verify_config_pda(config_pda: &AccountView, check_status: bool) -> ProgramResult {
@@ -539,7 +610,11 @@ pub fn verify_mm_admin(admin: &AccountView, mm_program_account: &AccountView, co
    Ok(())
 }
 
-pub fn verify_mm_encumbrance_pda(mm_encumbrance_pda: &AccountView, mm_program_account: &AccountView) -> Option<u8> {
+pub fn verify_mm_encumbrance_pda(
+   mm_encumbrance_pda: &AccountView,
+   mm_program_account: &AccountView,
+   mint: &Address,
+) -> Option<u8> {
    if unlikely(!address_eq(mm_encumbrance_pda.owner(), &ID)) {
       #[cfg(feature = "log")]
       log!("verify_mm_encumbrance_pda: encumbrance pda must be owned by the program");
@@ -555,7 +630,7 @@ pub fn verify_mm_encumbrance_pda(mm_encumbrance_pda: &AccountView, mm_program_ac
    let stored_bump = unsafe { 
       read_u8_unchecked(mm_encumbrance_pda.data_ptr(), MM_ENCUMBRANCE_PDA_BUMP_OFFSET) 
    };
-   let expected_address = derive_encumbrance_pda(mm_program_account.address(), stored_bump);
+   let expected_address = derive_encumbrance_pda(mm_program_account.address(), mint, stored_bump);
 
    if unlikely(!address_eq(mm_encumbrance_pda.address(), &expected_address)) {
       #[cfg(feature = "log")]

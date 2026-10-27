@@ -1,4 +1,6 @@
 import {
+   getAddressDecoder,
+   getAddressEncoder,
    getU32Decoder,
    getU32Encoder,
    getU64Decoder,
@@ -12,8 +14,10 @@ import {
    AGGREGATOR_PROGRAM_ID,
    MAX_NUMBER_OF_MMS,
    MAX_NUMBER_OF_MMS_PROXY,
+   ADDRESS_LEN,
    MAX_PARLAY_LEGS,
-   MINT_ID,
+   PROMO_BOOST,
+   PROMO_FREEBET,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    CONFIG_PDA,
    SPL_TOKEN_PROGRAM_ID,
@@ -32,6 +36,7 @@ import {
    decodeFillRfqCashoutIxData,
    decodeFillRfqParlayCashoutIxData,
    decodeFillRfqParlayIxData,
+   decodeIssueBoostIxData,
    decodeIssueFreebetIxData,
    encodeFillCashoutIxData,
    encodeFillParlayCashoutIxData,
@@ -46,6 +51,7 @@ import {
    encodeFillCashoutParlayQuoteIxData,
    encodeGetQuoteIxData,
    encodeGetQuoteParlayIxData,
+   encodeIssueBoostIxData,
    encodeIssueFreebetIxData,
    getAddLineToNettingIxPayloadDecoder,
    getAddLineToNettingIxPayloadEncoder,
@@ -66,6 +72,7 @@ import {
    getCashoutParlayPda,
    getConfigPda,
    getEventStatePda,
+   getBoostPda,
    getFreebetIssuerPda,
    getFreebetPda,
    getMmConfigPda,
@@ -97,6 +104,7 @@ import {
    type FillParlayIxData,
    type FillCashoutQuoteIxData,
    type FillCashoutParlayQuoteIxData,
+   type IssueBoostIxData,
    type IssueFreebetIxData,
    type MarketId,
    type MmGetQuote,
@@ -116,6 +124,7 @@ import {
    FILL_RFQ_PARLAY_IX_HEADER_LEN,
    RFQ_SIGNATURE_LEN,
    EVENT_ID_WIRE_SIZE,
+   NETTING_SCOPE_IX_LEN,
    ADD_LINE_TO_LIABILITY_NETTING_IX_LEN,
    REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN,
    fillParlayIxDataLen,
@@ -141,6 +150,7 @@ import {
    validateMmGetCashoutQuote,
    validateMmGetQuote,
    validateGradeBetResults,
+   validateIssueBoostIxData,
    validateIssueFreebetIxData,
    validateMarketId,
    validatePositiveU64,
@@ -160,68 +170,84 @@ const ws = (address: Address) => ({ address, role: AccountRole.WRITABLE_SIGNER }
 async function settleFillerAccountRow(
    filler: BetFiller,
    eventId: EventId,
+   operator: Address,
+   mint: Address,
 ): Promise<readonly [Address, Address, Address, Address, Address]> {
    const mmProgram = filler.mmAddress;
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
-   const liabilityAta = await getAta(mmEncumbrancePda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const liabilityAta = await getAta(mmEncumbrancePda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const nettingPda = filler.isPotentiallyNetted
-      ? (await getNettingPda(mmProgram, eventId))[0]
+      ? (await getNettingPda(mmProgram, eventId, operator, mint))[0]
       : SYSTEM_PROGRAM_ID;
    return [mmProgram, mmConfigPda, mmEncumbrancePda, liabilityAta, nettingPda] as const;
 }
 
 /** Router discriminators (first byte of aggregator instruction data). */
-// setup — 0–3
+// setup — 0–5
 export const INIT_PROGRAM_IX_DISCRIMINATOR = 0;
 export const CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR = 1;
 export const REGISTER_MM_IX_DISCRIMINATOR = 2;
 export const DEREGISTER_MM_IX_DISCRIMINATOR = 3;
+export const INIT_MM_MINT_VAULT_IX_DISCRIMINATOR = 4;
+export const CLOSE_MM_MINT_VAULT_IX_DISCRIMINATOR = 5;
 // bets — 10–13
 export const FILL_BET_IX_DISCRIMINATOR = 10;
 export const FILL_PARLAY_IX_DISCRIMINATOR = 11;
 export const FILL_RFQ_BET_IX_DISCRIMINATOR = 12;
 export const FILL_RFQ_PARLAY_IX_DISCRIMINATOR = 13;
-// freebet fills — 15–18
-export const FREEBET_FILL_BET_IX_DISCRIMINATOR = 15;
-export const FREEBET_FILL_PARLAY_IX_DISCRIMINATOR = 16;
-export const FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR = 17;
-export const FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR = 18;
+// freebet fills — 20–23
+export const FREEBET_FILL_BET_IX_DISCRIMINATOR = 20;
+export const FREEBET_FILL_PARLAY_IX_DISCRIMINATOR = 21;
+export const FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR = 22;
+export const FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR = 23;
 /** MM RFQ fill CPI discs — canonical values live in `constants.ts`. */
 export { MM_FILL_BET_RFQ_IX_DISCRIMINATOR, MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR };
-// grading / settlement — 20–21 / 25–28
-export const GRADE_BETS_IX_DISCRIMINATOR = 20;
-export const GRADE_PARLAY_IX_DISCRIMINATOR = 21;
-export const SETTLE_BET_IX_DISCRIMINATOR = 25;
-export const SETTLE_PARLAY_IX_DISCRIMINATOR = 26;
-export const SETTLE_FREEBET_IX_DISCRIMINATOR = 27;
-export const SETTLE_FREEBET_PARLAY_IX_DISCRIMINATOR = 28;
-// proxies — 30–34
-export const GET_QUOTE_PROXY_IX_DISCRIMINATOR = 30;
-export const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR = 31;
-export const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR = 32;
-export const GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR = 33;
-export const GET_PARLAY_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR = 34;
-// netting PDA — 40–43
-export const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 40;
-export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 41;
-export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 42;
-export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 43;
-// liability account — 50
-export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 50;
-// freebet issuer admin — 60–64
-export const INIT_FREEBET_ISSUER_IX_DISCRIMINATOR = 60;
-export const REMOVE_FREEBET_ISSUER_IX_DISCRIMINATOR = 61;
-export const WITHDRAW_FREEBET_FUNDS_IX_DISCRIMINATOR = 62;
-export const ISSUE_FREEBET_IX_DISCRIMINATOR = 63;
-export const REVOKE_FREEBET_IX_DISCRIMINATOR = 64;
-// cashout — 70–75
-export const FILL_CASHOUT_IX_DISCRIMINATOR = 70;
-export const FILL_PARLAY_CASHOUT_IX_DISCRIMINATOR = 71;
-export const FILL_RFQ_CASHOUT_IX_DISCRIMINATOR = 72;
-export const FILL_RFQ_PARLAY_CASHOUT_IX_DISCRIMINATOR = 73;
-export const CLAIM_CASHOUT_ESCROW_IX_DISCRIMINATOR = 74;
-export const REVERT_CASHOUT_IX_DISCRIMINATOR = 75;
+// boosted fills — 30–33
+export const BOOSTED_FILL_BET_IX_DISCRIMINATOR = 30;
+export const BOOSTED_FILL_PARLAY_IX_DISCRIMINATOR = 31;
+export const BOOSTED_FILL_RFQ_BET_IX_DISCRIMINATOR = 32;
+export const BOOSTED_FILL_RFQ_PARLAY_IX_DISCRIMINATOR = 33;
+// cashout — 90–95
+export const FILL_CASHOUT_IX_DISCRIMINATOR = 90;
+export const FILL_PARLAY_CASHOUT_IX_DISCRIMINATOR = 91;
+export const FILL_RFQ_CASHOUT_IX_DISCRIMINATOR = 92;
+export const FILL_RFQ_PARLAY_CASHOUT_IX_DISCRIMINATOR = 93;
+export const CLAIM_CASHOUT_ESCROW_IX_DISCRIMINATOR = 94;
+export const REVERT_CASHOUT_IX_DISCRIMINATOR = 95;
+// grading — 100–101
+export const GRADE_BETS_IX_DISCRIMINATOR = 100;
+export const GRADE_PARLAY_IX_DISCRIMINATOR = 101;
+// settle — 110–115
+export const SETTLE_BET_IX_DISCRIMINATOR = 110;
+export const SETTLE_PARLAY_IX_DISCRIMINATOR = 111;
+export const SETTLE_FREEBET_IX_DISCRIMINATOR = 112;
+export const SETTLE_FREEBET_PARLAY_IX_DISCRIMINATOR = 113;
+export const SETTLE_BOOSTED_BET_IX_DISCRIMINATOR = 114;
+export const SETTLE_BOOSTED_PARLAY_IX_DISCRIMINATOR = 115;
+// netting PDA — 130–133
+export const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 130;
+export const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR = 131;
+export const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR = 132;
+export const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR = 133;
+// liability account — 150
+export const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR = 150;
+// promo issuer admin — 160–168
+export const INIT_FREEBET_ISSUER_IX_DISCRIMINATOR = 160;
+export const REMOVE_FREEBET_ISSUER_IX_DISCRIMINATOR = 161;
+export const WITHDRAW_FREEBET_FUNDS_IX_DISCRIMINATOR = 162;
+export const CREATE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR = 163;
+export const CLOSE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR = 164;
+export const ISSUE_FREEBET_IX_DISCRIMINATOR = 165;
+export const REVOKE_FREEBET_IX_DISCRIMINATOR = 166;
+export const ISSUE_BOOST_IX_DISCRIMINATOR = 167;
+export const REVOKE_BOOST_IX_DISCRIMINATOR = 168;
+// proxies — 200–204
+export const GET_QUOTE_PROXY_IX_DISCRIMINATOR = 200;
+export const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR = 201;
+export const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR = 202;
+export const GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR = 203;
+export const GET_PARLAY_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR = 204;
 // devnet
 export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
@@ -235,7 +261,41 @@ import {
    MM_GET_QUOTE_PARLAY_IX_DISCRIMINATOR,
 } from './constants.js';
 
-export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction): Uint8Array {
+/** Empty-payload mint-vault and promo-issuer ATA instructions. */
+export type MintScopedInstruction =
+   | { kind: 'initMmMintVault' }
+   | { kind: 'closeMmMintVault' }
+   | { kind: 'createPromoIssuerAta' }
+   | { kind: 'closePromoIssuerAta' };
+
+export type AggregatorInstructionData = DecodedAggregatorInstruction | MintScopedInstruction;
+
+function encodeNettingScope(eventId: EventId, operator: Address, mint: Address): Uint8Array {
+   const eventBytes = getEventIdEncoder().encode(eventId);
+   if (eventBytes.length !== EVENT_ID_WIRE_SIZE) {
+      throw new RangeError(`event id payload length ${eventBytes.length}`);
+   }
+   const out = new Uint8Array(NETTING_SCOPE_IX_LEN);
+   out.set(eventBytes, 0);
+   out.set(getAddressEncoder().encode(operator), EVENT_ID_WIRE_SIZE);
+   out.set(getAddressEncoder().encode(mint), EVENT_ID_WIRE_SIZE + ADDRESS_LEN);
+   return out;
+}
+
+function decodeNettingScope(bytes: Uint8Array): { eventId: EventId; operator: Address; mint: Address } {
+   if (bytes.length !== NETTING_SCOPE_IX_LEN) {
+      throw new RangeError(`netting scope: expected ${NETTING_SCOPE_IX_LEN} bytes`);
+   }
+   const operatorAt = EVENT_ID_WIRE_SIZE;
+   const mintAt = EVENT_ID_WIRE_SIZE + ADDRESS_LEN;
+   return {
+      eventId: getEventIdDecoder().decode(bytes.subarray(0, operatorAt)),
+      operator: getAddressDecoder().decode(bytes.subarray(operatorAt, mintAt)),
+      mint: getAddressDecoder().decode(bytes.subarray(mintAt)),
+   };
+}
+
+export function encodeAggregatorInstructionData(ix: AggregatorInstructionData): Uint8Array {
    switch (ix.kind) {
       case 'initProgram':
          return new Uint8Array([INIT_PROGRAM_IX_DISCRIMINATOR]);
@@ -261,6 +321,10 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
          return concatDiscriminator(ISSUE_FREEBET_IX_DISCRIMINATOR, encodeIssueFreebetIxData(ix.data));
       case 'revokeFreebet':
          return concatDiscriminator(REVOKE_FREEBET_IX_DISCRIMINATOR, getU32Encoder().encode(ix.freebetId));
+      case 'issueBoost':
+         return concatDiscriminator(ISSUE_BOOST_IX_DISCRIMINATOR, encodeIssueBoostIxData(ix.data));
+      case 'revokeBoost':
+         return concatDiscriminator(REVOKE_BOOST_IX_DISCRIMINATOR, getU32Encoder().encode(ix.boostId));
       case 'fillBet': {
          const p = getFillBetIxDataEncoder().encode(ix.data);
          if (p.length !== FILL_BET_IX_DATA_LEN) {
@@ -309,6 +373,25 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
       case 'freebetFillRfqParlay': {
          const p = encodeFillRfqParlayIxData(ix.data);
          return concatDiscriminatorU32Prefix(FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR, ix.freebetId, p);
+      }
+      case 'boostedFillBet': {
+         const p = getFillBetIxDataEncoder().encode(ix.data);
+         if (p.length !== FILL_BET_IX_DATA_LEN) {
+            throw new RangeError(`boosted fill bet payload length ${p.length}`);
+         }
+         return concatDiscriminatorU32Prefix(BOOSTED_FILL_BET_IX_DISCRIMINATOR, ix.boostId, p);
+      }
+      case 'boostedFillParlay': {
+         const p = encodeFillParlayIxData(ix.data);
+         return concatDiscriminatorU32Prefix(BOOSTED_FILL_PARLAY_IX_DISCRIMINATOR, ix.boostId, p);
+      }
+      case 'boostedFillRfqBet': {
+         const p = encodeFillRfqBetIxData(ix.data);
+         return concatDiscriminatorU32Prefix(BOOSTED_FILL_RFQ_BET_IX_DISCRIMINATOR, ix.boostId, p);
+      }
+      case 'boostedFillRfqParlay': {
+         const p = encodeFillRfqParlayIxData(ix.data);
+         return concatDiscriminatorU32Prefix(BOOSTED_FILL_RFQ_PARLAY_IX_DISCRIMINATOR, ix.boostId, p);
       }
       case 'fillCashout': {
          const p = encodeFillCashoutIxData(ix.data);
@@ -380,13 +463,15 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
          return new Uint8Array([SETTLE_FREEBET_IX_DISCRIMINATOR]);
       case 'settleFreebetParlay':
          return new Uint8Array([SETTLE_FREEBET_PARLAY_IX_DISCRIMINATOR]);
-      case 'createNettingAccount': {
-         const p = getEventIdEncoder().encode(ix.eventId);
-         if (p.length !== EVENT_ID_WIRE_SIZE) {
-            throw new RangeError(`event id payload length ${p.length}`);
-         }
-         return concatDiscriminator(CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR, p);
-      }
+      case 'settleBoostedBet':
+         return new Uint8Array([SETTLE_BOOSTED_BET_IX_DISCRIMINATOR]);
+      case 'settleBoostedParlay':
+         return new Uint8Array([SETTLE_BOOSTED_PARLAY_IX_DISCRIMINATOR]);
+      case 'createNettingAccount':
+         return concatDiscriminator(
+            CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
+            encodeNettingScope(ix.eventId, ix.operator, ix.mint),
+         );
       case 'addLineToNettingAccount': {
          const p = getAddLineToNettingIxPayloadEncoder().encode(ix.data);
          if (p.length !== ADD_LINE_TO_LIABILITY_NETTING_IX_LEN) {
@@ -401,13 +486,11 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
          }
          return concatDiscriminator(REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR, p);
       }
-      case 'closeNettingAccount': {
-         const p = getEventIdEncoder().encode(ix.eventId);
-         if (p.length !== EVENT_ID_WIRE_SIZE) {
-            throw new RangeError(`event id payload length ${p.length}`);
-         }
-         return concatDiscriminator(CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR, p);
-      }
+      case 'closeNettingAccount':
+         return concatDiscriminator(
+            CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
+            encodeNettingScope(ix.eventId, ix.operator, ix.mint),
+         );
       case 'withdrawFromLiabilityAccount': {
          const p = getU64Encoder().encode(ix.amount);
          return concatDiscriminator(WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR, p);
@@ -417,6 +500,14 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
       }
       case 'forceClosePda':
          return new Uint8Array([FORCE_CLOSE_PDA_IX_DISCRIMINATOR]);
+      case 'initMmMintVault':
+         return new Uint8Array([INIT_MM_MINT_VAULT_IX_DISCRIMINATOR]);
+      case 'closeMmMintVault':
+         return new Uint8Array([CLOSE_MM_MINT_VAULT_IX_DISCRIMINATOR]);
+      case 'createPromoIssuerAta':
+         return new Uint8Array([CREATE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR]);
+      case 'closePromoIssuerAta':
+         return new Uint8Array([CLOSE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR]);
       default: {
          const _exhaustive: never = ix;
          throw new Error(`unreachable: ${String(_exhaustive)}`);
@@ -424,7 +515,7 @@ export function encodeAggregatorInstructionData(ix: DecodedAggregatorInstruction
    }
 }
 
-export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): DecodedAggregatorInstruction {
+export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): AggregatorInstructionData {
    if (data.length === 0) {
       throw new RangeError('instruction data empty');
    }
@@ -480,6 +571,13 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             kind: 'revokeFreebet',
             freebetId: getU32Decoder().decode(restBytes),
          };
+      case ISSUE_BOOST_IX_DISCRIMINATOR:
+         return { kind: 'issueBoost', data: decodeIssueBoostIxData(restBytes) };
+      case REVOKE_BOOST_IX_DISCRIMINATOR:
+         if (rest.length !== 4) {
+            throw new RangeError('revokeBoost: expected 4 bytes');
+         }
+         return { kind: 'revokeBoost', boostId: getU32Decoder().decode(restBytes) };
       case FILL_BET_IX_DISCRIMINATOR:
          if (rest.length !== FILL_BET_IX_DATA_LEN) {
             throw new RangeError(`fillBet: expected ${FILL_BET_IX_DATA_LEN} bytes`);
@@ -535,6 +633,25 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
       case FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR: {
          const { freebetId, body } = parseU32Prefix(rest);
          return { kind: 'freebetFillRfqParlay', freebetId, data: decodeFillRfqParlayIxData(body) };
+      }
+      case BOOSTED_FILL_BET_IX_DISCRIMINATOR: {
+         const { freebetId: boostId, body } = parseU32Prefix(rest);
+         if (body.length !== FILL_BET_IX_DATA_LEN) {
+            throw new RangeError(`boostedFillBet: expected ${FILL_BET_IX_DATA_LEN} bytes after id`);
+         }
+         return { kind: 'boostedFillBet', boostId, data: getFillBetIxDataDecoder().decode(body) };
+      }
+      case BOOSTED_FILL_PARLAY_IX_DISCRIMINATOR: {
+         const { freebetId: boostId, body } = parseU32Prefix(rest);
+         return { kind: 'boostedFillParlay', boostId, data: decodeFillParlayIxData(body) };
+      }
+      case BOOSTED_FILL_RFQ_BET_IX_DISCRIMINATOR: {
+         const { freebetId: boostId, body } = parseU32Prefix(rest);
+         return { kind: 'boostedFillRfqBet', boostId, data: getFillRfqBetIxDataDecoder().decode(body) };
+      }
+      case BOOSTED_FILL_RFQ_PARLAY_IX_DISCRIMINATOR: {
+         const { freebetId: boostId, body } = parseU32Prefix(rest);
+         return { kind: 'boostedFillRfqParlay', boostId, data: decodeFillRfqParlayIxData(body) };
       }
       case FILL_CASHOUT_IX_DISCRIMINATOR:
       case GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR: {
@@ -627,11 +744,18 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError('settleFreebetParlay: expected no payload');
          }
          return { kind: 'settleFreebetParlay' };
-      case CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR:
-         if (rest.length !== EVENT_ID_WIRE_SIZE) {
-            throw new RangeError(`createNettingAccount: expected ${EVENT_ID_WIRE_SIZE} bytes`);
+      case SETTLE_BOOSTED_BET_IX_DISCRIMINATOR:
+         if (rest.length !== 0) {
+            throw new RangeError('settleBoostedBet: expected no payload');
          }
-         return { kind: 'createNettingAccount', eventId: getEventIdDecoder().decode(restBytes) };
+         return { kind: 'settleBoostedBet' };
+      case SETTLE_BOOSTED_PARLAY_IX_DISCRIMINATOR:
+         if (rest.length !== 0) {
+            throw new RangeError('settleBoostedParlay: expected no payload');
+         }
+         return { kind: 'settleBoostedParlay' };
+      case CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR:
+         return { kind: 'createNettingAccount', ...decodeNettingScope(restBytes) };
       case ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR:
          if (rest.length !== ADD_LINE_TO_LIABILITY_NETTING_IX_LEN) {
             throw new RangeError(`addLineToNettingAccount: expected ${ADD_LINE_TO_LIABILITY_NETTING_IX_LEN} bytes`);
@@ -648,10 +772,7 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             data: getRemoveLineFromNettingIxPayloadDecoder().decode(restBytes),
          };
       case CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR:
-         if (rest.length !== EVENT_ID_WIRE_SIZE) {
-            throw new RangeError(`closeNettingAccount: expected ${EVENT_ID_WIRE_SIZE} bytes`);
-         }
-         return { kind: 'closeNettingAccount', eventId: getEventIdDecoder().decode(restBytes) };
+         return { kind: 'closeNettingAccount', ...decodeNettingScope(restBytes) };
       case WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR:
          if (rest.length !== 8) {
             throw new RangeError('withdrawFromLiabilityAccount: expected 8 bytes');
@@ -667,6 +788,26 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Decod
             throw new RangeError('forceClosePda: expected no payload');
          }
          return { kind: 'forceClosePda' };
+      case INIT_MM_MINT_VAULT_IX_DISCRIMINATOR:
+         if (rest.length !== 0) {
+            throw new RangeError('initMmMintVault: expected no payload');
+         }
+         return { kind: 'initMmMintVault' };
+      case CLOSE_MM_MINT_VAULT_IX_DISCRIMINATOR:
+         if (rest.length !== 0) {
+            throw new RangeError('closeMmMintVault: expected no payload');
+         }
+         return { kind: 'closeMmMintVault' };
+      case CREATE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR:
+         if (rest.length !== 0) {
+            throw new RangeError('createPromoIssuerAta: expected no payload');
+         }
+         return { kind: 'createPromoIssuerAta' };
+      case CLOSE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR:
+         if (rest.length !== 0) {
+            throw new RangeError('closePromoIssuerAta: expected no payload');
+         }
+         return { kind: 'closePromoIssuerAta' };
       default:
          throw new RangeError(`unknown instruction discriminator: ${disc}`);
    }
@@ -716,20 +857,12 @@ export async function getChangeConfigStatusIx(admin: Address, status: 0 | 1): Pr
  *
  * @param mmAdmin - **TS:** `Address` — MM admin (writable signer). **Rust:** `mm_admin` (writable signer), verified against MM config PDA.
  * @param mmProgram - **TS:** `Address` — executable MM program id. **Rust:** `mm_program` (`Pubkey` / `Address`).
- * @returns **`Promise<Instruction>`** — 15 account metas (admin, MM program, MM config, encumbrance, liability ATA, aggregator config, MM list, mint, token + ATA programs, rent sysvar, system, MM token ATA, quote buffers). Mint and token program addresses match the SDK `constants` module.
+ * @returns **`Promise<Instruction>`** — 9 account metas (MM admin, MM program, MM config, aggregator config, MM list, rent sysvar, system program, quote buffer, parlay quote buffer). Open a per-mint vault with {@link getInitMmMintVaultIx}.
  */
 export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Promise<Instruction> {
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
-   const mmLiabilityAta = await getAta(
-      mmEncumbrancePda,
-      MINT_ID,
-      SPL_TOKEN_PROGRAM_ID,
-      SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
-   );
    const [configPda] = await getConfigPda();
    const [mmListPda] = await getMmListPda();
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [mmQuoteBuffer] = await getMmQuoteBufferPda(mmProgram);
    const [mmParlayQuoteBuffer] = await getMmParlayQuoteBufferPda(mmProgram);
    return {
@@ -738,20 +871,84 @@ export async function getRegisterMmIx(mmAdmin: Address, mmProgram: Address): Pro
          ws(mmAdmin),
          ro(mmProgram),
          ro(mmConfigPda),
-         rw(mmEncumbrancePda),
-         rw(mmLiabilityAta),
          ro(configPda),
          rw(mmListPda),
-         ro(MINT_ID),
-         ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
-         ro(mmTokenAta),
          ro(mmQuoteBuffer),
          ro(mmParlayQuoteBuffer),
       ],
       data: encodeAggregatorInstructionData({ kind: 'registerMm' }),
+   };
+}
+
+
+/**
+ * **`init_mm_mint_vault`** — open one encumbrance PDA and its liability ATA for `mint`.
+ *
+ * **Rust:** `aggregator::instructions::init_mm_mint_vault::process` (`INIT_MM_MINT_VAULT_IX_DISCRIMINATOR` = 4). No payload.
+ * The MM config ATA for this mint must already exist.
+ */
+export async function getInitMmMintVaultIx(
+   mmAdmin: Address,
+   mmProgram: Address,
+   mint: Address,
+): Promise<Instruction> {
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmListPda] = await getMmListPda();
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(mmAdmin),
+         ro(mmProgram),
+         ro(mmConfigPda),
+         ro(mmListPda),
+         rw(mmEncumbrancePda),
+         rw(mmLiabilityAta),
+         ro(mmTokenAta),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSVAR_RENT_ID),
+         ro(SYSTEM_PROGRAM_ID),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'initMmMintVault' }),
+   };
+}
+
+/**
+ * **`close_mm_mint_vault`** — close one mint vault without removing the MM from the list.
+ *
+ * **Rust:** `aggregator::instructions::close_mm_mint_vault::process` (`CLOSE_MM_MINT_VAULT_IX_DISCRIMINATOR` = 5). No payload.
+ * Config ATA receives leftover tokens; `mmAdmin` receives ATA dust and PDA rent.
+ */
+export async function getCloseMmMintVaultIx(
+   mmAdmin: Address,
+   mmProgram: Address,
+   mint: Address,
+): Promise<Instruction> {
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(mmAdmin),
+         ro(mmProgram),
+         ro(mmConfigPda),
+         rw(mmEncumbrancePda),
+         rw(mmLiabilityAta),
+         rw(mmTokenAta),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSTEM_PROGRAM_ID),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'closeMmMintVault' }),
    };
 }
 
@@ -769,18 +966,19 @@ export async function getDeregisterMmIx(
    aggregatorAdmin: Address,
    mmAdmin: Address,
    mmProgram: Address,
+   mint: Address,
 ): Promise<Instruction> {
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
    const mmLiabilityAta = await getAta(
       mmEncumbrancePda,
-      MINT_ID,
+      mint,
       SPL_TOKEN_PROGRAM_ID,
       SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    );
    const [configPda] = await getConfigPda();
    const [mmListPda] = await getMmListPda();
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [mmQuoteBuffer] = await getMmQuoteBufferPda(mmProgram);
    const [mmParlayQuoteBuffer] = await getMmParlayQuoteBufferPda(mmProgram);
    return {
@@ -794,7 +992,7 @@ export async function getDeregisterMmIx(
          rw(mmLiabilityAta),
          ro(configPda),
          rw(mmListPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
@@ -808,20 +1006,18 @@ export async function getDeregisterMmIx(
 }
 
 /**
- * **`init_freebet_issuer`** — create issuer PDA + ATA (auth pays rent).
+ * **`init_freebet_issuer`** — create the promo issuer PDA only (auth pays rent).
+ *
+ * **Rust:** `promo_issuer::process_init` (`INIT_FREEBET_ISSUER_IX_DISCRIMINATOR` = 160). No payload.
+ * Open a per-mint ATA with {@link getCreatePromoIssuerAtaIx}.
  */
 export async function getInitFreebetIssuerIx(auth: Address): Promise<Instruction> {
    const [issuerPda] = await getFreebetIssuerPda(auth);
-   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
          ws(auth),
          rw(issuerPda),
-         rw(issuerAta),
-         ro(MINT_ID),
-         ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
       ],
@@ -830,36 +1026,53 @@ export async function getInitFreebetIssuerIx(auth: Address): Promise<Instruction
 }
 
 /**
- * **`remove_freebet_issuer`** — drain issuer ATA, close ATA + PDA (`open_count` must be 0).
+ * **`remove_freebet_issuer`** — close the issuer PDA (`open_count` must be 0).
+ *
+ * **Rust:** `promo_issuer::process_remove` (`REMOVE_FREEBET_ISSUER_IX_DISCRIMINATOR` = 161). No payload.
+ * Close every issuer ATA with {@link getClosePromoIssuerAtaIx} first.
  */
 export async function getRemoveFreebetIssuerIx(auth: Address): Promise<Instruction> {
    const [issuerPda] = await getFreebetIssuerPda(auth);
-   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const authAta = await getAta(auth, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
-      accounts: [
-         ws(auth),
-         rw(issuerPda),
-         rw(issuerAta),
-         rw(authAta),
-         ro(MINT_ID),
-         ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
-         ro(SYSTEM_PROGRAM_ID),
-      ],
+      accounts: [ws(auth), rw(issuerPda)],
       data: encodeAggregatorInstructionData({ kind: 'removeFreebetIssuer' }),
    };
 }
 
 /**
- * **`withdraw_freebet_funds`** — transfer `amount` from issuer ATA to auth ATA (PDA signer).
+ * **`create_promo_issuer_ata`** — create the issuer ATA for one mint.
+ *
+ * **Rust:** `promo_issuer::process_create_ata` (`CREATE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR` = 163). No payload.
  */
-export async function getWithdrawFreebetFundsIx(auth: Address, amount: bigint): Promise<Instruction> {
-   validatePositiveU64(amount, 'amount');
+export async function getCreatePromoIssuerAtaIx(auth: Address, mint: Address): Promise<Instruction> {
    const [issuerPda] = await getFreebetIssuerPda(auth);
-   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const destAta = await getAta(auth, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(auth),
+         ro(issuerPda),
+         rw(issuerAta),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSTEM_PROGRAM_ID),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'createPromoIssuerAta' }),
+   };
+}
+
+/**
+ * **`close_promo_issuer_ata`** — drain and close one issuer ATA.
+ *
+ * **Rust:** `promo_issuer::process_close_ata` (`CLOSE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR` = 164).
+ * Accounts: auth, issuer PDA, issuer ATA, dest ATA, mint, token program.
+ */
+export async function getClosePromoIssuerAtaIx(auth: Address, mint: Address): Promise<Instruction> {
+   const [issuerPda] = await getFreebetIssuerPda(auth);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const destAta = await getAta(auth, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
@@ -867,7 +1080,29 @@ export async function getWithdrawFreebetFundsIx(auth: Address, amount: bigint): 
          ro(issuerPda),
          rw(issuerAta),
          rw(destAta),
-         ro(MINT_ID),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'closePromoIssuerAta' }),
+   };
+}
+
+/**
+ * **`withdraw_freebet_funds`** — transfer `amount` from issuer ATA to auth ATA (PDA signer).
+ */
+export async function getWithdrawFreebetFundsIx(auth: Address, mint: Address, amount: bigint): Promise<Instruction> {
+   validatePositiveU64(amount, 'amount');
+   const [issuerPda] = await getFreebetIssuerPda(auth);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const destAta = await getAta(auth, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(auth),
+         ro(issuerPda),
+         rw(issuerAta),
+         rw(destAta),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: encodeAggregatorInstructionData({ kind: 'withdrawFreebetFunds', amount }),
@@ -881,10 +1116,11 @@ export async function getIssueFreebetIx(
    auth: Address,
    user: Address,
    data: IssueFreebetIxData,
+   mint: Address,
 ): Promise<Instruction> {
    validateIssueFreebetIxData(data);
    const [issuerPda] = await getFreebetIssuerPda(auth);
-   const [freebetPda] = await getFreebetPda(auth, data.freebetId);
+   const [freebetPda] = await getFreebetPda(auth, mint, data.freebetId);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
@@ -892,6 +1128,7 @@ export async function getIssueFreebetIx(
          rw(issuerPda),
          ro(user),
          rw(freebetPda),
+         ro(mint),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
          ro(CLOCK_ID),
@@ -903,13 +1140,13 @@ export async function getIssueFreebetIx(
 /**
  * **`revoke_freebet`** — close an Available freebet PDA; rent to auth.
  */
-export async function getRevokeFreebetIx(auth: Address, freebetId: number): Promise<Instruction> {
+export async function getRevokeFreebetIx(auth: Address, mint: Address, freebetId: number): Promise<Instruction> {
    validateU32Number(freebetId, 'freebetId');
    if (freebetId === 0) {
       throw new RangeError('freebetId 0 is reserved');
    }
    const [issuerPda] = await getFreebetIssuerPda(auth);
-   const [freebetPda] = await getFreebetPda(auth, freebetId);
+   const [freebetPda] = await getFreebetPda(auth, mint, freebetId);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [ws(auth), rw(issuerPda), rw(freebetPda)],
@@ -917,16 +1154,62 @@ export async function getRevokeFreebetIx(auth: Address, freebetId: number): Prom
    };
 }
 
+/**
+ * **`issue_boost`** — create a boost PDA for `user`. Increments issuer `open_count`.
+ */
+export async function getIssueBoostIx(
+   auth: Address,
+   user: Address,
+   data: IssueBoostIxData,
+   mint: Address,
+): Promise<Instruction> {
+   validateIssueBoostIxData(data);
+   const [issuerPda] = await getFreebetIssuerPda(auth);
+   const [boostPda] = await getBoostPda(auth, mint, data.boostId);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(auth),
+         rw(issuerPda),
+         ro(user),
+         rw(boostPda),
+         ro(mint),
+         ro(SYSVAR_RENT_ID),
+         ro(SYSTEM_PROGRAM_ID),
+         ro(CLOCK_ID),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'issueBoost', data }),
+   };
+}
+
+/**
+ * **`revoke_boost`** — close an Available boost PDA; rent to auth.
+ */
+export async function getRevokeBoostIx(auth: Address, mint: Address, boostId: number): Promise<Instruction> {
+   validateU32Number(boostId, 'boostId');
+   if (boostId === 0) {
+      throw new RangeError('boostId 0 is reserved');
+   }
+   const [issuerPda] = await getFreebetIssuerPda(auth);
+   const [boostPda] = await getBoostPda(auth, mint, boostId);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [ws(auth), rw(issuerPda), rw(boostPda)],
+      data: encodeAggregatorInstructionData({ kind: 'revokeBoost', boostId }),
+   };
+}
+
 async function cashoutEscrowAccountMetas(
    user: Address,
    origBetId: bigint,
    delay: boolean,
+   mint: Address,
 ): Promise<[{ address: Address; role: AccountRole }, { address: Address; role: AccountRole }]> {
    if (!delay) {
       return [rw(SYSTEM_PROGRAM_ID), rw(SYSTEM_PROGRAM_ID)];
    }
    const [escrowPda] = await getCashoutEscrowPda(user, origBetId);
-   return [rw(escrowPda), rw(await getAta(escrowPda))];
+   return [rw(escrowPda), rw(await getAta(escrowPda, mint))];
 }
 
 /**
@@ -939,7 +1222,7 @@ async function cashoutEscrowAccountMetas(
  * @param user - **TS:** `Address` — bet owner (readonly signer). **Rust:** `user` (readonly signer).
  * @param mmPrograms - **TS:** `readonly Address[]` — one MM program id per quote leg (1..=MAX_NUMBER_OF_MMS). **Rust:** repeated 9-account MM slice per program (`mm_program` … `mm_netting_pda`). Quote buffer PDA derived per MM in TS (`mm_quote_buffer` seed on MM program).
  * @param hasActiveNetting - **TS:** `boolean` — `true` derives each MM’s netting PDA; `false` passes the system program as the netting slot.
- * @returns **`Promise<Instruction>`** — base 12 accounts + 9×N MM accounts; `data` = router discriminator + encoded `fill`. **Note:** mint / token / rent / system program addresses are taken from constants in TS builders.
+ * @returns **`Promise<Instruction>`** — base 12 accounts + 9×N MM accounts; `data` = router discriminator + encoded `fill`. Mint is `fill.marketId.mint`.
  */
 export async function getFillBetIx(
    fill: FillBetIxData,
@@ -952,9 +1235,10 @@ export async function getFillBetIx(
    if (mmPrograms.length === 0 || mmPrograms.length > MAX_NUMBER_OF_MMS) {
       throw new RangeError(`mmPrograms.length must be in [1, ${MAX_NUMBER_OF_MMS}]`);
    }
-   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mint = fill.marketId.mint;
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [betPda] = await getBetPda(user, fill.betId);
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const accounts: { address: Address; role: AccountRole }[] = [];
    const baseAccounts = [
@@ -964,7 +1248,7 @@ export async function getFillBetIx(
       rw(betPda),
       rw(betAta),
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
@@ -977,16 +1261,16 @@ export async function getFillBetIx(
       const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
       const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
       const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
-      const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+      const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
       const liabilityAta = await getAta(
          mmEncumbrancePda,
-         MINT_ID,
+         mint,
          SPL_TOKEN_PROGRAM_ID,
          SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
       );
-      const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+      const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
       const nettingPda = hasActiveNetting
-         ? (await getNettingPda(mmProgram, fill.marketId.eventId))[0]
+         ? (await getNettingPda(mmProgram, fill.marketId.eventId, fill.marketId.operator, mint))[0]
          : SYSTEM_PROGRAM_ID;
       accounts.push(
          ro(mmProgram),
@@ -1023,23 +1307,24 @@ export async function getFillRfqBetIx(
    hasActiveNetting: boolean,
 ): Promise<Instruction> {
    validateFillRfqBetIxData(fill, 'fill');
-   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mint = fill.marketId.mint;
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [betPda] = await getBetPda(user, fill.betId);
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
    const liabilityAta = await getAta(
       mmEncumbrancePda,
-      MINT_ID,
+      mint,
       SPL_TOKEN_PROGRAM_ID,
       SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    );
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const nettingPda = hasActiveNetting
-      ? (await getNettingPda(mmProgram, fill.marketId.eventId))[0]
+      ? (await getNettingPda(mmProgram, fill.marketId.eventId, fill.marketId.operator, mint))[0]
       : SYSTEM_PROGRAM_ID;
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
@@ -1050,7 +1335,7 @@ export async function getFillRfqBetIx(
          rw(betPda),
          rw(betAta),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
@@ -1083,19 +1368,20 @@ export async function getFillRfqParlayIx(
    mmProgram: Address,
 ): Promise<Instruction> {
    validateFillRfqParlayIxData(fill, 'fill');
-   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mint = fill.legs[0]!.marketId.mint;
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [betPda] = await getParlayBetPda(user, fill.betId);
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
    const liabilityAta = await getAta(
       mmEncumbrancePda,
-      MINT_ID,
+      mint,
       SPL_TOKEN_PROGRAM_ID,
       SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    );
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
@@ -1105,7 +1391,7 @@ export async function getFillRfqParlayIx(
          rw(betPda),
          rw(betAta),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
@@ -1134,7 +1420,7 @@ function requireFreebetId(freebetId: number): void {
 /**
  * **`freebet_fill_bet`** — auction fill funded from the issuer ATA (`freebet_id` prefix + `FillBetIxData`).
  *
- * **Rust:** `aggregator::instructions::freebet_fill_bet::process` (`FREEBET_FILL_BET_IX_DISCRIMINATOR` = 15).
+ * **Rust:** `aggregator::instructions::freebet_fill_bet::process` (`FREEBET_FILL_BET_IX_DISCRIMINATOR` = 20).
  * Accounts: 15 fixed + 9 × N MM accounts. Same as {@link getFillBetIx} except `user_ata` is replaced
  * by `issuer_pda` (readonly), `issuer_ata` (writable) and `freebet_pda` (writable) at indices 2–4.
  */
@@ -1152,11 +1438,12 @@ export async function getFreebetFillBetIx(
    if (mmPrograms.length === 0 || mmPrograms.length > MAX_NUMBER_OF_MMS) {
       throw new RangeError(`mmPrograms.length must be in [1, ${MAX_NUMBER_OF_MMS}]`);
    }
+   const mint = fill.marketId.mint;
    const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
-   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [freebetPda] = await getFreebetPda(issuerAuth, mint, freebetId);
    const [betPda] = await getBetPda(user, fill.betId);
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const accounts: { address: Address; role: AccountRole }[] = [
       ws(feepayer),
@@ -1167,7 +1454,7 @@ export async function getFreebetFillBetIx(
       rw(betPda),
       rw(betAta),
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
@@ -1179,16 +1466,16 @@ export async function getFreebetFillBetIx(
       const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
       const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
       const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
-      const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+      const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
       const liabilityAta = await getAta(
          mmEncumbrancePda,
-         MINT_ID,
+         mint,
          SPL_TOKEN_PROGRAM_ID,
          SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
       );
-      const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+      const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
       const nettingPda = hasActiveNetting
-         ? (await getNettingPda(mmProgram, fill.marketId.eventId))[0]
+         ? (await getNettingPda(mmProgram, fill.marketId.eventId, fill.marketId.operator, mint))[0]
          : SYSTEM_PROGRAM_ID;
       accounts.push(
          ro(mmProgram),
@@ -1212,7 +1499,7 @@ export async function getFreebetFillBetIx(
 /**
  * **`freebet_fill_parlay`** — parlay auction fill funded from the issuer ATA.
  *
- * **Rust:** `aggregator::instructions::freebet_fill_parlay::process` (`FREEBET_FILL_PARLAY_IX_DISCRIMINATOR` = 16).
+ * **Rust:** `aggregator::instructions::freebet_fill_parlay::process` (`FREEBET_FILL_PARLAY_IX_DISCRIMINATOR` = 21).
  * Accounts: 15 fixed + 6 + 2 × L MM accounts. Same as {@link getFillParlayIx} except `user_ata` is replaced
  * by `issuer_pda` (readonly), `issuer_ata` (writable) and `freebet_pda` (writable) at indices 2–4.
  */
@@ -1226,22 +1513,23 @@ export async function getFreebetFillParlayIx(
 ): Promise<Instruction> {
    requireFreebetId(freebetId);
    validateFillParlayIxData(fill, 'fill');
+   const mint = fill.legs[0]!.marketId.mint;
    const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
-   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [freebetPda] = await getFreebetPda(issuerAuth, mint, freebetId);
    const [betPda] = await getParlayBetPda(user, fill.betId);
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
    const liabilityAta = await getAta(
       mmEncumbrancePda,
-      MINT_ID,
+      mint,
       SPL_TOKEN_PROGRAM_ID,
       SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    );
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const accounts = [
       ws(feepayer),
       rs(user),
@@ -1251,7 +1539,7 @@ export async function getFreebetFillParlayIx(
       rw(betPda),
       rw(betAta),
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
@@ -1280,7 +1568,7 @@ export async function getFreebetFillParlayIx(
 /**
  * **`freebet_fill_rfq_bet`** — RFQ single fill funded from the issuer ATA. Signed RFQ payload is unprefixed.
  *
- * **Rust:** `aggregator::instructions::freebet_fill_rfq_bet::process` (`FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR` = 17).
+ * **Rust:** `aggregator::instructions::freebet_fill_rfq_bet::process` (`FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR` = 22).
  * Accounts: 15 fixed + 8 MM accounts. Same as {@link getFillRfqBetIx} except `user_ata` is replaced
  * by `issuer_pda` (readonly), `issuer_ata` (writable) and `freebet_pda` (writable) at indices 2–4.
  */
@@ -1295,25 +1583,26 @@ export async function getFreebetFillRfqBetIx(
 ): Promise<Instruction> {
    requireFreebetId(freebetId);
    validateFillRfqBetIxData(fill, 'fill');
+   const mint = fill.marketId.mint;
    const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
-   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [freebetPda] = await getFreebetPda(issuerAuth, mint, freebetId);
    const [betPda] = await getBetPda(user, fill.betId);
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
    const liabilityAta = await getAta(
       mmEncumbrancePda,
-      MINT_ID,
+      mint,
       SPL_TOKEN_PROGRAM_ID,
       SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    );
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const nettingPda = hasActiveNetting
-      ? (await getNettingPda(mmProgram, fill.marketId.eventId))[0]
+      ? (await getNettingPda(mmProgram, fill.marketId.eventId, fill.marketId.operator, mint))[0]
       : SYSTEM_PROGRAM_ID;
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
@@ -1326,7 +1615,7 @@ export async function getFreebetFillRfqBetIx(
          rw(betPda),
          rw(betAta),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
@@ -1348,7 +1637,7 @@ export async function getFreebetFillRfqBetIx(
 /**
  * **`freebet_fill_rfq_parlay`** — RFQ parlay fill funded from the issuer ATA. Signed RFQ payload is unprefixed.
  *
- * **Rust:** `aggregator::instructions::freebet_fill_rfq_parlay::process` (`FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR` = 18).
+ * **Rust:** `aggregator::instructions::freebet_fill_rfq_parlay::process` (`FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR` = 23).
  * Accounts: 15 fixed + 6 MM accounts. Same as {@link getFillRfqParlayIx} except `user_ata` is replaced
  * by `issuer_pda` (readonly), `issuer_ata` (writable) and `freebet_pda` (writable) at indices 2–4.
  */
@@ -1362,21 +1651,22 @@ export async function getFreebetFillRfqParlayIx(
 ): Promise<Instruction> {
    requireFreebetId(freebetId);
    validateFillRfqParlayIxData(fill, 'fill');
+   const mint = fill.legs[0]!.marketId.mint;
    const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
-   const issuerAta = await getAta(issuerPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const [freebetPda] = await getFreebetPda(issuerAuth, freebetId);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [freebetPda] = await getFreebetPda(issuerAuth, mint, freebetId);
    const [betPda] = await getParlayBetPda(user, fill.betId);
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
    const liabilityAta = await getAta(
       mmEncumbrancePda,
-      MINT_ID,
+      mint,
       SPL_TOKEN_PROGRAM_ID,
       SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    );
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
@@ -1388,7 +1678,7 @@ export async function getFreebetFillRfqParlayIx(
          rw(betPda),
          rw(betAta),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
@@ -1401,6 +1691,256 @@ export async function getFreebetFillRfqParlayIx(
          rw(mmTokenAta),
       ],
       data: encodeAggregatorInstructionData({ kind: 'freebetFillRfqParlay', freebetId, data: fill }),
+   };
+}
+
+/**
+ * **`boosted_fill_bet`** — user pays the stake. Issuer ATA is checked and not debited.
+ * Accounts: `fill_bet`'s 12, with issuer PDA, issuer ATA, and boost PDA inserted after `user_ata`.
+ */
+export async function getBoostedFillBetIx(
+   fill: FillBetIxData,
+   feepayer: Address,
+   user: Address,
+   issuerAuth: Address,
+   boostId: number,
+   mmPrograms: readonly Address[],
+   hasActiveNetting: boolean,
+): Promise<Instruction> {
+   requireFreebetId(boostId);
+   validateFillBetIxData(fill, 'fill');
+   if (mmPrograms.length === 0 || mmPrograms.length > MAX_NUMBER_OF_MMS) {
+      throw new RangeError(`mmPrograms.length must be in [1, ${MAX_NUMBER_OF_MMS}]`);
+   }
+   const mint = fill.marketId.mint;
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [boostPda] = await getBoostPda(issuerAuth, mint, boostId);
+   const [betPda] = await getBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const accounts: { address: Address; role: AccountRole }[] = [
+      ws(feepayer),
+      rs(user),
+      rw(userAta),
+      ro(issuerPda),
+      ro(issuerAta),
+      rw(boostPda),
+      rw(betPda),
+      rw(betAta),
+      ro(configPda),
+      ro(mint),
+      ro(SPL_TOKEN_PROGRAM_ID),
+      ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+      ro(SYSVAR_RENT_ID),
+      ro(SYSTEM_PROGRAM_ID),
+      ro(CLOCK_ID),
+   ];
+   for (const mmProgram of mmPrograms) {
+      const [mmConfigPda] = await getMmConfigPda(mmProgram);
+      const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
+      const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
+      const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+      const liabilityAta = await getAta(mmEncumbrancePda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+      const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+      const nettingPda = hasActiveNetting
+         ? (await getNettingPda(mmProgram, fill.marketId.eventId, fill.marketId.operator, mint))[0]
+         : SYSTEM_PROGRAM_ID;
+      accounts.push(
+         ro(mmProgram),
+         rw(mmConfigPda),
+         rw(eventStatePda),
+         rw(marketDataPda),
+         rw(mmQuoteBufferPda),
+         rw(mmEncumbrancePda),
+         rw(liabilityAta),
+         rw(mmTokenAta),
+         rw(nettingPda),
+      );
+   }
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts,
+      data: encodeAggregatorInstructionData({ kind: 'boostedFillBet', boostId, data: fill }),
+   };
+}
+
+/**
+ * **`boosted_fill_parlay`** — user pays the stake. Same fixed prefix as {@link getBoostedFillBetIx}.
+ */
+export async function getBoostedFillParlayIx(
+   fill: FillParlayIxData,
+   feepayer: Address,
+   user: Address,
+   issuerAuth: Address,
+   boostId: number,
+   mmProgram: Address,
+): Promise<Instruction> {
+   requireFreebetId(boostId);
+   validateFillParlayIxData(fill, 'fill');
+   const mint = fill.legs[0]!.marketId.mint;
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [boostPda] = await getBoostPda(issuerAuth, mint, boostId);
+   const [betPda] = await getParlayBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const liabilityAta = await getAta(mmEncumbrancePda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const accounts = [
+      ws(feepayer),
+      rs(user),
+      rw(userAta),
+      ro(issuerPda),
+      ro(issuerAta),
+      rw(boostPda),
+      rw(betPda),
+      rw(betAta),
+      ro(configPda),
+      ro(mint),
+      ro(SPL_TOKEN_PROGRAM_ID),
+      ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+      ro(SYSVAR_RENT_ID),
+      ro(SYSTEM_PROGRAM_ID),
+      ro(CLOCK_ID),
+      ro(mmProgram),
+      rw(mmConfigPda),
+      rw(mmParlayQuoteBufferPda),
+      rw(mmEncumbrancePda),
+      rw(liabilityAta),
+      rw(mmTokenAta),
+   ];
+   for (let legIdx = 0; legIdx < fill.numLegs; legIdx++) {
+      const leg = fill.legs[legIdx]!;
+      const [marketDataPda] = await getMmMarketDataPda(mmProgram, leg.marketId);
+      const [eventStatePda] = await getEventStatePda(mmProgram, leg.marketId.eventId);
+      accounts.push(ro(marketDataPda), ro(eventStatePda));
+   }
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts,
+      data: encodeAggregatorInstructionData({ kind: 'boostedFillParlay', boostId, data: fill }),
+   };
+}
+
+/**
+ * **`boosted_fill_rfq_bet`** — user pays the stake. Signed RFQ payload is unprefixed.
+ */
+export async function getBoostedFillRfqBetIx(
+   fill: FillRfqBetIxData,
+   feepayer: Address,
+   user: Address,
+   issuerAuth: Address,
+   boostId: number,
+   mmProgram: Address,
+   hasActiveNetting: boolean,
+): Promise<Instruction> {
+   requireFreebetId(boostId);
+   validateFillRfqBetIxData(fill, 'fill');
+   const mint = fill.marketId.mint;
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [boostPda] = await getBoostPda(issuerAuth, mint, boostId);
+   const [betPda] = await getBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [eventStatePda] = await getEventStatePda(mmProgram, fill.marketId.eventId);
+   const [marketDataPda] = await getMmMarketDataPda(mmProgram, fill.marketId);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const liabilityAta = await getAta(mmEncumbrancePda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const nettingPda = hasActiveNetting
+      ? (await getNettingPda(mmProgram, fill.marketId.eventId, fill.marketId.operator, mint))[0]
+      : SYSTEM_PROGRAM_ID;
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(feepayer),
+         rs(user),
+         rw(userAta),
+         ro(issuerPda),
+         ro(issuerAta),
+         rw(boostPda),
+         rw(betPda),
+         rw(betAta),
+         ro(configPda),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSVAR_RENT_ID),
+         ro(SYSTEM_PROGRAM_ID),
+         ro(CLOCK_ID),
+         ro(mmProgram),
+         rw(mmConfigPda),
+         rw(eventStatePda),
+         rw(marketDataPda),
+         rw(mmEncumbrancePda),
+         rw(liabilityAta),
+         rw(mmTokenAta),
+         rw(nettingPda),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'boostedFillRfqBet', boostId, data: fill }),
+   };
+}
+
+/**
+ * **`boosted_fill_rfq_parlay`** — user pays the stake. Signed RFQ payload is unprefixed.
+ */
+export async function getBoostedFillRfqParlayIx(
+   fill: FillRfqParlayIxData,
+   feepayer: Address,
+   user: Address,
+   issuerAuth: Address,
+   boostId: number,
+   mmProgram: Address,
+): Promise<Instruction> {
+   requireFreebetId(boostId);
+   validateFillRfqParlayIxData(fill, 'fill');
+   const mint = fill.legs[0]!.marketId.mint;
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [boostPda] = await getBoostPda(issuerAuth, mint, boostId);
+   const [betPda] = await getParlayBetPda(user, fill.betId);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const liabilityAta = await getAta(mmEncumbrancePda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         ws(feepayer),
+         rs(user),
+         rw(userAta),
+         ro(issuerPda),
+         ro(issuerAta),
+         rw(boostPda),
+         rw(betPda),
+         rw(betAta),
+         ro(configPda),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSVAR_RENT_ID),
+         ro(SYSTEM_PROGRAM_ID),
+         ro(CLOCK_ID),
+         ro(mmProgram),
+         rw(mmConfigPda),
+         rw(mmEncumbrancePda),
+         rw(liabilityAta),
+         rw(mmTokenAta),
+      ],
+      data: encodeAggregatorInstructionData({ kind: 'boostedFillRfqParlay', boostId, data: fill }),
    };
 }
 
@@ -1430,9 +1970,10 @@ export async function getFillCashoutIx(
    if (bet.betId !== fill.origBetId) {
       throw new RangeError('bet.betId must equal fill.origBetId');
    }
-   if (bet.freebetId !== 0) {
-      throw new RangeError('cannot cash out a freebet ticket');
+   if (bet.promoType === PROMO_FREEBET || bet.promoType === PROMO_BOOST) {
+      throw new RangeError('cannot cash out a promo ticket');
    }
+   const mint = bet.marketId.mint;
    if (mmPrograms.length === 0 || mmPrograms.length > MAX_NUMBER_OF_MMS) {
       throw new RangeError(`mmPrograms.length must be in [1, ${MAX_NUMBER_OF_MMS}]`);
    }
@@ -1440,11 +1981,11 @@ export async function getFillCashoutIx(
       throw new RangeError('fillingMm must be included in mmPrograms');
    }
    const user = bet.owner;
-   const userAta = await getAta(user);
+   const userAta = await getAta(user, mint);
    const [betPda] = await getBetPda(user, fill.origBetId);
-   const betAta = await getAta(betPda);
+   const betAta = await getAta(betPda, mint);
    const [cashoutPda] = await getCashoutPda(fillingMm, fill.cashoutId);
-   const cashoutAta = await getAta(cashoutPda);
+   const cashoutAta = await getAta(cashoutPda, mint);
    const delay = cashoutRequiresDelay(
       marketId.isPregame,
       bet.eventStateSequence,
@@ -1454,6 +1995,7 @@ export async function getFillCashoutIx(
       user,
       fill.origBetId,
       delay,
+      mint,
    );
    const [configPda] = await getConfigPda();
    const accounts = [
@@ -1468,7 +2010,7 @@ export async function getFillCashoutIx(
       escrowPdaMeta,
       escrowAtaMeta,
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
@@ -1480,9 +2022,9 @@ export async function getFillCashoutIx(
       const [eventStatePda] = await getEventStatePda(mmProgram, marketId.eventId);
       const [marketDataPda] = await getMmMarketDataPda(mmProgram, marketId);
       const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
-      const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
-      const mmLiabilityAta = await getAta(mmEncumbrancePda);
-      const mmTokenAta = await getAta(mmConfigPda);
+      const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+      const mmLiabilityAta = await getAta(mmEncumbrancePda, mint);
+      const mmTokenAta = await getAta(mmConfigPda, mint);
       accounts.push(
          ro(mmProgram),
          rw(mmConfigPda),
@@ -1524,30 +2066,32 @@ export async function getFillParlayCashoutIx(
    if (parlay.betId !== fill.origBetId) {
       throw new RangeError('parlay.betId must equal fill.origBetId');
    }
-   if (parlay.freebetId !== 0) {
-      throw new RangeError('cannot cash out a freebet ticket');
+   if (parlay.promoType === PROMO_FREEBET || parlay.promoType === PROMO_BOOST) {
+      throw new RangeError('cannot cash out a promo ticket');
    }
+   const mint = parlay.legs[0]!.marketId.mint;
    if (marketIds.length !== fill.numLegs) {
       throw new RangeError('marketIds.length must equal fill.numLegs');
    }
    const user = parlay.owner;
-   const userAta = await getAta(user);
+   const userAta = await getAta(user, mint);
    const [betPda] = await getParlayBetPda(user, fill.origBetId);
-   const betAta = await getAta(betPda);
+   const betAta = await getAta(betPda, mint);
    const [cashoutPda] = await getCashoutParlayPda(fillingMm, fill.cashoutId);
-   const cashoutAta = await getAta(cashoutPda);
+   const cashoutAta = await getAta(cashoutPda, mint);
    const delay = parlayCashoutRequiresDelay(parlay.legs, fill.snapshots);
    const [escrowPdaMeta, escrowAtaMeta] = await cashoutEscrowAccountMetas(
       user,
       fill.origBetId,
       delay,
+      mint,
    );
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(fillingMm);
    const [mmParlayQuoteBuffer] = await getMmParlayQuoteBufferPda(fillingMm);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(fillingMm);
-   const mmLiabilityAta = await getAta(mmEncumbrancePda);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(fillingMm, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint);
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    const legAccounts: { address: Address; role: AccountRole }[] = [];
    for (const mid of marketIds) {
       const [marketDataPda] = await getMmMarketDataPda(fillingMm, mid);
@@ -1568,7 +2112,7 @@ export async function getFillParlayCashoutIx(
          escrowPdaMeta,
          escrowAtaMeta,
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
@@ -1607,15 +2151,16 @@ export async function getFillRfqCashoutIx(
    if (bet.betId !== fill.origBetId) {
       throw new RangeError('bet.betId must equal fill.origBetId');
    }
-   if (bet.freebetId !== 0) {
-      throw new RangeError('cannot cash out a freebet ticket');
+   if (bet.promoType === PROMO_FREEBET || bet.promoType === PROMO_BOOST) {
+      throw new RangeError('cannot cash out a promo ticket');
    }
+   const mint = bet.marketId.mint;
    const user = bet.owner;
-   const userAta = await getAta(user);
+   const userAta = await getAta(user, mint);
    const [betPda] = await getBetPda(user, fill.origBetId);
-   const betAta = await getAta(betPda);
+   const betAta = await getAta(betPda, mint);
    const [cashoutPda] = await getCashoutPda(mmProgram, fill.cashoutId);
-   const cashoutAta = await getAta(cashoutPda);
+   const cashoutAta = await getAta(cashoutPda, mint);
    const delay = cashoutRequiresDelay(
       marketId.isPregame,
       bet.eventStateSequence,
@@ -1625,14 +2170,15 @@ export async function getFillRfqCashoutIx(
       user,
       fill.origBetId,
       delay,
+      mint,
    );
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [eventStatePda] = await getEventStatePda(mmProgram, marketId.eventId);
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, marketId);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
-   const mmLiabilityAta = await getAta(mmEncumbrancePda);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint);
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
@@ -1647,7 +2193,7 @@ export async function getFillRfqCashoutIx(
          escrowPdaMeta,
          escrowAtaMeta,
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
@@ -1692,29 +2238,31 @@ export async function getFillRfqParlayCashoutIx(
    if (parlay.betId !== fill.origBetId) {
       throw new RangeError('parlay.betId must equal fill.origBetId');
    }
-   if (parlay.freebetId !== 0) {
-      throw new RangeError('cannot cash out a freebet ticket');
+   if (parlay.promoType === PROMO_FREEBET || parlay.promoType === PROMO_BOOST) {
+      throw new RangeError('cannot cash out a promo ticket');
    }
+   const mint = parlay.legs[0]!.marketId.mint;
    if (marketIds.length !== fill.numLegs) {
       throw new RangeError('marketIds.length must equal fill.numLegs');
    }
    const user = parlay.owner;
-   const userAta = await getAta(user);
+   const userAta = await getAta(user, mint);
    const [betPda] = await getParlayBetPda(user, fill.origBetId);
-   const betAta = await getAta(betPda);
+   const betAta = await getAta(betPda, mint);
    const [cashoutPda] = await getCashoutParlayPda(fillingMm, fill.cashoutId);
-   const cashoutAta = await getAta(cashoutPda);
+   const cashoutAta = await getAta(cashoutPda, mint);
    const delay = parlayCashoutRequiresDelay(parlay.legs, fill.snapshots);
    const [escrowPdaMeta, escrowAtaMeta] = await cashoutEscrowAccountMetas(
       user,
       fill.origBetId,
       delay,
+      mint,
    );
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(fillingMm);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(fillingMm);
-   const mmLiabilityAta = await getAta(mmEncumbrancePda);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(fillingMm, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint);
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
@@ -1729,7 +2277,7 @@ export async function getFillRfqParlayCashoutIx(
          escrowPdaMeta,
          escrowAtaMeta,
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
@@ -1756,15 +2304,16 @@ export async function getClaimCashoutEscrowIx(
    feepayer: Address,
    escrow: CashoutEscrowAccountData,
    ticket: Pick<BetAccountData, 'feepayer'> | Pick<ParlayBetAccountData, 'feepayer'>,
+   mint: Address,
 ): Promise<Instruction> {
    const user = escrow.owner;
-   const userAta = await getAta(user);
+   const userAta = await getAta(user, mint);
    const [escrowPda] = await getCashoutEscrowPda(user, escrow.origBetId);
-   const escrowAta = await getAta(escrowPda);
+   const escrowAta = await getAta(escrowPda, mint);
    const [originalBetPda] = escrow.isParlay
       ? await getParlayBetPda(user, escrow.origBetId)
       : await getBetPda(user, escrow.origBetId);
-   const originalBetAta = await getAta(originalBetPda);
+   const originalBetAta = await getAta(originalBetPda, mint);
    const [cashoutPda] = escrow.isParlay
       ? await getCashoutParlayPda(escrow.marketMaker, escrow.cashoutId)
       : await getCashoutPda(escrow.marketMaker, escrow.cashoutId);
@@ -1783,7 +2332,7 @@ export async function getClaimCashoutEscrowIx(
          rw(originalBetAta),
          ro(cashoutPda),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SYSTEM_PROGRAM_ID),
          ro(CLOCK_ID),
@@ -1802,22 +2351,23 @@ export async function getClaimCashoutEscrowIx(
 export async function getRevertCashoutIx(
    feepayer: Address,
    escrow: CashoutEscrowAccountData,
+   mint: Address,
 ): Promise<Instruction> {
    const user = escrow.owner;
-   const userAta = await getAta(user);
+   const userAta = await getAta(user, mint);
    const [originalBetPda] = escrow.isParlay
       ? await getParlayBetPda(user, escrow.origBetId)
       : await getBetPda(user, escrow.origBetId);
-   const originalBetAta = await getAta(originalBetPda);
+   const originalBetAta = await getAta(originalBetPda, mint);
    const [cashoutPda] = escrow.isParlay
       ? await getCashoutParlayPda(escrow.marketMaker, escrow.cashoutId)
       : await getCashoutPda(escrow.marketMaker, escrow.cashoutId);
-   const cashoutAta = await getAta(cashoutPda);
+   const cashoutAta = await getAta(cashoutPda, mint);
    const [escrowPda] = await getCashoutEscrowPda(user, escrow.origBetId);
-   const escrowAta = await getAta(escrowPda);
+   const escrowAta = await getAta(escrowPda, mint);
    const [mmConfigPda] = await getMmConfigPda(escrow.marketMaker);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(escrow.marketMaker);
-   const mmLiabilityAta = await getAta(mmEncumbrancePda);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(escrow.marketMaker, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint);
    const [configPda] = await getConfigPda();
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
@@ -1834,10 +2384,10 @@ export async function getRevertCashoutIx(
          rw(escrowAta),
          ro(escrow.marketMaker),
          ro(mmConfigPda),
-         ro(mmEncumbrancePda),
+         rw(mmEncumbrancePda),
          rw(mmLiabilityAta),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SYSTEM_PROGRAM_ID),
       ],
@@ -1933,9 +2483,10 @@ export async function getSettleCashoutIx(
    if (cashout.result === BetResult.CashedOut) {
       throw new Error('cashout.result CashedOut is not settleable');
    }
-   const cashoutAta = await getAta(cashoutPda);
-   const [encumbrancePda] = await getMmEncumbrancePda(cashout.mm);
-   const liabilityAta = await getAta(encumbrancePda);
+   const mint = cashout.marketId.mint;
+   const cashoutAta = await getAta(cashoutPda, mint);
+   const [encumbrancePda] = await getMmEncumbrancePda(cashout.mm, mint);
+   const liabilityAta = await getAta(encumbrancePda, mint);
    const [configPda] = await getConfigPda();
    const [cashoutEscrowPda] = await getCashoutEscrowPda(cashout.origOwner, cashout.origBetId);
    const baseAccounts = [
@@ -1946,17 +2497,17 @@ export async function getSettleCashoutIx(
       ro(cashout.mm),
       rw(liabilityAta),
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(cashoutEscrowPda),
-      ro(encumbrancePda),
+      rw(encumbrancePda),
    ];
    const fillerAccounts: { address: Address; role: AccountRole }[] = [];
    if (cashout.fillers.length === 0 || cashout.fillers.length !== cashout.numFillers) {
       throw new RangeError(`cashout.fillers.length must equal cashout.numFillers (${cashout.numFillers})`);
    }
    for (const filler of cashout.fillers) {
-      const row = await settleFillerAccountRow(filler, cashout.marketId.eventId);
+      const row = await settleFillerAccountRow(filler, cashout.marketId.eventId, cashout.marketId.operator, mint);
       const nettingRole = filler.isPotentiallyNetted ? rw(row[4]!) : ro(row[4]!);
       fillerAccounts.push(ro(row[0]!), ro(row[1]!), rw(row[2]!), rw(row[3]!), nettingRole);
    }
@@ -1984,13 +2535,14 @@ export async function getSettleCashoutParlayIx(
    if (cashout.result === BetResult.CashedOut) {
       throw new Error('cashout.result CashedOut is not settleable');
    }
-   const cashoutAta = await getAta(cashoutPda);
-   const [destEncumbrancePda] = await getMmEncumbrancePda(cashout.mm);
-   const destLiabilityAta = await getAta(destEncumbrancePda);
+   const mint = cashout.legs[0]!.marketId.mint;
+   const cashoutAta = await getAta(cashoutPda, mint);
+   const [destEncumbrancePda] = await getMmEncumbrancePda(cashout.mm, mint);
+   const destLiabilityAta = await getAta(destEncumbrancePda, mint);
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(cashout.originalFillerAddress);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(cashout.originalFillerAddress);
-   const mmLiabilityAta = await getAta(mmEncumbrancePda);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(cashout.originalFillerAddress, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint);
    const [cashoutEscrowPda] = await getCashoutEscrowPda(cashout.origOwner, cashout.origBetId);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
@@ -2002,14 +2554,14 @@ export async function getSettleCashoutParlayIx(
          ro(cashout.mm),
          rw(destLiabilityAta),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(cashout.originalFillerAddress),
          ro(mmConfigPda),
          rw(mmEncumbrancePda),
          rw(mmLiabilityAta),
          ro(cashoutEscrowPda),
-         ro(destEncumbrancePda),
+         rw(destEncumbrancePda),
       ],
       data: encodeAggregatorInstructionData({ kind: 'settleParlay' }),
    };
@@ -2018,7 +2570,7 @@ export async function getSettleCashoutParlayIx(
 /**
  * **`get_quote_proxy`** — CPI each MM `get_quote`, return `ProxyQuoteData[]` via transaction return data (no bet accounts).
  *
- * **Rust:** `get_quote_proxy::get_quote_proxy` (`GET_QUOTE_PROXY_IX_DISCRIMINATOR` = 30). Instruction body matches `fill_bet` (`FillBetIxData`; `bet_id` unused). Per MM: 5 accounts (program, config, event state, market data, quote buffer).
+ * **Rust:** `get_quote_proxy::get_quote_proxy` (`GET_QUOTE_PROXY_IX_DISCRIMINATOR` = 200). Instruction body matches `fill_bet` (`FillBetIxData`; `bet_id` unused). Per MM: 5 accounts (program, config, event state, market data, quote buffer).
  *
  * @param quote - Same fields as {@link getFillBetIx} / {@link FillBetIxData}.
  * @param user - User pubkey passed to MM `get_quote` CPI (readonly; not required to sign).
@@ -2061,7 +2613,7 @@ export async function getGetQuoteProxyIx(
 /**
  * **`get_market_quotes_proxy`** — CPI each MM `get_quote` for every side in the market; return packed quotes via transaction return data.
  *
- * **Rust:** `get_market_quotes_proxy::get_market_quotes_proxy` (`GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR` = 32). Body matches `fill_bet` (`bet_id` / `side` unused). Return data is odds-only per side (`decodeMarketQuotesProxyReturnData` in `codex.ts`). `N` ≤ `min(20, maxProxyMmsForMarketQuotes(numSidesForMkt(mkt)))`.
+ * **Rust:** `get_market_quotes_proxy::get_market_quotes_proxy` (`GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR` = 202). Body matches `fill_bet` (`bet_id` / `side` unused). Return data is odds-only per side (`decodeMarketQuotesProxyReturnData` in `codex.ts`). `N` ≤ `min(20, maxProxyMmsForMarketQuotes(numSidesForMkt(mkt)))`.
  *
  * @param quote - Same fields as {@link getFillBetIx} / {@link FillBetIxData}.
  * @param user - User pubkey for MM CPI (readonly).
@@ -2111,7 +2663,7 @@ export async function getGetMarketQuotesProxyIx(
 /**
  * **`get_parlay_quote_proxy`** — CPI each MM `get_quote_parlay`, return `ProxyParlayQuoteData[]` via transaction return data.
  *
- * **Rust:** `get_parlay_quote_proxy::get_parlay_quote_proxy` (`GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR` = 31). Body matches `fill_parlay` (`FillParlayIxData`; `bet_id` unused). Per MM: `3 + 2 × num_legs` accounts.
+ * **Rust:** `get_parlay_quote_proxy::get_parlay_quote_proxy` (`GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR` = 201). Body matches `fill_parlay` (`FillParlayIxData`; `bet_id` unused). Per MM: `3 + 2 × num_legs` accounts.
  *
  * @param quote - Same fields as {@link getFillParlayIx} / {@link FillParlayIxData}.
  * @param user - User pubkey for MM CPI (readonly).
@@ -2169,20 +2721,21 @@ export async function getFillParlayIx(
    mmProgram: Address,
 ): Promise<Instruction> {
    validateFillParlayIxData(fill, 'fill');
-   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mint = fill.legs[0]!.marketId.mint;
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [betPda] = await getParlayBetPda(user, fill.betId);
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
    const liabilityAta = await getAta(
       mmEncumbrancePda,
-      MINT_ID,
+      mint,
       SPL_TOKEN_PROGRAM_ID,
       SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    );
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const accounts = [
       ws(feepayer),
       rs(user),
@@ -2190,7 +2743,7 @@ export async function getFillParlayIx(
       rw(betPda),
       rw(betAta),
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
       ro(SYSVAR_RENT_ID),
@@ -2380,12 +2933,13 @@ export async function getMmFillCashoutQuoteIx(
       ...params,
    };
    validateFillCashoutQuoteIxData(full);
+   const mint = params.marketId.mint;
    const ixData = encodeFillCashoutQuoteIxData(full);
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, params.marketId);
    const [eventStatePda] = await getEventStatePda(mmProgram, params.marketId.eventId);
    const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return {
       programAddress: mmProgram,
       accounts: [
@@ -2397,7 +2951,7 @@ export async function getMmFillCashoutQuoteIx(
          rw(mmQuoteBufferPda),
          rw(mmTokenAta),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: ixData,
@@ -2465,6 +3019,7 @@ export async function getMmFillCashoutParlayQuoteIx(
    mmProgram: Address,
    user: Address,
    paymentDest: Address,
+   mint: Address,
 ): Promise<Instruction> {
    const full: FillCashoutParlayQuoteIxData = {
       instructionDiscriminator: MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
@@ -2474,7 +3029,7 @@ export async function getMmFillCashoutParlayQuoteIx(
    const ixData = encodeFillCashoutParlayQuoteIxData(full);
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return {
       programAddress: mmProgram,
       accounts: [
@@ -2484,7 +3039,7 @@ export async function getMmFillCashoutParlayQuoteIx(
          rw(mmParlayQuoteBufferPda),
          rw(mmTokenAta),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: ixData,
@@ -2494,7 +3049,7 @@ export async function getMmFillCashoutParlayQuoteIx(
 /**
  * **`grade_bets`** — admin sets `BetResult` on many bet / cashout PDAs (no token movement).
  *
- * **Rust:** `aggregator::instructions::grade_bets::process` (`GRADE_BETS_IX_DISCRIMINATOR` = 20). Data: one `u8` result per bet account (`data.len() == bet_accounts.len()`).
+ * **Rust:** `aggregator::instructions::grade_bets::process` (`GRADE_BETS_IX_DISCRIMINATOR` = 100). Data: one `u8` result per bet account (`data.len() == bet_accounts.len()`).
  * Accepts single-bet PDAs (`BET_ACCOUNT_DISCRIMINATOR`) or cashout tickets (`CASHOUT_ACCOUNT_DISCRIMINATOR`).
  *
  * @param admin - **TS:** `Address` — config admin signer. **Rust:** `admin` (signer).
@@ -2522,7 +3077,7 @@ export async function getGradeBetsIx(
 /**
  * **`grade_parlay`** — operator or admin grades legs on one parlay / cashout-parlay (`255` = skip leg).
  *
- * **Rust:** `aggregator::instructions::grade_parlay::process` (`GRADE_PARLAY_IX_DISCRIMINATOR` = 21).
+ * **Rust:** `aggregator::instructions::grade_parlay::process` (`GRADE_PARLAY_IX_DISCRIMINATOR` = 101).
  * Data: grade mask for the parlay account.
  */
 export async function getGradeParlayIx(
@@ -2542,7 +3097,7 @@ export async function getGradeParlayIx(
 /**
  * **`settle_bet`** — pay winner, release encumbrances to fillers, close bet / cashout PDA + ATA to feepayer (must not be `Pending` or `CashedOut`).
  *
- * **Rust:** `aggregator::instructions::settle_bet::process` (`SETTLE_BET_IX_DISCRIMINATOR` = 25). Instruction data: none after router discriminator.
+ * **Rust:** `aggregator::instructions::settle_bet::process` (`SETTLE_BET_IX_DISCRIMINATOR` = 110). Instruction data: none after router discriminator.
  * For cashout tickets use {@link getSettleCashoutIx}.
  *
  * @param bet - **TS:** {@link BetAccountData} — decoded on-chain bet layout (owner, feepayer, fillers, result, etc.). **Rust:** `BetAccountData` read from `bet_account` account.
@@ -2562,12 +3117,16 @@ export async function getSettleBetIx(
    if (bet.result === BetResult.CashedOut) {
       throw new Error('bet.result CashedOut is not settleable');
    }
-   if (bet.freebetId !== 0) {
+   if (bet.promoType === PROMO_FREEBET) {
       throw new Error('use getSettleFreebetIx for freebet tickets');
    }
+   if (bet.promoType === PROMO_BOOST) {
+      throw new Error('use getSettleBoostedBetIx for boosted tickets');
+   }
+   const mint = bet.marketId.mint;
    const user = bet.owner;
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    const [cashoutEscrowPda] = await getCashoutEscrowPda(user, bet.betId);
    const baseAccounts = [
@@ -2578,7 +3137,7 @@ export async function getSettleBetIx(
       ro(user),
       rw(userAta),
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(cashoutEscrowPda),
       ro(SYSTEM_PROGRAM_ID),
@@ -2588,7 +3147,7 @@ export async function getSettleBetIx(
       throw new RangeError(`bet.fillers.length must equal bet.numFillers (${bet.numFillers})`);
    }
    for (const filler of bet.fillers) {
-      const row = await settleFillerAccountRow(filler, bet.marketId.eventId);
+      const row = await settleFillerAccountRow(filler, bet.marketId.eventId, bet.marketId.operator, mint);
       const nettingRole = filler.isPotentiallyNetted ? rw(row[4]!) : ro(row[4]!);
       fillerAccounts.push(ro(row[0]!), ro(row[1]!), rw(row[2]!), rw(row[3]!), nettingRole);
    }
@@ -2602,7 +3161,7 @@ export async function getSettleBetIx(
 /**
  * **`settle_parlay`** — settle a graded parlay bet (no payload after router discriminator).
  *
- * **Rust:** `aggregator::instructions::settle_parlay::process` (`SETTLE_PARLAY_IX_DISCRIMINATOR` = 26). Instruction data: none after router discriminator.
+ * **Rust:** `aggregator::instructions::settle_parlay::process` (`SETTLE_PARLAY_IX_DISCRIMINATOR` = 111). Instruction data: none after router discriminator.
  * For cashout-parlay tickets use {@link getSettleCashoutParlayIx}.
  *
  * @param parlay - **TS:** {@link ParlayBetAccountData}. **Rust:** `ParlayBetAccountData` from parlay bet PDA.
@@ -2622,17 +3181,21 @@ export async function getSettleParlayIx(
    if (parlay.result === BetResult.CashedOut) {
       throw new Error('parlay.result CashedOut is not settleable');
    }
-   if (parlay.freebetId !== 0) {
+   if (parlay.promoType === PROMO_FREEBET) {
       throw new Error('use getSettleFreebetParlayIx for freebet parlays');
    }
+   if (parlay.promoType === PROMO_BOOST) {
+      throw new Error('use getSettleBoostedParlayIx for boosted parlays');
+   }
+   const mint = parlay.legs[0]!.marketId.mint;
    const user = parlay.owner;
-   const betAta = await getAta(betPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
-   const userAta = await getAta(user, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const betAta = await getAta(betPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const userAta = await getAta(user, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
 
    const [mmConfigPda] = await getMmConfigPda(parlay.fillerAddress);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(parlay.fillerAddress);
-   const mmLiabilityTokenAccount = await getAta(mmEncumbrancePda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(parlay.fillerAddress, mint);
+   const mmLiabilityTokenAccount = await getAta(mmEncumbrancePda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [cashoutEscrowPda] = await getCashoutEscrowPda(user, parlay.betId);
    const accounts = [
       rs(signer),
@@ -2642,7 +3205,7 @@ export async function getSettleParlayIx(
       ro(user),
       rw(userAta),
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(parlay.fillerAddress),
       ro(mmConfigPda),
@@ -2668,7 +3231,10 @@ export async function getSettleFreebetIx(
    bet: BetAccountData,
    issuerAuth: Address,
 ): Promise<Instruction> {
-   requireFreebetId(bet.freebetId);
+   if (bet.promoType !== PROMO_FREEBET) {
+      throw new Error('bet is not a freebet ticket');
+   }
+   const mint = bet.marketId.mint;
    validatePositiveU64(bet.betId, 'bet.betId');
    if (bet.result === BetResult.Pending) {
       throw new Error('bet.result must be not Pending');
@@ -2677,11 +3243,11 @@ export async function getSettleFreebetIx(
       throw new Error('bet.result CashedOut is not settleable');
    }
    const user = bet.owner;
-   const betAta = await getAta(betPda);
-   const userAta = await getAta(user);
+   const betAta = await getAta(betPda, mint);
+   const userAta = await getAta(user, mint);
    const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
-   const issuerAta = await getAta(issuerPda);
-   const [freebetPda] = await getFreebetPda(issuerAuth, bet.freebetId);
+   const issuerAta = await getAta(issuerPda, mint);
+   const freebetPda = bet.promoAccount;
    const [configPda] = await getConfigPda();
    const baseAccounts = [
       rs(signer),
@@ -2695,7 +3261,7 @@ export async function getSettleFreebetIx(
       rw(issuerAta),
       rw(freebetPda),
       ro(configPda),
-      ro(MINT_ID),
+      ro(mint),
       ro(SPL_TOKEN_PROGRAM_ID),
       ro(CLOCK_ID),
    ];
@@ -2704,7 +3270,7 @@ export async function getSettleFreebetIx(
       throw new RangeError(`bet.fillers.length must equal bet.numFillers (${bet.numFillers})`);
    }
    for (const filler of bet.fillers) {
-      const row = await settleFillerAccountRow(filler, bet.marketId.eventId);
+      const row = await settleFillerAccountRow(filler, bet.marketId.eventId, bet.marketId.operator, mint);
       const nettingRole = filler.isPotentiallyNetted ? rw(row[4]!) : ro(row[4]!);
       fillerAccounts.push(ro(row[0]!), ro(row[1]!), rw(row[2]!), rw(row[3]!), nettingRole);
    }
@@ -2725,7 +3291,10 @@ export async function getSettleFreebetParlayIx(
    parlay: ParlayBetAccountData,
    issuerAuth: Address,
 ): Promise<Instruction> {
-   requireFreebetId(parlay.freebetId);
+   if (parlay.promoType !== PROMO_FREEBET) {
+      throw new Error('parlay is not a freebet ticket');
+   }
+   const mint = parlay.legs[0]!.marketId.mint;
    validatePositiveU64(parlay.betId, 'parlay.betId');
    if (parlay.result === BetResult.Pending) {
       throw new Error('parlay.result must be not Pending');
@@ -2734,15 +3303,15 @@ export async function getSettleFreebetParlayIx(
       throw new Error('parlay.result CashedOut is not settleable');
    }
    const user = parlay.owner;
-   const betAta = await getAta(betPda);
-   const userAta = await getAta(user);
+   const betAta = await getAta(betPda, mint);
+   const userAta = await getAta(user, mint);
    const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
-   const issuerAta = await getAta(issuerPda);
-   const [freebetPda] = await getFreebetPda(issuerAuth, parlay.freebetId);
+   const issuerAta = await getAta(issuerPda, mint);
+   const freebetPda = parlay.promoAccount;
    const [configPda] = await getConfigPda();
    const [mmConfigPda] = await getMmConfigPda(parlay.fillerAddress);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(parlay.fillerAddress);
-   const mmLiabilityAta = await getAta(mmEncumbrancePda);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(parlay.fillerAddress, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [
@@ -2757,7 +3326,7 @@ export async function getSettleFreebetParlayIx(
          rw(issuerAta),
          rw(freebetPda),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(CLOCK_ID),
          ro(parlay.fillerAddress),
@@ -2770,9 +3339,124 @@ export async function getSettleFreebetParlayIx(
 }
 
 /**
+ * **`settle_boosted_bet`** — normal stake and market-maker profit, then the issuer ATA pays the boost top-up.
+ */
+export async function getSettleBoostedBetIx(
+   signer: Address,
+   betPda: Address,
+   bet: BetAccountData,
+   issuerAuth: Address,
+): Promise<Instruction> {
+   if (bet.promoType !== PROMO_BOOST) {
+      throw new Error('bet is not a boost ticket');
+   }
+   const mint = bet.marketId.mint;
+   validatePositiveU64(bet.betId, 'bet.betId');
+   if (bet.result === BetResult.Pending) {
+      throw new Error('bet.result must be not Pending');
+   }
+   if (bet.result === BetResult.CashedOut) {
+      throw new Error('bet.result CashedOut is not settleable');
+   }
+   const user = bet.owner;
+   const betAta = await getAta(betPda, mint);
+   const userAta = await getAta(user, mint);
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, mint);
+   const boostPda = bet.promoAccount;
+   const [configPda] = await getConfigPda();
+   const baseAccounts = [
+      rs(signer),
+      rw(betPda),
+      rw(betAta),
+      rw(bet.feepayer),
+      ro(user),
+      rw(userAta),
+      rw(issuerAuth),
+      rw(issuerPda),
+      rw(issuerAta),
+      rw(boostPda),
+      ro(configPda),
+      ro(mint),
+      ro(SPL_TOKEN_PROGRAM_ID),
+      ro(CLOCK_ID),
+   ];
+   const fillerAccounts: { address: Address; role: AccountRole }[] = [];
+   if (bet.fillers.length === 0 || bet.fillers.length !== bet.numFillers) {
+      throw new RangeError(`bet.fillers.length must equal bet.numFillers (${bet.numFillers})`);
+   }
+   for (const filler of bet.fillers) {
+      const row = await settleFillerAccountRow(filler, bet.marketId.eventId, bet.marketId.operator, mint);
+      const nettingRole = filler.isPotentiallyNetted ? rw(row[4]!) : ro(row[4]!);
+      fillerAccounts.push(ro(row[0]!), ro(row[1]!), rw(row[2]!), rw(row[3]!), nettingRole);
+   }
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [...baseAccounts, ...fillerAccounts],
+      data: new Uint8Array([SETTLE_BOOSTED_BET_IX_DISCRIMINATOR]),
+   };
+}
+
+/**
+ * **`settle_boosted_parlay`** — normal parlay settle, then the issuer ATA pays the boost top-up.
+ */
+export async function getSettleBoostedParlayIx(
+   signer: Address,
+   betPda: Address,
+   parlay: ParlayBetAccountData,
+   issuerAuth: Address,
+): Promise<Instruction> {
+   if (parlay.promoType !== PROMO_BOOST) {
+      throw new Error('parlay is not a boost ticket');
+   }
+   const mint = parlay.legs[0]!.marketId.mint;
+   validatePositiveU64(parlay.betId, 'parlay.betId');
+   if (parlay.result === BetResult.Pending) {
+      throw new Error('parlay.result must be not Pending');
+   }
+   if (parlay.result === BetResult.CashedOut) {
+      throw new Error('parlay.result CashedOut is not settleable');
+   }
+   const user = parlay.owner;
+   const betAta = await getAta(betPda, mint);
+   const userAta = await getAta(user, mint);
+   const [issuerPda] = await getFreebetIssuerPda(issuerAuth);
+   const issuerAta = await getAta(issuerPda, mint);
+   const boostPda = parlay.promoAccount;
+   const [configPda] = await getConfigPda();
+   const [mmConfigPda] = await getMmConfigPda(parlay.fillerAddress);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(parlay.fillerAddress, mint);
+   const mmLiabilityAta = await getAta(mmEncumbrancePda, mint);
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [
+         rs(signer),
+         rw(betPda),
+         rw(betAta),
+         rw(parlay.feepayer),
+         ro(user),
+         rw(userAta),
+         rw(issuerAuth),
+         rw(issuerPda),
+         rw(issuerAta),
+         rw(boostPda),
+         ro(configPda),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(CLOCK_ID),
+         ro(parlay.fillerAddress),
+         ro(mmConfigPda),
+         rw(mmEncumbrancePda),
+         rw(mmLiabilityAta),
+      ],
+      data: new Uint8Array([SETTLE_BOOSTED_PARLAY_IX_DISCRIMINATOR]),
+   };
+}
+
+/**
  * **`create_netting_account`** — MM admin creates per-event netting PDA under the aggregator for liability netting.
  *
- * **Rust:** `aggregator::instructions::create_netting_account::process` (`CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 40). Data: `EventId` wire bytes only (after discriminator).
+ * **Rust:** `aggregator::instructions::create_netting_account::process` (`CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 130). Data: `EventId` wire bytes only (after discriminator).
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `EventId` decoded from instruction data.
  * @param mmAdmin - **TS:** `Address` — must match MM config admin. **Rust:** `mm_admin` (writable signer).
@@ -2781,23 +3465,25 @@ export async function getSettleFreebetParlayIx(
  */
 export async function getCreateNettingAccountIx(
    eventId: EventId,
+   operator: Address,
+   mint: Address,
    mmAdmin: Address,
    mmProgram: Address,
 ): Promise<Instruction> {
    validateEventId(eventId, 'eventId');
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [nettingPda] = await getNettingPda(mmProgram, eventId);
+   const [nettingPda] = await getNettingPda(mmProgram, eventId, operator, mint);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [ws(mmAdmin), ro(mmProgram), ro(mmConfigPda), rw(nettingPda), ro(SYSVAR_RENT_ID), ro(SYSTEM_PROGRAM_ID)],
-      data: encodeAggregatorInstructionData({ kind: 'createNettingAccount', eventId }),
+      data: encodeAggregatorInstructionData({ kind: 'createNettingAccount', eventId, operator, mint }),
    };
 }
 
 /**
  * **`add_line_to_netting_account`** — MM admin adds `(event_id, period, mkt)` line to an existing netting account.
  *
- * **Rust:** `aggregator::instructions::add_line_to_netting_account::process` (`ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 41). Payload: `EventId` + `period: u8` + `mkt: u16` (`AddLineToLiabilityNettingIxData`).
+ * **Rust:** `aggregator::instructions::add_line_to_netting_account::process` (`ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 131). Payload: `EventId` + `period: u8` + `mkt: u16` (`AddLineToLiabilityNettingIxData`).
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `event_id` in parsed ix data.
  * @param period - **TS:** `number` — `u8` market period. **Rust:** `u8` / `period`.
@@ -2808,6 +3494,8 @@ export async function getCreateNettingAccountIx(
  */
 export async function getAddLineToNettingAccountIx(
    eventId: EventId,
+   operator: Address,
+   mint: Address,
    period: number,
    mkt: number,
    admin: Address,
@@ -2817,13 +3505,13 @@ export async function getAddLineToNettingAccountIx(
    validateU8(period, 'period');
    validateU16(mkt, 'mkt');
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [nettingPda] = await getNettingPda(mmProgram, eventId);
+   const [nettingPda] = await getNettingPda(mmProgram, eventId, operator, mint);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [ws(admin), ro(mmProgram), ro(mmConfigPda), rw(nettingPda), ro(SYSVAR_RENT_ID), ro(SYSTEM_PROGRAM_ID)],
       data: encodeAggregatorInstructionData({
          kind: 'addLineToNettingAccount',
-         data: { eventId, period, mkt },
+         data: { eventId, operator, mint, period, mkt },
       }),
    };
 }
@@ -2831,7 +3519,7 @@ export async function getAddLineToNettingAccountIx(
 /**
  * **`remove_line_from_netting_account`** — MM admin removes a netting line keyed by `(event_id, period, mkt)`.
  *
- * **Rust:** `aggregator::instructions::remove_line_from_netting_account::process` (`REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 42). Same payload shape as add-line.
+ * **Rust:** `aggregator::instructions::remove_line_from_netting_account::process` (`REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 132). Same payload shape as add-line.
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `event_id`.
  * @param period - **TS:** `number` — `u8`. **Rust:** `u8`.
@@ -2842,6 +3530,8 @@ export async function getAddLineToNettingAccountIx(
  */
 export async function getRemoveLineFromNettingAccountIx(
    eventId: EventId,
+   operator: Address,
+   mint: Address,
    period: number,
    mkt: number,
    admin: Address,
@@ -2851,13 +3541,13 @@ export async function getRemoveLineFromNettingAccountIx(
    validateU8(period, 'period');
    validateU16(mkt, 'mkt');
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [nettingPda] = await getNettingPda(mmProgram, eventId);
+   const [nettingPda] = await getNettingPda(mmProgram, eventId, operator, mint);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [rs(admin), ro(mmProgram), ro(mmConfigPda), rw(nettingPda)],
       data: encodeAggregatorInstructionData({
          kind: 'removeLineFromNettingAccount',
-         data: { eventId, period, mkt },
+         data: { eventId, operator, mint, period, mkt },
       }),
    };
 }
@@ -2865,7 +3555,7 @@ export async function getRemoveLineFromNettingAccountIx(
 /**
  * **`close_netting_account`** — MM admin closes netting PDA for an event and returns rent (requires `EventId` in data).
  *
- * **Rust:** `aggregator::instructions::close_netting_account::process` (`CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 43). Data: `EventId` wire bytes after discriminator.
+ * **Rust:** `aggregator::instructions::close_netting_account::process` (`CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR` = 133). Data: `EventId` wire bytes after discriminator.
  *
  * @param eventId - **TS:** {@link EventId}. **Rust:** `EventId` from instruction data.
  * @param admin - **TS:** `Address` — MM admin (writable signer). **Rust:** `admin`.
@@ -2874,23 +3564,25 @@ export async function getRemoveLineFromNettingAccountIx(
  */
 export async function getCloseNettingAccountIx(
    eventId: EventId,
+   operator: Address,
+   mint: Address,
    admin: Address,
    mmProgram: Address,
 ): Promise<Instruction> {
    validateEventId(eventId, 'eventId');
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [nettingPda] = await getNettingPda(mmProgram, eventId);
+   const [nettingPda] = await getNettingPda(mmProgram, eventId, operator, mint);
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [ws(admin), ro(mmProgram), ro(mmConfigPda), rw(nettingPda), ro(SYSTEM_PROGRAM_ID)],
-      data: encodeAggregatorInstructionData({ kind: 'closeNettingAccount', eventId }),
+      data: encodeAggregatorInstructionData({ kind: 'closeNettingAccount', eventId, operator, mint }),
    };
 }
 
 /**
  * **`withdraw_from_liability_account`** — MM admin pulls free liability vault balance to the MM collateral token account (subject to encumbrance accounting on-chain).
  *
- * **Rust:** `aggregator::instructions::withdraw_from_liability_account::process` (`WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR` = 50). Data: `amount: u64` (LE) after discriminator.
+ * **Rust:** `aggregator::instructions::withdraw_from_liability_account::process` (`WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR` = 150). Data: `amount: u64` (LE) after discriminator.
  *
  * @param amount - **TS:** `bigint` — must fit `u64` and be > 0 where enforced. **Rust:** `u64` read from ix data.
  * @param mmAdmin - **TS:** `Address` — MM admin signer. **Rust:** `mm_admin` (writable signer).
@@ -2901,17 +3593,18 @@ export async function getWithdrawFromLiabilityAccountIx(
    amount: bigint,
    mmAdmin: Address,
    mmProgram: Address,
+   mint: Address,
 ): Promise<Instruction> {
    validatePositiveU64(amount, 'amount');
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram);
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
    const mmLiabilityAta = await getAta(
       mmEncumbrancePda,
-      MINT_ID,
+      mint,
       SPL_TOKEN_PROGRAM_ID,
       SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    );
-   const mmTokenAta = await getAta(mmConfigPda, MINT_ID, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
+   const mmTokenAta = await getAta(mmConfigPda, mint, SPL_TOKEN_PROGRAM_ID, SPL_ASSOCIATED_TOKEN_PROGRAM_ID);
    const [configPda] = await getConfigPda();
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
@@ -2923,7 +3616,7 @@ export async function getWithdrawFromLiabilityAccountIx(
          rw(mmLiabilityAta),
          rw(mmTokenAta),
          ro(configPda),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: encodeAggregatorInstructionData({
@@ -2965,12 +3658,18 @@ export type AggregatorInstructionInput =
    | { kind: 'initProgram'; admin: Address }
    | { kind: 'changeConfigStatus'; status: 0 | 1; admin: Address }
    | { kind: 'registerMm'; mmAdmin: Address; mmProgram: Address }
-   | { kind: 'deregisterMm'; aggregatorAdmin: Address; mmAdmin: Address; mmProgram: Address }
+   | { kind: 'deregisterMm'; aggregatorAdmin: Address; mmAdmin: Address; mmProgram: Address; mint: Address }
+   | { kind: 'initMmMintVault'; mmAdmin: Address; mmProgram: Address; mint: Address }
+   | { kind: 'closeMmMintVault'; mmAdmin: Address; mmProgram: Address; mint: Address }
    | { kind: 'initFreebetIssuer'; auth: Address }
    | { kind: 'removeFreebetIssuer'; auth: Address }
-   | { kind: 'withdrawFreebetFunds'; auth: Address; amount: bigint }
-   | { kind: 'issueFreebet'; auth: Address; user: Address; data: IssueFreebetIxData }
-   | { kind: 'revokeFreebet'; auth: Address; freebetId: number }
+   | { kind: 'createPromoIssuerAta'; auth: Address; mint: Address }
+   | { kind: 'closePromoIssuerAta'; auth: Address; mint: Address }
+   | { kind: 'withdrawFreebetFunds'; auth: Address; mint: Address; amount: bigint }
+   | { kind: 'issueFreebet'; auth: Address; user: Address; data: IssueFreebetIxData; mint: Address }
+   | { kind: 'revokeFreebet'; auth: Address; mint: Address; freebetId: number }
+   | { kind: 'issueBoost'; auth: Address; user: Address; data: IssueBoostIxData; mint: Address }
+   | { kind: 'revokeBoost'; auth: Address; mint: Address; boostId: number }
    | {
         kind: 'fillBet';
         fill: FillBetIxData;
@@ -3040,6 +3739,44 @@ export type AggregatorInstructionInput =
         mmProgram: Address;
      }
    | {
+        kind: 'boostedFillBet';
+        fill: FillBetIxData;
+        feepayer: Address;
+        user: Address;
+        issuerAuth: Address;
+        boostId: number;
+        mmPrograms: readonly Address[];
+        hasActiveNetting: boolean;
+     }
+   | {
+        kind: 'boostedFillParlay';
+        fill: FillParlayIxData;
+        feepayer: Address;
+        user: Address;
+        issuerAuth: Address;
+        boostId: number;
+        mmProgram: Address;
+     }
+   | {
+        kind: 'boostedFillRfqBet';
+        fill: FillRfqBetIxData;
+        feepayer: Address;
+        user: Address;
+        issuerAuth: Address;
+        boostId: number;
+        mmProgram: Address;
+        hasActiveNetting: boolean;
+     }
+   | {
+        kind: 'boostedFillRfqParlay';
+        fill: FillRfqParlayIxData;
+        feepayer: Address;
+        user: Address;
+        issuerAuth: Address;
+        boostId: number;
+        mmProgram: Address;
+     }
+   | {
         kind: 'fillCashout';
         fill: FillCashoutIxData;
         feepayer: Address;
@@ -3077,8 +3814,9 @@ export type AggregatorInstructionInput =
         feepayer: Address;
         escrow: CashoutEscrowAccountData;
         ticket: Pick<BetAccountData, 'feepayer'> | Pick<ParlayBetAccountData, 'feepayer'>;
+        mint: Address;
      }
-   | { kind: 'revertCashout'; feepayer: Address; escrow: CashoutEscrowAccountData }
+   | { kind: 'revertCashout'; feepayer: Address; escrow: CashoutEscrowAccountData; mint: Address }
    | {
         kind: 'getMarketQuotesProxy';
         quote: FillBetIxData;
@@ -3151,10 +3889,26 @@ export type AggregatorInstructionInput =
         betPda: Address;
         issuerAuth: Address;
      }
-   | { kind: 'createNettingAccount'; eventId: EventId; mmAdmin: Address; mmProgram: Address }
+   | {
+        kind: 'settleBoostedBet';
+        bet: BetAccountData;
+        signer: Address;
+        betPda: Address;
+        issuerAuth: Address;
+     }
+   | {
+        kind: 'settleBoostedParlay';
+        parlay: ParlayBetAccountData;
+        signer: Address;
+        betPda: Address;
+        issuerAuth: Address;
+     }
+   | { kind: 'createNettingAccount'; eventId: EventId; operator: Address; mint: Address; mmAdmin: Address; mmProgram: Address }
    | {
         kind: 'addLineToNettingAccount';
         eventId: EventId;
+        operator: Address;
+        mint: Address;
         period: number;
         mkt: number;
         admin: Address;
@@ -3163,13 +3917,15 @@ export type AggregatorInstructionInput =
    | {
         kind: 'removeLineFromNettingAccount';
         eventId: EventId;
+        operator: Address;
+        mint: Address;
         period: number;
         mkt: number;
         admin: Address;
         mmProgram: Address;
      }
-   | { kind: 'closeNettingAccount'; eventId: EventId; admin: Address; mmProgram: Address }
-   | { kind: 'withdrawFromLiabilityAccount'; amount: bigint; mmAdmin: Address; mmProgram: Address }
+   | { kind: 'closeNettingAccount'; eventId: EventId; operator: Address; mint: Address; admin: Address; mmProgram: Address }
+   | { kind: 'withdrawFromLiabilityAccount'; amount: bigint; mmAdmin: Address; mmProgram: Address; mint: Address }
    | { kind: 'writeArbitraryData'; admin: Address; account: Address; data: Uint8Array }
    | { kind: 'forceClosePda'; admin: Address; pda: Address };
 
@@ -3192,17 +3948,29 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
       case 'registerMm':
          return getRegisterMmIx(input.mmAdmin, input.mmProgram);
       case 'deregisterMm':
-         return getDeregisterMmIx(input.aggregatorAdmin, input.mmAdmin, input.mmProgram);
+         return getDeregisterMmIx(input.aggregatorAdmin, input.mmAdmin, input.mmProgram, input.mint);
+      case 'initMmMintVault':
+         return getInitMmMintVaultIx(input.mmAdmin, input.mmProgram, input.mint);
+      case 'closeMmMintVault':
+         return getCloseMmMintVaultIx(input.mmAdmin, input.mmProgram, input.mint);
       case 'initFreebetIssuer':
          return getInitFreebetIssuerIx(input.auth);
       case 'removeFreebetIssuer':
          return getRemoveFreebetIssuerIx(input.auth);
+      case 'createPromoIssuerAta':
+         return getCreatePromoIssuerAtaIx(input.auth, input.mint);
+      case 'closePromoIssuerAta':
+         return getClosePromoIssuerAtaIx(input.auth, input.mint);
       case 'withdrawFreebetFunds':
-         return getWithdrawFreebetFundsIx(input.auth, input.amount);
+         return getWithdrawFreebetFundsIx(input.auth, input.mint, input.amount);
       case 'issueFreebet':
-         return getIssueFreebetIx(input.auth, input.user, input.data);
+         return getIssueFreebetIx(input.auth, input.user, input.data, input.mint);
       case 'revokeFreebet':
-         return getRevokeFreebetIx(input.auth, input.freebetId);
+         return getRevokeFreebetIx(input.auth, input.mint, input.freebetId);
+      case 'issueBoost':
+         return getIssueBoostIx(input.auth, input.user, input.data, input.mint);
+      case 'revokeBoost':
+         return getRevokeBoostIx(input.auth, input.mint, input.boostId);
       case 'fillBet':
          return getFillBetIx(
             input.fill,
@@ -3261,6 +4029,44 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
             input.freebetId,
             input.mmProgram,
          );
+      case 'boostedFillBet':
+         return getBoostedFillBetIx(
+            input.fill,
+            input.feepayer,
+            input.user,
+            input.issuerAuth,
+            input.boostId,
+            input.mmPrograms,
+            input.hasActiveNetting,
+         );
+      case 'boostedFillParlay':
+         return getBoostedFillParlayIx(
+            input.fill,
+            input.feepayer,
+            input.user,
+            input.issuerAuth,
+            input.boostId,
+            input.mmProgram,
+         );
+      case 'boostedFillRfqBet':
+         return getBoostedFillRfqBetIx(
+            input.fill,
+            input.feepayer,
+            input.user,
+            input.issuerAuth,
+            input.boostId,
+            input.mmProgram,
+            input.hasActiveNetting,
+         );
+      case 'boostedFillRfqParlay':
+         return getBoostedFillRfqParlayIx(
+            input.fill,
+            input.feepayer,
+            input.user,
+            input.issuerAuth,
+            input.boostId,
+            input.mmProgram,
+         );
       case 'fillCashout':
          return getFillCashoutIx(
             input.fill,
@@ -3295,9 +4101,9 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
             input.fillingMm,
          );
       case 'claimCashoutEscrow':
-         return getClaimCashoutEscrowIx(input.feepayer, input.escrow, input.ticket);
+         return getClaimCashoutEscrowIx(input.feepayer, input.escrow, input.ticket, input.mint);
       case 'revertCashout':
-         return getRevertCashoutIx(input.feepayer, input.escrow);
+         return getRevertCashoutIx(input.feepayer, input.escrow, input.mint);
       case 'getQuoteProxy':
          return getGetQuoteProxyIx(input.quote, input.user, input.mmPrograms);
       case 'getParlayQuoteProxy':
@@ -3333,11 +4139,17 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
          return getSettleFreebetIx(input.signer, input.betPda, input.bet, input.issuerAuth);
       case 'settleFreebetParlay':
          return getSettleFreebetParlayIx(input.signer, input.betPda, input.parlay, input.issuerAuth);
+      case 'settleBoostedBet':
+         return getSettleBoostedBetIx(input.signer, input.betPda, input.bet, input.issuerAuth);
+      case 'settleBoostedParlay':
+         return getSettleBoostedParlayIx(input.signer, input.betPda, input.parlay, input.issuerAuth);
       case 'createNettingAccount':
-         return getCreateNettingAccountIx(input.eventId, input.mmAdmin, input.mmProgram);
+         return getCreateNettingAccountIx(input.eventId, input.operator, input.mint, input.mmAdmin, input.mmProgram);
       case 'addLineToNettingAccount':
          return getAddLineToNettingAccountIx(
             input.eventId,
+            input.operator,
+            input.mint,
             input.period,
             input.mkt,
             input.admin,
@@ -3346,15 +4158,17 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
       case 'removeLineFromNettingAccount':
          return getRemoveLineFromNettingAccountIx(
             input.eventId,
+            input.operator,
+            input.mint,
             input.period,
             input.mkt,
             input.admin,
             input.mmProgram,
          );
       case 'closeNettingAccount':
-         return getCloseNettingAccountIx(input.eventId, input.admin, input.mmProgram);
+         return getCloseNettingAccountIx(input.eventId, input.operator, input.mint, input.admin, input.mmProgram);
       case 'withdrawFromLiabilityAccount':
-         return getWithdrawFromLiabilityAccountIx(input.amount, input.mmAdmin, input.mmProgram);
+         return getWithdrawFromLiabilityAccountIx(input.amount, input.mmAdmin, input.mmProgram, input.mint);
       case 'writeArbitraryData':
          return getWriteArbitraryDataIx(input.admin, input.account, input.data);
       case 'forceClosePda':

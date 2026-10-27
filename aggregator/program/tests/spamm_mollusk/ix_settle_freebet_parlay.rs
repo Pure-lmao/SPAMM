@@ -133,6 +133,6 @@ fn settle_freebet_parlay_cancelled_reinstates() {
    assert_eq!(decode_issuer(&env).open_count, 1);
    assert!(matches!(
       decode_freebet(&env, FREEBET_ID_BASIC).state,
-      spamm_aggregator::state::FreebetState::Available
+      spamm_aggregator::state::PromoState::Available
    ));
 }

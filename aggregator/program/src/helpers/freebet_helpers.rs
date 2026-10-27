@@ -18,10 +18,10 @@ use crate::{
    helpers::close_pda_return_rent,
    readers::{read_address_ref_unchecked, read_u8_unchecked, read_u32_le_unchecked},
    state::{
-      bump_open_count, freebet_account_len, FreebetAccountData, FreebetState,
-      FREEBET_ISSUER_AUTH_OFFSET, FREEBET_ISSUER_BUMP_OFFSET,
-      FREEBET_ISSUER_DISCRIMINATOR, FREEBET_ISSUER_LEN, FREEBET_ISSUER_OPEN_COUNT_OFFSET,
-      FREEBET_ISSUER_SEED, account_bet::BetResult,
+      bump_open_count, freebet_account_len, FreebetAccountData, PromoState,
+      PROMO_ISSUER_AUTH_OFFSET, PROMO_ISSUER_BUMP_OFFSET,
+      PROMO_ISSUER_DISCRIMINATOR, PROMO_ISSUER_LEN, PROMO_ISSUER_OPEN_COUNT_OFFSET,
+      PROMO_ISSUER_SEED, account_bet::BetResult,
    },
 };
 
@@ -37,18 +37,18 @@ pub fn verify_freebet_issuer_pda(
       log!("freebet: issuer pda owner");
       return Err(ProgramError::InvalidAccountOwner);
    }
-   if unlikely(issuer_pda.data_len() != FREEBET_ISSUER_LEN) {
+   if unlikely(issuer_pda.data_len() != PROMO_ISSUER_LEN) {
       log!("freebet: issuer pda len");
       return Err(ProgramError::InvalidAccountData);
    }
    let ptr = issuer_pda.data_ptr();
    let disc = unsafe { read_u8_unchecked(ptr, 0) };
-   if unlikely(disc != FREEBET_ISSUER_DISCRIMINATOR) {
+   if unlikely(disc != PROMO_ISSUER_DISCRIMINATOR) {
       log!("freebet: issuer disc");
       return Err(ProgramError::InvalidAccountData);
    }
-   let bump = unsafe { read_u8_unchecked(ptr, FREEBET_ISSUER_BUMP_OFFSET) };
-   let stored_auth = unsafe { read_address_ref_unchecked(ptr, FREEBET_ISSUER_AUTH_OFFSET) };
+   let bump = unsafe { read_u8_unchecked(ptr, PROMO_ISSUER_BUMP_OFFSET) };
+   let stored_auth = unsafe { read_address_ref_unchecked(ptr, PROMO_ISSUER_AUTH_OFFSET) };
    if unlikely(!address_eq(stored_auth, auth)) {
       log!("freebet: issuer auth");
       return Err(ProgramError::InvalidAccountData);
@@ -64,7 +64,7 @@ pub fn verify_freebet_issuer_pda(
 /// Caller must have already passed `verify_freebet_issuer_pda` (checks `data_len`).
 #[inline(always)]
 pub fn get_issuer_open_count(issuer_pda: &AccountView) -> u32 {
-   unsafe { read_u32_le_unchecked(issuer_pda.data_ptr(), FREEBET_ISSUER_OPEN_COUNT_OFFSET) }
+   unsafe { read_u32_le_unchecked(issuer_pda.data_ptr(), PROMO_ISSUER_OPEN_COUNT_OFFSET) }
 }
 
 #[inline(always)]
@@ -73,7 +73,7 @@ pub fn issuer_signer_seeds<'a>(
    bump: &'a [u8; 1],
 ) -> [Seed<'a>; 3] {
    [
-      Seed::from(FREEBET_ISSUER_SEED),
+      Seed::from(PROMO_ISSUER_SEED),
       Seed::from(auth.as_ref()),
       Seed::from(bump.as_slice()),
    ]
@@ -103,6 +103,7 @@ pub fn transfer_stake(
 pub fn verify_freebet_pda(
    freebet_pda: &AccountView,
    issuer_auth: &Address,
+   mint: &Address,
    freebet_id: u32,
    bump: u8,
 ) -> ProgramResult {
@@ -111,7 +112,7 @@ pub fn verify_freebet_pda(
       return Err(ProgramError::InvalidAccountOwner);
    }
 
-   let expected = derive_freebet_pda(issuer_auth, freebet_id, bump);
+   let expected = derive_freebet_pda(issuer_auth, mint, freebet_id, bump);
    if unlikely(!address_eq(freebet_pda.address(), &expected)) {
       log!("freebet: pda seeds");
       return Err(ProgramError::InvalidSeeds);
@@ -134,7 +135,7 @@ pub fn decode_and_verify_freebet_for_ix(
       log!("freebet: id mismatch");
       return Err(SpammError::InvalidFreebet.into());
    }
-   verify_freebet_pda(freebet_pda, &fb.issuer_auth, fb.freebet_id, fb.bump)?;
+   verify_freebet_pda(freebet_pda, &fb.issuer_auth, &fb.mint, fb.freebet_id, fb.bump)?;
    let issuer_bump = verify_freebet_issuer_pda(issuer_pda, &fb.issuer_auth)?;
    Ok((fb, issuer_bump))
 }
@@ -145,11 +146,12 @@ pub fn decode_and_verify_freebet_for_ix(
 pub fn verify_freebet_for_fill(
    fb: &FreebetAccountData,
    user: &Address,
+   mint: &Address,
    amount: u64,
    num_legs: u8,
    now: u32,
 ) -> ProgramResult {
-   if unlikely(fb.state != FreebetState::Available) {
+   if unlikely(fb.state != PromoState::Available) {
       log!("freebet: not available");
       return Err(SpammError::FreebetNotAvailable.into());
    }
@@ -159,6 +161,10 @@ pub fn verify_freebet_for_fill(
    }
    if unlikely(!address_eq(&fb.user, user)) {
       log!("freebet: user mismatch");
+      return Err(SpammError::InvalidFreebet.into());
+   }
+   if unlikely(!address_eq(&fb.mint, mint)) {
+      log!("freebet: mint mismatch");
       return Err(SpammError::InvalidFreebet.into());
    }
    if unlikely(amount != fb.amount) {
@@ -197,29 +203,13 @@ pub fn require_freebet_operator_allowed(fb: &FreebetAccountData, operator: &Addr
    }
 }
 
-#[inline(always)]
-pub fn require_not_freebet(freebet_id: u32) -> ProgramResult {
-   if unlikely(freebet_id != 0) {
-      log!("freebet: ticket is a freebet");
-      return Err(SpammError::InvalidFreebet.into());
-   }
-   Ok(())
-}
-
-#[inline(always)]
-pub fn require_is_freebet(freebet_id: u32) -> ProgramResult {
-   if unlikely(freebet_id == 0) {
-      log!("freebet: ticket is not a freebet");
-      return Err(SpammError::InvalidFreebet.into());
-   }
-   Ok(())
-}
+pub use crate::state::promo::{require_is_boost, require_is_freebet, require_not_promo};
 
 /// Settle-time freebet / issuer checks before token moves. Caller must already have decoded the
 /// bet ticket and passed `require_is_freebet(ticket_freebet_id)`. Cross-checks ticket id vs PDA.
 #[inline(never)]
 pub fn verify_freebet_settle_preamble(
-   ticket_freebet_id: u32,
+   ticket_promo_account: &Address,
    user: &AccountView,
    issuer_auth: &AccountView,
    issuer_pda: &AccountView,
@@ -232,8 +222,8 @@ pub fn verify_freebet_settle_preamble(
       let data = freebet_pda.try_borrow()?;
       FreebetAccountData::decode_header(data.as_ref())?
    };
-   if unlikely(header.freebet_id != ticket_freebet_id) {
-      log!("freebet: settle ticket/pda id mismatch");
+   if unlikely(!address_eq(freebet_pda.address(), ticket_promo_account)) {
+      log!("freebet: settle ticket/pda mismatch");
       return Err(SpammError::InvalidFreebet.into());
    }
    verify_freebet_issuer_pda(issuer_pda, issuer_auth.address())?;
@@ -241,13 +231,18 @@ pub fn verify_freebet_settle_preamble(
       log!("freebet: settle issuer_auth mismatch");
       return Err(SpammError::InvalidFreebet.into());
    }
+   if unlikely(!address_eq(&header.mint, mint.address())) {
+      log!("freebet: settle mint mismatch");
+      return Err(SpammError::InvalidFreebet.into());
+   }
    verify_freebet_pda(
       freebet_pda,
       &header.issuer_auth,
+      &header.mint,
       header.freebet_id,
       header.bump,
    )?;
-   if unlikely(header.state != FreebetState::Used) {
+   if unlikely(header.state != PromoState::Used) {
       log!("freebet: settle expects Used");
       return Err(SpammError::InvalidFreebet.into());
    }
@@ -255,7 +250,7 @@ pub fn verify_freebet_settle_preamble(
       log!("freebet: settle user mismatch");
       return Err(SpammError::InvalidFreebet.into());
    }
-   verify_token_account(true, issuer_ata, issuer_pda, mint, token_program)?;
+   verify_token_account(true, issuer_ata, issuer_pda, mint, token_program, true)?;
    Ok(())
 }
 
@@ -263,11 +258,11 @@ pub fn verify_freebet_settle_preamble(
 pub fn mark_freebet_used(freebet_pda: &mut AccountView) -> ProgramResult {
    let mut data = freebet_pda.try_borrow_mut()?;
    let header = FreebetAccountData::decode_header(data.as_ref())?;
-   if unlikely(header.state != FreebetState::Available) {
+   if unlikely(header.state != PromoState::Available) {
       log!("freebet: mark used expects Available");
       return Err(SpammError::FreebetNotAvailable.into());
    }
-   FreebetAccountData::patch_state(&mut data, FreebetState::Used)
+   FreebetAccountData::patch_state(&mut data, PromoState::Used)
 }
 
 #[inline(always)]
@@ -283,7 +278,7 @@ pub fn reinstate_freebet(
       FreebetAccountData::patch_amount(&mut data, amount)?;
    }
    FreebetAccountData::patch_expiry(&mut data, expiry)?;
-   FreebetAccountData::patch_state(&mut data, FreebetState::Available)
+   FreebetAccountData::patch_state(&mut data, PromoState::Available)
 }
 
 /// Close the freebet PDA (rent → `rent_dest`) and decrement issuer `open_count`.

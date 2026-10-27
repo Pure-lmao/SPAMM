@@ -92,7 +92,10 @@ impl MmKeys {
    }
 
    pub fn encumbrance(&self) -> Pubkey {
-      Pubkey::find_program_address(&[b"encumbrance", self.program_id.as_ref()], &agg_program_id()).0
+      Pubkey::find_program_address(
+         &[b"encumbrance", self.program_id.as_ref(), mint_pubkey().as_ref()],
+         &agg_program_id(),
+      ).0
    }
 
    pub fn liability_ata(&self) -> Pubkey {
@@ -118,14 +121,20 @@ impl MmKeys {
 
    pub fn market_data(&self, mid: &MarketId) -> Pubkey {
       let w = market_id_wire_bytes(mid);
-      let (body, operator) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
-      Pubkey::find_program_address(&[b"market_data", body, operator], &self.program_id).0
+      let (body, operator, mint) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
+      Pubkey::find_program_address(&[b"market_data", body, operator, mint], &self.program_id).0
    }
 
    pub fn netting(&self, eid: &EventId) -> Pubkey {
       let e = eid.as_wire_bytes();
       Pubkey::find_program_address(
-         &[b"netting", self.program_id.as_ref(), e.as_slice()],
+         &[
+            b"netting",
+            self.program_id.as_ref(),
+            e.as_slice(),
+            market_operator().as_ref(),
+            mint_pubkey().as_ref(),
+         ],
          &agg_program_id(),
       )
       .0

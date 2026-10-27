@@ -23,3 +23,20 @@ pub fn verify_rfq_ed25519_signature(
       SpammError::InvalidRfqSignature.into()
    })
 }
+
+/// Verify over concatenated `parts` without copying them into one buffer.
+#[inline(never)]
+pub fn verify_rfq_ed25519_signature_parts(
+   rfq_signer: &Address,
+   signature: &[u8; 64],
+   parts: &[&[u8]],
+) -> Result<(), ProgramError> {
+   if unlikely(parts.is_empty() || parts.iter().all(|p| p.is_empty())) {
+      log!("verify_rfq_ed25519_signature: empty message");
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   verify(rfq_signer, signature, parts).map_err(|_| {
+      log!("verify_rfq_ed25519_signature: signature invalid");
+      SpammError::InvalidRfqSignature.into()
+   })
+}

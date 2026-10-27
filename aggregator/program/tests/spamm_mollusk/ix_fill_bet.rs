@@ -418,6 +418,7 @@ fn fill_bet_with_netting_line_m4() {
       period: 1,
       is_pregame: true,
       operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
    };
    let body = crate::common::oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -425,6 +426,8 @@ fn fill_bet_with_netting_line_m4() {
    use spamm_aggregator::instructions::{AddLineToLiabilityNettingIxData, ADD_LINE_TO_LIABILITY_NETTING_IX_LEN};
    let add = AddLineToLiabilityNettingIxData {
       event_id: eid,
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 4,
    };
@@ -498,6 +501,7 @@ fn fill_bet_netting_m4_offset_opposing_sides() {
       period: 1,
       is_pregame: true,
       operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
    };
    let body = crate::common::oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -505,6 +509,8 @@ fn fill_bet_netting_m4_offset_opposing_sides() {
    use spamm_aggregator::instructions::{AddLineToLiabilityNettingIxData, ADD_LINE_TO_LIABILITY_NETTING_IX_LEN};
    let add = AddLineToLiabilityNettingIxData {
       event_id: eid,
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 4,
    };
@@ -561,6 +567,7 @@ fn fill_bet_netting_skips_first_half_ml() {
       period: 2,
       is_pregame: true,
       operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
    };
    let body = oracle_body_three_outcome(20_000, 20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -585,6 +592,7 @@ fn fill_bet_netting_first_half_ah() {
       period: 2,
       is_pregame: true,
       operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
    };
    let body = oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -616,6 +624,7 @@ fn fill_bet_netting_skips_player_market() {
       period: 1,
       is_pregame: true,
       operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
    };
    let body = oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);

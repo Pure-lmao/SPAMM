@@ -2,7 +2,6 @@ use pinocchio::{
    account::AccountView, address::address_eq, cpi::{Seed, Signer}, error::ProgramError, hint::unlikely,
    Address, ProgramResult,
 };
-use pinocchio_associated_token_account::instructions::Create as CreateAssociatedTokenAccount;
 use pinocchio_log::log;
 use pinocchio_system::instructions::CreateAccount;
 use zeropod::ZeroPodFixed;
@@ -10,8 +9,7 @@ use zeropod::ZeroPodFixed;
 use spamm_aggregator::{
    constants::ADDRESS_LEN,
    helpers::{
-      get_rent, verify_associated_token_program, verify_rent_sysvar, verify_signer,
-      verify_system_program, verify_token_program,
+      get_rent, verify_rent_sysvar, verify_signer, verify_system_program,
    },
    readers::read_address_unchecked,
    state::{
@@ -38,10 +36,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       config_pda,               // `Address::find_program_address` (`["config"]`); empty
       quote_buffer,             // `Address::find_program_address` (`["mm_quote_buffer"]`); empty
       parlay_buffer,            // `Address::find_program_address` (`["mm_parlay_quote_buffer"]`); empty
-      token_account,            // created by `CreateAssociatedTokenAccount`
-      mint,                     // passed to `CreateAssociatedTokenAccount`
-      token_program,            // `verify_token_program`
-      associated_token_program, // `verify_associated_token_program`
       rent_sysvar,              // `verify_rent_sysvar`
       system_program,           // `verify_system_program`
    ] = accounts else {
@@ -52,8 +46,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    verify_signer(feepayer)?;
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
-   verify_token_program(token_program)?;
-   verify_associated_token_program(associated_token_program)?;
    if unlikely(!address_eq(feepayer.address(), &admin)) {
       log!("init_program: feepayer must be admin");
       return Err(ProgramError::InvalidInstructionData);
@@ -133,15 +125,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       body[0] = MM_PARLAY_QUOTE_BUFFER_DISCRIMINATOR;
    }
 
-   CreateAssociatedTokenAccount {
-      funding_account: feepayer,
-      account: token_account,
-      wallet: config_pda,
-      mint,
-      token_program,
-      system_program,
-   }
-   .invoke()?;
    Ok(())
 }
 

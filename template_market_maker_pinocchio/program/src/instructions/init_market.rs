@@ -43,9 +43,9 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    }
 
    let wire = market_id.as_bytes();
-   let (body, operator) = market_id_pda_seed_parts(&wire);
+   let (body, operator, mint) = market_id_pda_seed_parts(&wire);
    let (pda, bump) = Address::find_program_address(
-      &[MM_MARKET_DATA_PDA_SEED, body, operator],
+      &[MM_MARKET_DATA_PDA_SEED, body, operator, mint],
       program_id,
    );
    if unlikely(!address_eq(market.address(), &pda)) {
@@ -58,6 +58,7 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       Seed::from(MM_MARKET_DATA_PDA_SEED),
       Seed::from(body),
       Seed::from(operator),
+      Seed::from(mint),
       Seed::from(&bump_seed as &[u8]),
    ];
    let signers = [Signer::from(&signer_seeds)];

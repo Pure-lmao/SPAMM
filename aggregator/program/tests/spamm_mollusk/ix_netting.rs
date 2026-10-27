@@ -11,6 +11,13 @@ use spamm_aggregator::state::EventGameState;
 
 use spamm_aggregator::state::{NETTING_ACCOUNT_ALLOC_LEN, NETTING_HEADER_LEN, NETTING_LINE_LEN};
 
+fn netting_scope_bytes() -> Vec<u8> {
+   let mut data = event_id_soccer().as_wire_bytes().to_vec();
+   data.extend_from_slice(crate::common::fixtures::market_operator().as_ref());
+   data.extend_from_slice(crate::common::fixtures::mint_pubkey().as_ref());
+   data
+}
+
 use crate::common::{
    admin, assert_ok_record_cu, assert_program_err, assert_netting_pda_initialized, bet_pda_for, bet_token_ata,
    config_pda, event_id_soccer, fill_bet_instruction, market_spread_pregame, mm_admin, mm_config_pda,
@@ -27,7 +34,7 @@ fn create_netting_success() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       40,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
@@ -51,7 +58,7 @@ fn create_netting_twice_fails() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       40,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
@@ -73,6 +80,8 @@ fn add_line_success_sorted() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -110,6 +119,8 @@ fn add_line_rejects_header_soccer_ft() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 1,
    };
@@ -142,6 +153,8 @@ fn remove_line_success() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -166,6 +179,8 @@ fn remove_line_success() {
 
    let rem = RemoveLineFromLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -198,7 +213,7 @@ fn close_netting_success() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       43,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
@@ -225,6 +240,8 @@ fn add_line_second_line_records_cu() {
 
    let add1 = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -251,6 +268,8 @@ fn add_line_second_line_records_cu() {
 
    let add2 = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 401,
    };
@@ -287,6 +306,8 @@ fn remove_line_second_line_records_cu() {
    for mkt in [400u16, 401u16] {
       let add = AddLineToLiabilityNettingIxData {
          event_id: event_id_soccer(),
+         operator: crate::common::fixtures::market_operator(),
+         mint: crate::common::fixtures::mint_pubkey(),
          period: 1,
          mkt,
       };
@@ -313,6 +334,8 @@ fn remove_line_second_line_records_cu() {
    }
    let rem = RemoveLineFromLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 401,
    };
@@ -357,7 +380,7 @@ fn create_netting_after_force_close_records_cu() {
    env.upsert(np, system_owned_empty());
    let create_ix = env.agg_ix(
       40,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
@@ -381,7 +404,7 @@ fn create_netting_wrong_mm_admin_rejected() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       40,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(wrong_signer(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
@@ -404,7 +427,7 @@ fn create_netting_non_executable_mm_program_rejected() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       40,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(wrong_signer(), false),
@@ -450,7 +473,7 @@ fn create_netting_wrong_netting_pda_address_rejected() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       40,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
@@ -472,6 +495,8 @@ fn add_line_duplicate_rejected() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -501,6 +526,8 @@ fn add_line_first_half_period_ok() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 2,
       mkt: 400,
    };
@@ -533,6 +560,8 @@ fn add_line_netting_missing_rejected() {
    env.upsert(fake, system_owned_empty());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -565,6 +594,8 @@ fn add_line_wrong_admin_rejected() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -622,6 +653,8 @@ fn remove_line_never_added_rejected() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -647,6 +680,8 @@ fn remove_line_never_added_rejected() {
       .is_ok());
    let rem = RemoveLineFromLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 999,
    };
@@ -674,6 +709,8 @@ fn remove_line_wrong_admin_rejected() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -699,6 +736,8 @@ fn remove_line_wrong_admin_rejected() {
       .is_ok());
    let rem = RemoveLineFromLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -727,7 +766,7 @@ fn close_netting_wrong_admin_rejected() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       43,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(wrong_signer(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
@@ -749,7 +788,7 @@ fn close_netting_uninitialized_pda_rejected() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       43,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
@@ -770,6 +809,8 @@ fn run_add_line(
 ) -> mollusk_svm::result::InstructionResult {
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period,
       mkt,
    };
@@ -900,6 +941,8 @@ fn remove_line_with_open_profit_rejected() {
    let np = netting_pda_for_event(&event_id_soccer());
    let rem = RemoveLineFromLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -926,7 +969,7 @@ fn close_netting_with_open_profit_rejected() {
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
       43,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),

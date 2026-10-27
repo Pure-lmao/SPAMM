@@ -17,7 +17,7 @@ import {
    type PromoInitMarketPayload,
 } from './codex';
 export type { PromoInitMarketPayload } from './codex';
-import { PROMO_PROGRAM_ID } from './constants';
+import { DEFAULT_PROMO_MINT, PROMO_PROGRAM_ID } from './constants';
 import type { EventGameState, EventId, MarketId } from './spammSdk';
 import {
    getAta,
@@ -26,7 +26,6 @@ import {
    getMmParlayQuoteBufferPda,
    getMmQuoteBufferPda,
    getEventStatePda,
-   MINT_ID,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    SPL_TOKEN_PROGRAM_ID,
    SYSVAR_RENT_ID,
@@ -62,7 +61,6 @@ export async function getInitProgramIx(
    const [configPda] = await getMmConfigPda(programId);
    const [quoteBufferPda] = await getMmQuoteBufferPda(programId);
    const [parlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(programId);
-   const collateralAta = await getAta(configPda);
    return {
       programAddress: programId,
       accounts: [
@@ -70,14 +68,33 @@ export async function getInitProgramIx(
          rw(configPda),
          rw(quoteBufferPda),
          rw(parlayQuoteBufferPda),
-         rw(collateralAta),
-         ro(MINT_ID),
-         ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
       ],
       data: encodePromoInitProgramIxData(feepayer, rfqSigner),
+   };
+}
+
+/** Config collateral ATA for one mint (discriminator 102). */
+export async function getCreateTokenAccountIx(
+   admin: Address,
+   programId: Address,
+   mint: Address = DEFAULT_PROMO_MINT,
+): Promise<Instruction> {
+   const [configPda] = await getMmConfigPda(programId);
+   const tokenAccount = await getAta(configPda, mint);
+   return {
+      programAddress: programId,
+      accounts: [
+         ws(admin),
+         ro(configPda),
+         rw(tokenAccount),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSTEM_PROGRAM_ID),
+      ],
+      data: new Uint8Array([102]),
    };
 }
 
@@ -254,16 +271,17 @@ export async function getWithdrawFromTokenAccountIx(
    admin: Address,
    programId: Address,
    destinationAta: Address,
+   mint: Address = DEFAULT_PROMO_MINT,
 ): Promise<Instruction> {
    const [configPda] = await getMmConfigPda(programId);
-   const tokenAccount = await getAta(configPda);
+   const tokenAccount = await getAta(configPda, mint);
    return {
       programAddress: programId,
       accounts: [
          ws(admin),
          ro(configPda),
          rw(tokenAccount),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          rw(destinationAta),
       ],

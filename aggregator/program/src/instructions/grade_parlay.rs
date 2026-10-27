@@ -21,7 +21,7 @@ use crate::{
    },
 };
 
-pub const GRADE_PARLAY_IX_DISCRIMINATOR: u8 = 21;
+pub const GRADE_PARLAY_IX_DISCRIMINATOR: u8 = 101;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [

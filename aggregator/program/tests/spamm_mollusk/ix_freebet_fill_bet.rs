@@ -2,7 +2,7 @@
 
 use spamm_aggregator::errors::SpammError;
 use spamm_aggregator::instructions::FillBetIxData;
-use spamm_aggregator::state::{EventGameState, FreebetState};
+use spamm_aggregator::state::{EventGameState, PromoState};
 
 use crate::common::{
    admin, assert_ok_record_cu, assert_spamm_err, bet_pda_for, bet_token_ata, bootstrap_issued_freebet,
@@ -53,9 +53,10 @@ fn freebet_fill_bet_success() {
    ));
    assert_ok_record_cu("freebet_fill_bet/success", &r);
    let bd = decode_bet(&env, &bet);
-   assert_eq!(bd.freebet_id, FREEBET_ID_BASIC);
+   assert_eq!(bd.promo_type, spamm_aggregator::state::PromoType::Freebet);
+   assert_eq!(bd.promo_account.as_ref(), crate::common::freebet_pda(FREEBET_ID_BASIC).as_ref());
    assert_eq!(bd.amount, STAKE);
-   assert_eq!(decode_freebet(&env, FREEBET_ID_BASIC).state, FreebetState::Used);
+   assert_eq!(decode_freebet(&env, FREEBET_ID_BASIC).state, PromoState::Used);
    assert_eq!(read_token_balance(&env, &user_collateral_ata()), pre_user);
    assert_eq!(read_token_balance(&env, &crate::common::issuer_ata()), pre_iss - STAKE);
 }
@@ -175,7 +176,7 @@ fn freebet_fill_bet_operator_whitelist_ok() {
       fill_bet_netting_placeholder(),
    ));
    assert_ok_record_cu("freebet_fill_bet/operator_ok", &r);
-   assert_eq!(decode_freebet(&env, FREEBET_ID_BASIC).state, FreebetState::Used);
+   assert_eq!(decode_freebet(&env, FREEBET_ID_BASIC).state, PromoState::Used);
 }
 
 #[test]

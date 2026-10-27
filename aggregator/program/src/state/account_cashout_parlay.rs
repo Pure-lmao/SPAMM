@@ -10,7 +10,7 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
    constants::MAX_RFQ_PARLAY_LEGS, readers::{read_address_ref_unchecked, read_u8_unchecked, read_u32_le_unchecked}, state::{
-      EventGameState, account_bet::BetResult, account_parlay_bet::ParlayLegSettleView, ids::{EventId, MARKET_ID_OPERATOR_OFFSET, MarketId},
+      EventGameState, account_bet::BetResult, account_parlay_bet::ParlayLegSettleView, ids::{EventId, MARKET_ID_MINT_OFFSET, MARKET_ID_OPERATOR_OFFSET, MarketId},
    }, writers::write_u8_unchecked,
 };
 
@@ -220,6 +220,12 @@ impl CashoutParlayAccountData {
    }
 
    #[inline(always)]
+   pub fn read_leg_mint<'a>(data: &'a [u8], leg_i: usize) -> Result<&'a Address, ProgramError> {
+      let market_id_offset = Self::ensure_leg_in_bounds(data, leg_i)?;
+      unsafe { Ok(read_address_ref_unchecked(data.as_ptr(), market_id_offset + MARKET_ID_MINT_OFFSET)) }
+   }
+
+   #[inline(always)]
    pub fn read_leg_settle_view(
       data: &[u8],
       leg_i: usize,
@@ -268,6 +274,38 @@ impl CashoutParlayAccountData {
       }
       for i in 0..n {
          out[i].write(Self::decode_leg(data, i)?);
+      }
+      Ok(())
+   }
+
+   #[inline(always)]
+   pub fn write_header_and_legs_with<F>(
+      out: &mut [u8],
+      header: &CashoutParlayHeader,
+      mut leg_at: F,
+   ) -> Result<(), ProgramError>
+   where
+      F: FnMut(usize) -> Result<CashoutParlayLeg, ProgramError>,
+   {
+      let n = header.num_legs as usize;
+      let expected = cashout_parlay_account_len(n);
+      if unlikely(out.len() != expected || n < 2 || n > MAX_RFQ_PARLAY_LEGS) {
+         return Err(ProgramError::InvalidAccountData);
+      }
+      let hzc = Self::header_to_zc(header);
+      unsafe {
+         core::ptr::write(out.as_mut_ptr().cast(), hzc);
+      }
+      for i in 0..n {
+         let off = CASHOUT_PARLAY_HEADER_LEN + i * CASHOUT_PARLAY_LEG_LEN;
+         let mut leg = leg_at(i)?;
+         if header.result == BetResult::Pending {
+            leg.result = BetResult::Pending;
+         }
+         let zc = leg.to_zc();
+         unsafe {
+            core::ptr::write(out.as_mut_ptr().add(off).cast(), zc);
+         }
       }
       Ok(())
    }

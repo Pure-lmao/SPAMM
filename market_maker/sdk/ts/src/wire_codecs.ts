@@ -81,6 +81,7 @@ export const getMarketIdEncoder = (): Encoder<MarketId> =>
       ['period', getU8Encoder()],
       ['isPregame', getBoolU8Encoder()],
       ['operator', getAddressEncoder()],
+      ['mint', getAddressEncoder()],
    ]);
 
 export const getMarketIdDecoder = (): Decoder<MarketId> =>
@@ -91,6 +92,7 @@ export const getMarketIdDecoder = (): Decoder<MarketId> =>
       ['period', getU8Decoder()],
       ['isPregame', getBoolU8Decoder()],
       ['operator', getAddressDecoder()],
+      ['mint', getAddressDecoder()],
    ]);
 
 export function encodeEventIdWire(eventId: EventId): Uint8Array {

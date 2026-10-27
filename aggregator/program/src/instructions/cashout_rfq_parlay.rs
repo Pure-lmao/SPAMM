@@ -43,11 +43,11 @@ use crate::{
          verify_ticket_feepayer, ParlayCashoutOrigTicket,
       },
    }, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
-      FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR, FillRfqIxData, FillRfqParlayCashoutIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, RFQ_CASHOUT_PARLAY_MESSAGE_LEN, build_rfq_cashout_parlay_message, other::config_signer_seeds, rfq_cashout_parlay_message_len,
+      CashoutSnapshot, FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR, FillRfqIxData, FillRfqParlayCashoutIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, RFQ_CASHOUT_PARLAY_MESSAGE_LEN, build_rfq_cashout_parlay_message, other::config_signer_seeds, rfq_cashout_parlay_message_len,
    },
 };
 
-pub const FILL_RFQ_PARLAY_CASHOUT_IX_DISCRIMINATOR: u8 = 73;
+pub const FILL_RFQ_PARLAY_CASHOUT_IX_DISCRIMINATOR: u8 = 93;
 
 /// Scalars needed after ticket validation — avoids a second ix decode on the finish frame.
 #[derive(Clone, Copy)]
@@ -88,10 +88,18 @@ fn run_fill_rfq_parlay_cashout(accounts: &mut [AccountView], data: &[u8]) -> Pro
       let clock_sysvar = accounts.get(16).ok_or(ProgramError::NotEnoughAccountKeys)?;
       clock_unix_timestamp_u32(clock_sysvar)?
    };
-   let mut ticket = unsafe { core::mem::zeroed::<ParlayCashoutOrigTicket>() };
+   let mut ticket = ParlayCashoutOrigTicket::blank();
    let (encumbrance_pda_bump, meta) =
       decode_validate_rfq_parlay_cashout(accounts, data, now, &mut ticket)?;
-   finish_rfq_parlay_cashout_after_ticket(accounts, now, &ticket, encumbrance_pda_bump, meta)
+   let parsed = FillRfqParlayCashoutIxData::decode_with_signature(data)?.0;
+   finish_rfq_parlay_cashout_after_ticket(
+      accounts,
+      now,
+      &ticket,
+      encumbrance_pda_bump,
+      meta,
+      &parsed.snapshots,
+   )
 }
 
 /// Owns decoded RFQ ix (~448B) + verifies ed25519 on a deeper frame; writes ticket via out-param.
@@ -144,7 +152,7 @@ fn decode_validate_rfq_parlay_cashout(
       return Err(SpammError::MmNotRegistered.into());
    }
    verify_mm_program_executable(mm_program)?;
-   if !verify_token_account(false, mm_token_account, mm_config, mint, token_program)? {
+   if !verify_token_account(false, mm_token_account, mm_config, mint, token_program, true)? {
       return Err(ProgramError::InvalidAccountData);
    }
    let Some(encumbrance_pda_bump) = verify_cashout_mm_encumbrance(
@@ -174,6 +182,7 @@ fn finish_rfq_parlay_cashout_after_ticket(
    ticket: &ParlayCashoutOrigTicket,
    encumbrance_pda_bump: u8,
    meta: RfqParlayCashoutIxMeta,
+   snapshots: &[CashoutSnapshot],
 ) -> ProgramResult {
    let (fixed, mm_rest) = accounts.split_at_mut(17);
    // Exact fixed layout (18). Prefixed slots already checked in preamble / unused on this path.
@@ -200,7 +209,6 @@ fn finish_rfq_parlay_cashout_after_ticket(
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   let num_legs = meta.num_legs as usize;
    let mm_program = &mm_rest[0];
    let mm_config = &mm_rest[1];
    let mm_encumbrance_pda = &mm_rest[2];
@@ -233,6 +241,7 @@ fn finish_rfq_parlay_cashout_after_ticket(
       mm_encumbrance_pda,
       encumbrance_pda_bump,
       mm_program.address(),
+      mint.address(),
       mm_liability_token_account,
       payment_dest,
       meta.max_payment,
@@ -261,11 +270,12 @@ fn finish_rfq_parlay_cashout_after_ticket(
       token_program,
       rent_sysvar,
       system_program,
+      mm_encumbrance_pda,
       mm_program.address(),
       meta.cashout_id,
       meta.amount,
       meta.num_legs,
-      &ticket.legs[..num_legs],
+      snapshots,
       ticket.payout_removed,
       ticket.delay,
       ticket.orig_amount,

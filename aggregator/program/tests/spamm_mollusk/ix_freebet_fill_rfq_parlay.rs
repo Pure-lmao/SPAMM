@@ -53,7 +53,7 @@ fn freebet_fill_rfq_parlay_success() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let bet = parlay_bet_pda_for(&user(), bet_id);
    let bat = bet_token_ata(&bet);
@@ -67,7 +67,8 @@ fn freebet_fill_rfq_parlay_success() {
       bat,
    ));
    assert_ok_record_cu("freebet_fill_rfq_parlay/success", &r);
-   assert_eq!(decode_parlay_bet(&env, &bet).freebet_id, FREEBET_ID_BASIC);
+   assert_eq!(decode_parlay_bet(&env, &bet).promo_type, spamm_aggregator::state::PromoType::Freebet);
+   assert_eq!(decode_parlay_bet(&env, &bet).promo_account.as_ref(), crate::common::freebet_pda(FREEBET_ID_BASIC).as_ref());
 }
 
 #[test]
@@ -91,7 +92,7 @@ fn freebet_fill_rfq_parlay_wrong_user() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let bet = parlay_bet_pda_for(&user(), bet_id);
    let bat = bet_token_ata(&bet);

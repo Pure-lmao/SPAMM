@@ -43,7 +43,7 @@ impl FillBetIxData {
          event_game_state: EventGameState::from_zc(&zc.event_game_state),
       };
       const LABEL: &str = "fill_bet";
-      validate_amount_over_min(parsed.amount, LABEL)?;
+      validate_amount_over_min(parsed.amount, 1, LABEL)?;
       validate_odds_above_scale(parsed.min_odds_scaled, LABEL)?;
       validate_event_state_sequence(
          parsed.event_state_sequence,

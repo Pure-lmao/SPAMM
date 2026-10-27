@@ -7,14 +7,14 @@ import {
 
 import {
    AGGREGATOR_PROGRAM_ID,
-   MINT_ID,
    BET_ACCOUNT_SEED,
    CASHOUT_ACCOUNT_SEED,
    CASHOUT_ESCROW_SEED,
    CASHOUT_PARLAY_ACCOUNT_SEED,
    CONFIG_PDA_SEED,
    FREEBET_ACCOUNT_SEED,
-   FREEBET_ISSUER_SEED,
+   BOOST_ACCOUNT_SEED,
+   PROMO_ISSUER_SEED,
    EVENT_STATE_SEED,
    MM_ACCOUNT_CONFIG_SEED,
    MM_ENCUMBRANCE_PDA_SEED,
@@ -43,10 +43,16 @@ const addressEncoder = getAddressEncoder();
 const eventIdEncoder = getEventIdEncoder();
 const marketIdEncoder = getMarketIdEncoder();
 
-/** PDA seeds for MM market data: legacy `MarketId` body wire + `operator` address bytes. */
-export function marketIdPdaSeeds(marketId: MarketId): readonly [Uint8Array, Uint8Array] {
+/** PDA seeds for a market id: body, operator, mint. Each slice is at most 32 bytes. */
+export function marketIdPdaSeeds(marketId: MarketId): readonly [Uint8Array, Uint8Array, Uint8Array] {
    const wire = marketIdEncoder.encode(marketId);
-   return [wire.subarray(0, MARKET_ID_BODY_WIRE_SIZE), wire.subarray(MARKET_ID_BODY_WIRE_SIZE)] as const;
+   const operatorAt = MARKET_ID_BODY_WIRE_SIZE;
+   const mintAt = operatorAt + ADDRESS_LEN;
+   return [
+      wire.subarray(0, operatorAt),
+      wire.subarray(operatorAt, mintAt),
+      wire.subarray(mintAt),
+   ] as const;
 }
 
 /**
@@ -161,33 +167,40 @@ export async function getMmParlayQuoteBufferPda(
 }
 
 /**
- * Derives the **per-MM encumbrance PDA** on the **aggregator** program (`["encumbrance", mm_program_id_bytes]`).
- *
- * **Rust:** `MM_ENCUMBRANCE_PDA_SEED` + MM program address bytes under `aggregator::ID` (`verify_mm_encumbrance_pda`).
- *
- * @param mmProgramId - **TS:** `Address` — MM program whose liability is tracked. **Rust:** `mm_program` pubkey embedded in seed.
- * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — encumbrance PDA address and bump.
+ * Derives the **per-MM per-mint encumbrance PDA** (`["encumbrance", mm_program, mint]`).
  */
-export async function getMmEncumbrancePda(mmProgramId: Address): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+export async function getMmEncumbrancePda(
+   mmProgramId: Address,
+   mint: Address,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
    return await getProgramDerivedAddress({
       programAddress: AGGREGATOR_PROGRAM_ID,
-      seeds: [MM_ENCUMBRANCE_PDA_SEED, addressEncoder.encode(mmProgramId)],
+      seeds: [
+         MM_ENCUMBRANCE_PDA_SEED,
+         addressEncoder.encode(mmProgramId),
+         addressEncoder.encode(mint),
+      ],
    });
 }
 
 /**
- * Derives the **netting PDA** for `(mm_program, event_id)` on the **aggregator** (`["netting", mm, event_id_wire]`).
- *
- * **Rust:** `NETTING_PDA_SEED` + MM pubkey + `EventId` wire bytes (`verify_netting_pda` / `create_netting_account`).
- *
- * @param mmProgramId - **TS:** `Address` — MM program id. **Rust:** first seed pubkey after `"netting"`.
- * @param eventId - **TS:** {@link EventId}. **Rust:** `EventId` encoded into trailing seed bytes.
- * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — netting PDA address and bump.
+ * Derives the **netting PDA** (`["netting", mm_program, event_id, operator, mint]`).
  */
-export async function getNettingPda(mmProgramId: Address, eventId: EventId): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+export async function getNettingPda(
+   mmProgramId: Address,
+   eventId: EventId,
+   operator: Address,
+   mint: Address,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
    return await getProgramDerivedAddress({
       programAddress: AGGREGATOR_PROGRAM_ID,
-      seeds: [NETTING_PDA_SEED, addressEncoder.encode(mmProgramId), encodeEventIdWire(eventId)],
+      seeds: [
+         NETTING_PDA_SEED,
+         addressEncoder.encode(mmProgramId),
+         encodeEventIdWire(eventId),
+         addressEncoder.encode(operator),
+         addressEncoder.encode(mint),
+      ],
    });
 }
 
@@ -208,7 +221,7 @@ export async function getEventStatePda(mmProgramId: Address, eventId: EventId): 
 }
 
 /**
- * Derives **MM market data PDA** (`["market_data", market_id_body_wire, operator]` on the **MM program**).
+ * Derives **MM market data PDA** (`["market_data", market_id_body, operator, mint]` on the **MM program**).
  *
  * **Rust:** `MM_MARKET_DATA_PDA_SEED` + `MarketId` wire bytes from `to_zc` (`verify_mm_market_data_pda`).
  *
@@ -217,10 +230,10 @@ export async function getEventStatePda(mmProgramId: Address, eventId: EventId): 
  * @returns **`Promise<readonly [Address, ProgramDerivedAddressBump]>`** — MM market-data PDA address and bump.
  */
 export async function getMmMarketDataPda(mmProgramId: Address, marketId: MarketId): Promise<readonly [Address, ProgramDerivedAddressBump]> {
-   const [body, operator] = marketIdPdaSeeds(marketId);
+   const [body, operator, mint] = marketIdPdaSeeds(marketId);
    return await getProgramDerivedAddress({
       programAddress: mmProgramId,
-      seeds: [MM_MARKET_DATA_PDA_SEED, body, operator],
+      seeds: [MM_MARKET_DATA_PDA_SEED, body, operator, mint],
    });
 }
 
@@ -299,27 +312,50 @@ export async function getCashoutParlayPda(
 }
 
 /**
- * Derives the **freebet issuer PDA** (`["freebet_issuer", auth]`).
+ * Derives the **promo issuer PDA** (`["promo_issuer", auth]`).
  */
 export async function getFreebetIssuerPda(
    auth: Address,
 ): Promise<readonly [Address, ProgramDerivedAddressBump]> {
    return await getProgramDerivedAddress({
       programAddress: AGGREGATOR_PROGRAM_ID,
-      seeds: [FREEBET_ISSUER_SEED, addressEncoder.encode(auth)],
+      seeds: [PROMO_ISSUER_SEED, addressEncoder.encode(auth)],
    });
 }
 
 /**
- * Derives the **freebet PDA** (`["freebet", auth, freebet_id_le]`).
+ * Derives the **freebet PDA** (`["freebet", auth, mint, freebet_id_le]`).
  */
 export async function getFreebetPda(
    auth: Address,
+   mint: Address,
    freebetId: number,
 ): Promise<readonly [Address, ProgramDerivedAddressBump]> {
    return await getProgramDerivedAddress({
       programAddress: AGGREGATOR_PROGRAM_ID,
-      seeds: [FREEBET_ACCOUNT_SEED, addressEncoder.encode(auth), encodeFreebetIdLe(freebetId)],
+      seeds: [
+         FREEBET_ACCOUNT_SEED,
+         addressEncoder.encode(auth),
+         addressEncoder.encode(mint),
+         encodeFreebetIdLe(freebetId),
+      ],
+   });
+}
+
+/** Derives the **boost PDA** (`["boost", auth, mint, boost_id_le]`). */
+export async function getBoostPda(
+   auth: Address,
+   mint: Address,
+   boostId: number,
+): Promise<readonly [Address, ProgramDerivedAddressBump]> {
+   return await getProgramDerivedAddress({
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      seeds: [
+         BOOST_ACCOUNT_SEED,
+         addressEncoder.encode(auth),
+         addressEncoder.encode(mint),
+         encodeFreebetIdLe(boostId),
+      ],
    });
 }
 
@@ -329,14 +365,14 @@ export async function getFreebetPda(
  * **Rust:** Same as `spl_associated_token_account::get_associated_token_address` / `pinocchio_associated_token_account` seeds: `[owner, token_program_id, mint]` under the ATA program id.
  *
  * @param owner - **TS:** `Address` — ATA owner (often a PDA or user wallet). **Rust:** `Pubkey` first seed.
- * @param mint - **TS:** `Address` — SPL mint (default {@link MINT_ID}). **Rust:** mint `Pubkey`.
- * @param tokenProgram - **TS:** `Address` — Token program (default {@link SPL_TOKEN_PROGRAM_ID}). **Rust:** `spl_token::ID` or Token-2022 id.
- * @param associatedTokenProgram - **TS:** `Address` — ATA program (default {@link SPL_ASSOCIATED_TOKEN_PROGRAM_ID}). **Rust:** `spl_associated_token_account::ID`.
- * @returns **`Promise<Address>`** — ATA address (unchecked existence; on-chain may need `create_idempotent`). **Note:** defaults align with aggregator instruction builders in this SDK.
+ * @param mint - **TS:** `Address` — SPL mint. **Rust:** mint `Pubkey`.
+ * @param tokenProgram - **TS:** `Address` — Token program (default {@link SPL_TOKEN_PROGRAM_ID}).
+ * @param associatedTokenProgram - **TS:** `Address` — ATA program (default {@link SPL_ASSOCIATED_TOKEN_PROGRAM_ID}).
+ * @returns **`Promise<Address>`** — ATA address (unchecked existence).
  */
 export async function getAta(
    owner: Address,
-   mint: Address = MINT_ID,
+   mint: Address,
    tokenProgram: Address = SPL_TOKEN_PROGRAM_ID,
    associatedTokenProgram: Address = SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
 ): Promise<Address> {

@@ -1,6 +1,7 @@
 import type { Address } from '@solana/kit';
 import type { EventId, EventGameState, MarketId } from './spammSdk';
 import { getEventGameState } from './spammSdk';
+import { DEFAULT_PROMO_MINT } from './constants';
 
 /** SLEPMP-style `sport:league:event:period:mkt:player` (player may be empty). */
 export type MarketKeyParts = {
@@ -34,7 +35,11 @@ export function decodeMarketKey(key: string): MarketKeyParts | null {
    }
 }
 
-export function marketIdFromKeyParts(parts: MarketKeyParts, operator: Address): MarketId {
+export function marketIdFromKeyParts(
+   parts: MarketKeyParts,
+   operator: Address,
+   mint: Address = DEFAULT_PROMO_MINT,
+): MarketId {
    return {
       eventId: { sport: parts.sport, league: parts.league, event: parts.event },
       mkt: parts.mkt,
@@ -42,6 +47,7 @@ export function marketIdFromKeyParts(parts: MarketKeyParts, operator: Address): 
       isPregame: true,
       player: parts.player,
       operator,
+      mint,
    };
 }
 

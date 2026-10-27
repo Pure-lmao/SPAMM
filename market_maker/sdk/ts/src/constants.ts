@@ -59,15 +59,4 @@ export const MM_PARLAY_QUOTE_BUFFER_SEED = 'mm_parlay_quote_buffer' as const;
 export const EVENT_STATE_SEED = 'event_state' as const;
 export const MM_MARKET_DATA_PDA_SEED = 'market_data' as const;
 export const MM_ENCUMBRANCE_PDA_SEED = 'encumbrance' as const;
-
-//--------MAINNET CONSTANTS--------
-
-// export const MINT_ID: Address = address(
-//    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-// );
-
-//--------DEVNET CONSTANTS--------
-
-export const MINT_ID: Address = address(
-   'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr',
-);
+export const CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR = 102;

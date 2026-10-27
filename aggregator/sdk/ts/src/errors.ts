@@ -64,6 +64,22 @@ export enum SpammErrorCode {
    InvalidFreebet = 23,
    /** Market `operator` is not on the freebet `allowed_operators` list. */
    FreebetOperatorNotAllowed = 24,
+   /** Boost `expiry` is in the past. */
+   BoostExpired = 25,
+   /** Boost is `Used` (or not `Available`) for this action. */
+   BoostNotAvailable = 26,
+   /** Fill stake is above the boost `maxStake`. */
+   BoostAmountMismatch = 27,
+   /** Quoted / filled odds are outside the boost `[minOdds, maxOdds]` range. */
+   BoostOddsOutOfRange = 28,
+   /** Ticket leg count is below the boost `minLegs`. */
+   BoostLegCount = 29,
+   /** Filling MM is not on the boost `allowedMms` list. */
+   BoostMmNotAllowed = 30,
+   /** Wrong settle path, or boost PDA / issuer accounts do not match the ticket. */
+   InvalidBoost = 31,
+   /** Market `operator` is not on the boost `allowedOperators` list. */
+   BoostOperatorNotAllowed = 32,
 }
 
 const MESSAGES: Record<SpammErrorCode, string> = {
@@ -92,6 +108,14 @@ const MESSAGES: Record<SpammErrorCode, string> = {
    [SpammErrorCode.FreebetMmNotAllowed]: 'market maker is not on the freebet allow list',
    [SpammErrorCode.InvalidFreebet]: 'wrong freebet settle or cashout path',
    [SpammErrorCode.FreebetOperatorNotAllowed]: 'market operator is not on the freebet allow list',
+   [SpammErrorCode.BoostExpired]: 'boost expiry is in the past',
+   [SpammErrorCode.BoostNotAvailable]: 'boost is not available',
+   [SpammErrorCode.BoostAmountMismatch]: 'fill stake is above the boost max stake, or the auction filled less than requested',
+   [SpammErrorCode.BoostOddsOutOfRange]: 'quoted odds are outside the boost range',
+   [SpammErrorCode.BoostLegCount]: 'ticket has fewer legs than the boost requires',
+   [SpammErrorCode.BoostMmNotAllowed]: 'market maker is not on the boost allow list',
+   [SpammErrorCode.InvalidBoost]: 'wrong boost settle path, or boost accounts do not match the ticket',
+   [SpammErrorCode.BoostOperatorNotAllowed]: 'market operator is not on the boost allow list',
 };
 
 export function isSpammErrorCode(code: number): code is SpammErrorCode {

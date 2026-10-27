@@ -59,6 +59,7 @@ const marketId = {
    isPregame: true,
    player: 0n,
    operator: "BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW" as Address,
+   mint: "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr" as Address,
 };
 const marketId2 = {
    eventId: {
@@ -71,6 +72,7 @@ const marketId2 = {
    isPregame: true,
    player: 0n,
    operator: "BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW" as Address,
+   mint: "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr" as Address,
 };
 const side = 0;
 const eventStateSequence = 1;

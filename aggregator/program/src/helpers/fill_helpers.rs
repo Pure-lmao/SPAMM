@@ -8,7 +8,7 @@ use pinocchio::{
    error::ProgramError, hint::unlikely,
    instruction::{InstructionAccount, InstructionView},
 };
-use pinocchio_associated_token_account::instructions::Create;
+use pinocchio_associated_token_account::instructions::CreateIdempotent;
 use pinocchio_log::log;
 use pinocchio_system::instructions::CreateAccount;
 use pinocchio_token::instructions::Transfer;
@@ -24,10 +24,11 @@ use crate::{
    state::{
       account_bet::BetResult, bet_account_len, other::MM_ENCUMBRANCE_PDA_SEED, parlay_bet_account_len,
       BET_ACCOUNT_SEED, BetAccountData, BetAccountHeader, BetFiller,
-      PARLAY_BET_ACCOUNT_DISCRIMINATOR, PARLAY_BET_ACCOUNT_SEED,
+      PARLAY_BET_ACCOUNT_DISCRIMINATOR, PARLAY_BET_ACCOUNT_SEED, PromoType,
       ParlayBetAccountData, ParlayBetAccountHeader, ParlayLegWire,
-      write_parlay_leg_sels, GET_QUOTE_PARLAY_IX_DISCRIMINATOR, GET_QUOTE_PARLAY_IX_HEADER_LEN,
+      GET_QUOTE_PARLAY_IX_DISCRIMINATOR, GET_QUOTE_PARLAY_IX_HEADER_LEN,
       GetQuoteParlayIxData, GetQuoteParlayIxHeaderZc, ParlayLegSel,
+      mm_parlay_quote::decode_packed_leg, PARLAY_LEG_SEL_LEN,
       mm_quote::{GetParlayQuoteReturnWire, QuoteData},
    },
 };
@@ -110,6 +111,7 @@ pub struct AuctionLiabilityRefund<'a> {
    pub mm_encumbrance_pda: &'a mut AccountView,
    pub encumbrance_bump: u8,
    pub mm_address: &'a Address,
+   pub mint: &'a Address,
    pub mm_liability: &'a AccountView,
    pub mm_token: &'a AccountView,
 }
@@ -137,6 +139,7 @@ pub fn try_auction_liability_deposit(
       refund.mm_encumbrance_pda,
       refund.encumbrance_bump,
       refund.mm_address,
+      refund.mint,
       refund.mm_liability,
       refund.mm_token,
       increase,
@@ -190,7 +193,7 @@ pub fn invoke_mm_get_quote_parlay(
    num_legs: usize,
    amount: u64,
    min_odds_scaled: u32,
-   legs: &[ParlayLegSel],
+   leg_bytes: &[u8],
    user: &AccountView,
    clock_sysvar: &AccountView,
    mm_program_account: &AccountView,
@@ -198,7 +201,10 @@ pub fn invoke_mm_get_quote_parlay(
    mm_parlay_quote_buffer: &AccountView,
    leg_accounts: &[AccountView],
 ) -> bool {
-   if unlikely(legs.len() < num_legs || num_legs < 2 || num_legs > MAX_PARLAY_LEGS) {
+   let Some(legs_len) = num_legs.checked_mul(PARLAY_LEG_SEL_LEN) else {
+      return false;
+   };
+   if unlikely(leg_bytes.len() < legs_len || num_legs < 2 || num_legs > MAX_PARLAY_LEGS) {
       return false;
    }
    if unlikely(leg_accounts.len() < 2 * num_legs) {
@@ -217,14 +223,8 @@ pub fn invoke_mm_get_quote_parlay(
       unsafe {
          core::ptr::write(get_quote_ix_buf.as_mut_ptr().cast(), hzc);
       }
-      if write_parlay_leg_sels(
-         &mut get_quote_ix_buf[GET_QUOTE_PARLAY_IX_HEADER_LEN..wire_len],
-         &legs[..num_legs],
-      )
-      .is_err()
-      {
-         return false;
-      }
+      get_quote_ix_buf[GET_QUOTE_PARLAY_IX_HEADER_LEN..wire_len]
+         .copy_from_slice(&leg_bytes[..legs_len]);
    }
 
    let mut maybe_metas: [MaybeUninit<InstructionAccount>; MAX_PARLAY_QUOTE_CPI_ACCOUNTS] =
@@ -239,7 +239,7 @@ pub fn invoke_mm_get_quote_parlay(
       let event_state_pda = &leg_pair[1];
       let md_index = 4 + leg_i * 2;
       let es_index = 5 + leg_i * 2;
-      let Some(leg) = legs.get(leg_i) else {
+      let Ok(leg) = decode_packed_leg::<ParlayLegSel>(leg_bytes, leg_i) else {
          return false;
       };
       let market_id = &leg.market_id;
@@ -287,6 +287,7 @@ pub fn refund_liability_deposit_mismatch(
    mm_encumbrance_pda: &mut AccountView,
    encumbrance_bump: u8,
    mm_address: &Address,
+   mint: &Address,
    mm_liability_token_account: &AccountView,
    mm_token_account: &AccountView,
    mm_liability_token_account_increase: u64,
@@ -295,6 +296,7 @@ pub fn refund_liability_deposit_mismatch(
    let enc_seeds = [
       Seed::from(MM_ENCUMBRANCE_PDA_SEED),
       Seed::from(mm_address.as_ref()),
+      Seed::from(mint.as_ref()),
       Seed::from(bump_seed),
    ];
    let signers = [Signer::from(&enc_seeds)];
@@ -312,7 +314,7 @@ pub fn refund_liability_deposit_mismatch(
 
 /// Create parlay bet PDA + ATA and pull stake from `stake_from` (`user` or issuer ATA).
 #[inline(never)]
-pub fn create_parlay_bet_account(
+pub fn create_parlay_bet_account<F>(
    feepayer: &AccountView,
    user: &AccountView,
    stake_from: &AccountView,
@@ -327,14 +329,18 @@ pub fn create_parlay_bet_account(
    amount: u64,
    payout: u64,
    timestamp: u32,
-   freebet_id: u32,
+   promo_type: PromoType,
+   promo_account: &Address,
    num_legs: usize,
-   legs: &[ParlayLegWire],
+   leg_at: F,
    filler_address: &Address,
    issuer_sign: Option<(u8, Address)>,
    log_label: &str,
-) -> ProgramResult {
-   if unlikely(num_legs < 2 || num_legs > MAX_RFQ_PARLAY_LEGS || legs.len() < num_legs) {
+) -> ProgramResult
+where
+   F: FnMut(usize) -> Result<ParlayLegWire, ProgramError>,
+{
+   if unlikely(num_legs < 2 || num_legs > MAX_RFQ_PARLAY_LEGS) {
       return Err(ProgramError::InvalidInstructionData);
    }
 
@@ -363,7 +369,8 @@ pub fn create_parlay_bet_account(
       amount,
       payout,
       timestamp,
-      freebet_id,
+      promo_type,
+      promo_account: *promo_account,
       filler_address: *filler_address,
       result: BetResult::Pending,
       num_legs: num_legs as u8,
@@ -381,10 +388,10 @@ pub fn create_parlay_bet_account(
 
    {
       let mut bet_pda_data = bet_pda.try_borrow_mut()?;
-      ParlayBetAccountData::write_header_and_legs(&mut bet_pda_data, &header, &legs[..num_legs])?;
+      ParlayBetAccountData::write_header_and_legs_with(&mut bet_pda_data, &header, leg_at)?;
    }
 
-   Create {
+   CreateIdempotent {
       funding_account: feepayer,
       account: bet_ata,
       wallet: bet_pda,
@@ -394,7 +401,7 @@ pub fn create_parlay_bet_account(
    }
    .invoke()?;
 
-   verify_token_account(true, bet_ata, bet_pda, mint, token_program)?;
+   verify_token_account(true, bet_ata, bet_pda, mint, token_program, true)?;
    transfer_stake(stake_from, bet_ata, stake_authority, amount, issuer_sign)?;
    Ok(())
 }
@@ -453,7 +460,7 @@ pub fn create_single_bet_account(
       BetAccountData::write_header_and_fillers(&mut bet_pda_data, &header, &fillers[..n])?;
    }
 
-   Create {
+   CreateIdempotent {
       funding_account: feepayer,
       account: bet_ata,
       wallet: bet_pda,
@@ -463,7 +470,7 @@ pub fn create_single_bet_account(
    }
    .invoke()?;
 
-   verify_token_account(true, bet_ata, bet_pda, mint, token_program)?;
+   verify_token_account(true, bet_ata, bet_pda, mint, token_program, true)?;
    transfer_stake(stake_from, bet_ata, stake_authority, header.amount, issuer_sign)?;
    Ok(())
 }

@@ -13,8 +13,8 @@ pub fn decode_close_market_wire(data: &[u8]) -> Result<&[u8; MARKET_ID_LEN], Pro
       return Err(ProgramError::InvalidInstructionData);
    }
    let wire = unsafe { &*(data.as_ptr().cast::<[u8; MARKET_ID_LEN]>()) };
-   let (_body, operator) = market_id_pda_seed_parts(wire);
-   if operator.len() != 32 {
+   let (_body, operator, mint) = market_id_pda_seed_parts(wire);
+   if operator.len() != 32 || mint.len() != 32 {
       return Err(ProgramError::InvalidInstructionData);
    }
    Ok(wire)

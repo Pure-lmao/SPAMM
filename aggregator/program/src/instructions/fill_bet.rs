@@ -45,12 +45,13 @@ use pinocchio::{
 
 use pinocchio_log::log;
 use crate::{
-   constants::{MAX_NUMBER_OF_MMS, MIN_FILLER_AMOUNT}, errors::SpammError, helpers::{
+   constants::MAX_NUMBER_OF_MMS, errors::SpammError, helpers::{
+      min_amount_for_decimals,
       calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, fill_helpers::{
          AuctionLiabilityRefund, compute_liability_shortfall, create_single_bet_account, parse_quote_return_for_mm, try_auction_liability_deposit,
       }, freebet_helpers::{odds_in_freebet_range, require_freebet_operator_allowed, verify_freebet_for_fill}, get_encumbrance, get_token_account_balance, reject_duplicate_mm_programs, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_netting_pda_or_placeholder, verify_quote_buffer, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
    }, state::{
-      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_QUOTE_IX_DISCRIMINATOR, FillBetIxData, FillBetQuoteIxData, FreebetAccountData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, event_id_wire_from_market_wire, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds}
+      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, BetFiller, FILL_BET_QUOTE_IX_DISCRIMINATOR, FillBetIxData, FillBetQuoteIxData, FreebetAccountData, GET_QUOTE_IX_DISCRIMINATOR, GetQuoteIxData, MMQuote, PromoType, account_bet::BetResult, account_netting::{NettingCalc, apply_netting, calculate_netting, ensure_netting_space_for_market}, event_id_wire_from_market_wire, validate_amount_over_min, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds}
    }, writers::write_u64_le_unchecked,
 };
 const MM_ACCOUNTS_PER_MM: usize = 9;
@@ -61,7 +62,8 @@ pub struct FillBetStake<'a> {
    pub token_account: &'a AccountView,
    pub authority: &'a AccountView,
    pub issuer_sign: Option<(u8, Address)>,
-   pub freebet_id: u32,
+   pub promo_type: PromoType,
+   pub promo_account: Address,
    pub freebet: Option<&'a FreebetAccountData>,
 }
 
@@ -104,7 +106,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_account: user_ata,
          authority: user,
          issuer_sign: None,
-         freebet_id: 0,
+         promo_type: PromoType::None,
+         promo_account: Address::default(),
          freebet: None,
       },
    )
@@ -147,8 +150,7 @@ pub(crate) fn run_fill_bet(
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_clock_sysvar(clock_sysvar)?;
-   verify_mint(mint)?;
-   verify_token_account(true, stake.token_account, stake.authority, mint, token_program)?;
+   verify_token_account(true, stake.token_account, stake.authority, mint, token_program, stake.issuer_sign.is_some())?;
    verify_config_pda(config_pda, true)?;
    ensure_pda_unused(bet_pda, "fill_bet")?;
 
@@ -156,13 +158,16 @@ pub(crate) fn run_fill_bet(
    let amount = parsed_data.amount;
    let min_odds_scaled = parsed_data.min_odds_scaled;
    let market_id = parsed_data.market_id;
+   let decimals = verify_mint(mint, &market_id.mint)?;
+   let min_fill = min_amount_for_decimals(decimals);
+   validate_amount_over_min(amount, min_fill, "fill_bet")?;
    let side = parsed_data.side;
    let event_game_state = parsed_data.event_game_state;
    let event_state_sequence = parsed_data.event_state_sequence;
 
    let now = clock_unix_timestamp_u32(clock_sysvar)?;
    if let Some(fb) = stake.freebet {
-      verify_freebet_for_fill(fb, user.address(), amount, 1, now)?;
+      verify_freebet_for_fill(fb, user.address(), &market_id.mint, amount, 1, now)?;
       require_freebet_operator_allowed(fb, &market_id.operator)?;
    }
 
@@ -257,10 +262,11 @@ pub(crate) fn run_fill_bet(
 
       let is_valid_mm_token_account = verify_token_account(
          false,
-         &mm_token_account, 
-         &mm_config_pda, 
-         mint, 
-         token_program, 
+         &mm_token_account,
+         &mm_config_pda,
+         mint,
+         token_program,
+         true,
       )?;
       if !is_valid_mm_token_account {
          #[cfg(feature = "log")]
@@ -271,6 +277,7 @@ pub(crate) fn run_fill_bet(
       let Some(encumbrance_pda_bump) = verify_mm_encumbrance_pda(
          mm_encumbrance_pda,
          &mm_program_account,
+         mint.address(),
       ) else {
          #[cfg(feature = "log")]
          log!("fill_bet: invalid encumbrance pda");
@@ -279,10 +286,11 @@ pub(crate) fn run_fill_bet(
 
       let is_valid_mm_liability_token_account = verify_token_account(
          false,
-         &mm_liability_token_account, 
+         &mm_liability_token_account,
          &mm_encumbrance_pda,
-         mint, 
-         token_program, 
+         mint,
+         token_program,
+         true,
       )?;
       if !is_valid_mm_liability_token_account {
          #[cfg(feature = "log")]
@@ -307,6 +315,8 @@ pub(crate) fn run_fill_bet(
          mm_netting_pda,
          mm_program_account,
          event_id_wire,
+         &market_id.operator,
+         &market_id.mint,
       );
       if !is_valid_mm_netting_pda {
          #[cfg(feature = "log")]
@@ -415,7 +425,7 @@ pub(crate) fn run_fill_bet(
       } else {
          quote.max_amount
       };
-      if amount_to_fill < MIN_FILLER_AMOUNT {
+      if amount_to_fill < min_fill {
          continue;
       }
 
@@ -560,6 +570,7 @@ pub(crate) fn run_fill_bet(
             mm_encumbrance_pda: &mut mm_accounts[quote.encumbrance_pda_index],
             encumbrance_bump: quote.encumbrance_pda_bump,
             mm_address: quote.mm_address,
+            mint: mint.address(),
             mm_liability: quote.mm_liability_token_account,
             mm_token: quote.mm_token_account,
          },
@@ -617,9 +628,15 @@ pub(crate) fn run_fill_bet(
       log!("fill_bet: no quotes were filled");
       return Err(SpammError::NoQuotesAvailable.into());
    }
-   if stake.freebet.is_some() && filled_amount != amount {
-      log!("fill_bet: freebet not fully filled");
-      return Err(SpammError::FreebetAmountMismatch.into());
+   if filled_amount != amount {
+      if stake.freebet.is_some() {
+         log!("fill_bet: freebet not fully filled");
+         return Err(SpammError::FreebetAmountMismatch.into());
+      }
+      if stake.promo_type == PromoType::Boost {
+         log!("fill_bet: boost not fully filled");
+         return Err(SpammError::BoostAmountMismatch.into());
+      }
    }
 
    let live_fillers = unsafe {
@@ -637,7 +654,8 @@ pub(crate) fn run_fill_bet(
       amount: filled_amount,
       payout: filled_payout,
       timestamp: now,
-      freebet_id: stake.freebet_id,
+      promo_type: stake.promo_type,
+      promo_account: stake.promo_account,
       event_state_sequence,
       event_game_state,
       result: BetResult::Pending,

@@ -19,7 +19,6 @@ import {
 
 import {
    ANCHOR_TEMPLATE_MM_CONFIG_PDA,
-   ANCHOR_TEMPLATE_MM_ENCUMBRANCE_PDA,
    ANCHOR_TEMPLATE_MM_PARLAY_QUOTE_BUFFER_PDA,
    ANCHOR_TEMPLATE_MM_PROGRAM_ID,
    ANCHOR_TEMPLATE_MM_QUOTE_BUFFER_PDA,
@@ -71,14 +70,18 @@ export async function readParlayQuoteBuffer(rpc: Rpc<SolanaRpcApi>): Promise<MmP
    );
 }
 
-export async function readEncumbrance(rpc: Rpc<SolanaRpcApi>): Promise<MmEncumbranceAccountData> {
-   return decodeMmEncumbranceAccountData(
-      await read(rpc, ANCHOR_TEMPLATE_MM_ENCUMBRANCE_PDA, 'encumbrance'),
-   );
+export async function readEncumbrance(rpc: Rpc<SolanaRpcApi>, mint: Address): Promise<MmEncumbranceAccountData> {
+   const [pda] = await getMmEncumbrancePda(PROGRAM, mint);
+   return decodeMmEncumbranceAccountData(await read(rpc, pda, 'encumbrance'));
 }
 
-export async function readNetting(rpc: Rpc<SolanaRpcApi>, eventId: EventId): Promise<NettingAccountData> {
-   const [pda] = await getNettingPda(PROGRAM, eventId);
+export async function readNetting(
+   rpc: Rpc<SolanaRpcApi>,
+   eventId: EventId,
+   operator: Address,
+   mint: Address,
+): Promise<NettingAccountData> {
+   const [pda] = await getNettingPda(PROGRAM, eventId, operator, mint);
    return decodeNettingAccountData(await read(rpc, pda, 'netting'));
 }
 
@@ -87,15 +90,15 @@ export async function readTokenBalance(rpc: Rpc<SolanaRpcApi>, ata: Address): Pr
    return BigInt(balance.value.amount);
 }
 
-export async function readCollateralBalance(rpc: Rpc<SolanaRpcApi>): Promise<bigint> {
-   return readTokenBalance(rpc, await collateralAta());
+export async function readCollateralBalance(rpc: Rpc<SolanaRpcApi>, mint: Address): Promise<bigint> {
+   return readTokenBalance(rpc, await collateralAta(mint));
 }
 
-export async function readLiabilityBalance(rpc: Rpc<SolanaRpcApi>): Promise<bigint> {
-   return readTokenBalance(rpc, await liabilityAta());
+export async function readLiabilityBalance(rpc: Rpc<SolanaRpcApi>, mint: Address): Promise<bigint> {
+   return readTokenBalance(rpc, await liabilityAta(mint));
 }
 
-export async function encumbranceAddress(): Promise<Address> {
-   const [pda] = await getMmEncumbrancePda(PROGRAM);
+export async function encumbranceAddress(mint: Address): Promise<Address> {
+   const [pda] = await getMmEncumbrancePda(PROGRAM, mint);
    return pda;
 }

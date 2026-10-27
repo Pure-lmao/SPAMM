@@ -1,5 +1,6 @@
 //! `register_mm` tests.
 
+use mollusk_svm_programs_token::{associated_token, token};
 use solana_instruction::AccountMeta;
 use solana_program_error::ProgramError;
 
@@ -113,7 +114,7 @@ fn register_mm_wrong_our_config_pda_rejected() {
    let fake = Pubkey::new_from_array([0xC3; 32]);
    env.upsert(fake, crate::common::system_owned_empty());
    let mut metas = register_metas(mm_admin(), mm_program_id());
-   metas[5] = AccountMeta::new_readonly(fake, false);
+   metas[3] = AccountMeta::new_readonly(fake, false);
    let ix = env.agg_ix(2, vec![], metas);
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::InvalidSeeds);
@@ -132,7 +133,7 @@ fn register_mm_wrong_mm_list_pda_rejected() {
    let fake_list = Pubkey::new_from_array([0xC4; 32]);
    env.upsert(fake_list, crate::common::system_owned_empty());
    let mut metas = register_metas(mm_admin(), mm_program_id());
-   metas[6] = AccountMeta::new(fake_list, false);
+   metas[4] = AccountMeta::new(fake_list, false);
    let ix = env.agg_ix(2, vec![], metas);
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::InvalidSeeds);
@@ -146,15 +147,33 @@ fn register_mm_wrong_mint_rejected() {
    let mid = market_spread_pregame(eid);
    let body = oracle_body_two_outcome(20_000, 20_000);
    env.prepare_mm_for_register(&[(mid, body.as_slice())]);
-   env.upsert(encumbrance_pda(), crate::common::system_owned_empty());
-   env.upsert(liability_token_ata(), crate::common::system_owned_empty());
+   let reg = env.run_ix(env.agg_ix(2, vec![], register_metas(mm_admin(), mm_program_id())));
+   assert!(reg.program_result.is_ok(), "register_mm {:?}", reg);
    let fake_mint = Pubkey::new_from_array([0xC5; 32]);
    env.upsert(fake_mint, crate::common::system_owned_empty());
-   let mut metas = register_metas(mm_admin(), mm_program_id());
-   metas[7] = AccountMeta::new_readonly(fake_mint, false);
-   let ix = env.agg_ix(2, vec![], metas);
+   env.upsert(encumbrance_pda(), crate::common::system_owned_empty());
+   env.upsert(liability_token_ata(), crate::common::system_owned_empty());
+   let sys = mollusk_svm::program::keyed_account_for_system_program().0;
+   let ix = env.agg_ix(
+      4,
+      vec![],
+      vec![
+         AccountMeta::new(mm_admin(), true),
+         AccountMeta::new_readonly(mm_program_id(), false),
+         AccountMeta::new_readonly(crate::common::mm_config_pda(), false),
+         AccountMeta::new_readonly(mm_list_pda(), false),
+         AccountMeta::new(encumbrance_pda(), false),
+         AccountMeta::new(liability_token_ata(), false),
+         AccountMeta::new_readonly(crate::common::mm_collateral_ata(), false),
+         AccountMeta::new_readonly(fake_mint, false),
+         AccountMeta::new_readonly(token::ID, false),
+         AccountMeta::new_readonly(associated_token::ID, false),
+         AccountMeta::new_readonly(crate::common::rent_sysvar_pubkey(), false),
+         AccountMeta::new_readonly(sys, false),
+      ],
+   );
    let r = env.run_ix(ix);
-   assert_program_err(&r, ProgramError::InvalidAccountData);
+   assert_program_err(&r, ProgramError::InvalidAccountOwner);
 }
 
 #[test]
@@ -168,7 +187,7 @@ fn register_mm_wrong_system_program_rejected() {
    env.upsert(encumbrance_pda(), crate::common::system_owned_empty());
    env.upsert(liability_token_ata(), crate::common::system_owned_empty());
    let mut metas = register_metas(mm_admin(), mm_program_id());
-   metas[11] = AccountMeta::new_readonly(user(), false);
+   metas[6] = AccountMeta::new_readonly(user(), false);
    let ix = env.agg_ix(2, vec![], metas);
    let r = env.run_ix(ix);
    assert_program_err(&r, ProgramError::IncorrectProgramId);

@@ -55,7 +55,7 @@ impl FillRfqBetIxData {
          offer_expiry: zc.offer_expiry.get(),
       };
       const LABEL: &str = "fill_rfq_bet";
-      validate_amount_over_min(parsed.amount, LABEL)?;
+      validate_amount_over_min(parsed.amount, 1, LABEL)?;
       if unlikely(parsed.amount > parsed.max_stake) {
          log!("{}: amount exceeds max_stake", LABEL);
          return Err(SpammError::StakeExceedsMaxStake.into());

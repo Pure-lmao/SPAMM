@@ -18,6 +18,7 @@ use crate::instructions::{
    get_quote_parlay::process as get_quote_parlay,
    init_event::INIT_EVENT_IX_DISCRIMINATOR,
    init_market::INIT_MARKET_IX_DISCRIMINATOR,
+   create_token_account::CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR,
    init_program::INIT_PROGRAM_IX_DISCRIMINATOR,
    set_rfq_signer::SET_RFQ_SIGNER_IX_DISCRIMINATOR,
    update_event_state::UPDATE_EVENT_STATE_IX_DISCRIMINATOR,
@@ -51,6 +52,7 @@ mod get_quote_parlay;
 mod init_event;
 mod init_market;
 mod init_program;
+mod create_token_account;
 mod returns;
 mod set_rfq_signer;
 mod token;
@@ -68,6 +70,7 @@ pub fn dispatch(
 ) -> ProgramResult {
    match discriminator {
       INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(program_id, accounts, data),
+      CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR => create_token_account::process(program_id, accounts, data),
       SET_RFQ_SIGNER_IX_DISCRIMINATOR => set_rfq_signer::process(program_id, accounts),
       INIT_EVENT_IX_DISCRIMINATOR => init_event::process(program_id, accounts, data),
       INIT_MARKET_IX_DISCRIMINATOR => init_market::process(program_id, accounts, data),

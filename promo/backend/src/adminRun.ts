@@ -12,13 +12,14 @@ import {
    sendAndConfirmSignedTransaction,
    type RpcClients,
 } from '../../../aggregator/client/txSend.ts';
-import { getEventGameState, getRegisterMmIx, readAccountDataRaw, getAta, getEventStatePda, getMmConfigPda, getMmQuoteBufferPda, getMmParlayQuoteBufferPda } from './spammSdk';
+import { getEventGameState, getInitMmMintVaultIx, getRegisterMmIx, readAccountDataRaw, getAta, getEventStatePda, getMmConfigPda, getMmQuoteBufferPda, getMmParlayQuoteBufferPda } from './spammSdk';
 import type { EventId, EventGameState, MarketId } from './spammSdk';
-import { DEFAULT_MARKET_OPERATOR, PROMO_BOOTSTRAP_EVENT_SEQUENCE, PROMO_PROGRAM_ID } from './constants';
+import { DEFAULT_MARKET_OPERATOR, DEFAULT_PROMO_MINT, PROMO_BOOTSTRAP_EVENT_SEQUENCE, PROMO_PROGRAM_ID } from './constants';
 import { ORACLE_ACCOUNT_DISCRIMINATOR, PROMO_MKT, decodePromoConfigAccount } from './codex';
 import {
    getCloseEventIx,
    getCloseMarketIx,
+   getCreateTokenAccountIx,
    getInitEventIx,
    getInitProgramIx,
    getPromoInitMarketIx,
@@ -271,6 +272,14 @@ export async function runPromoRegisterMm(
          {
             id: 'promo-register-mm',
             instruction: await getRegisterMmIx(ctx.signer.address, ctx.programId),
+         },
+         {
+            id: 'promo-create-token-account',
+            instruction: await getCreateTokenAccountIx(ctx.signer.address, ctx.programId, DEFAULT_PROMO_MINT),
+         },
+         {
+            id: 'promo-init-mm-mint-vault',
+            instruction: await getInitMmMintVaultIx(ctx.signer.address, ctx.programId, DEFAULT_PROMO_MINT),
          },
       ],
       options,
@@ -606,8 +615,12 @@ export async function runPromoCloseMarketAndEvent(
    );
 }
 
-export function promoMarketIdFromParts(parts: MarketKeyParts, operator: Address = DEFAULT_MARKET_OPERATOR): MarketId {
-   return marketIdFromKeyParts(parts, operator);
+export function promoMarketIdFromParts(
+   parts: MarketKeyParts,
+   operator: Address = DEFAULT_MARKET_OPERATOR,
+   mint: Address = DEFAULT_PROMO_MINT,
+): MarketId {
+   return marketIdFromKeyParts(parts, operator, mint);
 }
 
 export function promoMarketIdFromIds(
@@ -624,6 +637,7 @@ export function promoMarketIdFromIds(
       isPregame: true,
       player: 0n,
       operator,
+      mint: DEFAULT_PROMO_MINT,
    };
 }
 
@@ -635,9 +649,10 @@ export async function buildPromoInitMarketFromParts(
    marketOutcomes: 2 | 3,
    maxAmount: bigint,
    maxTotalAmount: bigint,
+   mint: Address = DEFAULT_PROMO_MINT,
 ): Promise<PromoInitMarketPayload> {
    return {
-      marketId: promoMarketIdFromParts(parts, operator),
+      marketId: promoMarketIdFromParts(parts, operator, mint),
       eventStartTime,
       marketOutcomes,
       maxAmount,
@@ -650,9 +665,10 @@ export async function runPromoWithdraw(
    ctx: PromoAdminContext,
    destinationAta?: Address,
    options?: SendAdminOptions,
+   mint: Address = DEFAULT_PROMO_MINT,
 ) {
    await assertPromoConfigAdminSigner(ctx);
-   const dest = destinationAta ?? await getAta(ctx.signer.address);
+   const dest = destinationAta ?? await getAta(ctx.signer.address, mint);
    return sendAdminInstructions(
       ctx,
       options?.groupId ?? 'promo-withdraw',
@@ -663,6 +679,7 @@ export async function runPromoWithdraw(
                ctx.signer.address,
                ctx.programId,
                dest,
+               mint,
             ),
          },
       ],

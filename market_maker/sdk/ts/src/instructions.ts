@@ -4,7 +4,7 @@ import type { Address } from '@solana/kit';
 import {
    AGGREGATOR_CONFIG_PDA,
    CLOCK_ID,
-   MINT_ID,
+   CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    SPL_TOKEN_PROGRAM_ID,
    SYSVAR_RENT_ID,
@@ -119,9 +119,9 @@ const rw = (address: Address) => ({ address, role: AccountRole.WRITABLE });
 const ws = (address: Address) => ({ address, role: AccountRole.WRITABLE_SIGNER });
 
 /**
- * **`init_program`** — MM config PDA, single-leg quote buffer PDA, parlay quote buffer PDA, MM collateral ATA (authority = config PDA).
+ * **`init_program`** — MM config PDA and both quote buffers. Open a collateral ATA per mint with `getCreateTokenAccountIx`.
  *
- * **Rust:** `market_maker::instructions::init_program` (`INIT_PROGRAM_IX_DISCRIMINATOR` = 100). `admin` in data must equal `feepayer`. Accounts include rent sysvar immediately above system program.
+ * **Rust:** `market_maker::instructions::init_program` (`INIT_PROGRAM_IX_DISCRIMINATOR` = 100).
  */
 export async function getInitProgramIx(
    feepayer: Address,
@@ -131,7 +131,6 @@ export async function getInitProgramIx(
    const [configPda] = await getMmConfigPda(mmProgram);
    const [quoteBuf] = await getMmQuoteBufferPda(mmProgram);
    const [parlayQuoteBuf] = await getMmParlayQuoteBufferPda(mmProgram);
-   const mmTokenAta = await getAta(configPda);
    return {
       programAddress: mmProgram,
       accounts: [
@@ -139,10 +138,6 @@ export async function getInitProgramIx(
          rw(configPda),
          rw(quoteBuf),
          rw(parlayQuoteBuf),
-         rw(mmTokenAta),
-         ro(MINT_ID),
-         ro(SPL_TOKEN_PROGRAM_ID),
-         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSVAR_RENT_ID),
          ro(SYSTEM_PROGRAM_ID),
       ],
@@ -150,6 +145,29 @@ export async function getInitProgramIx(
          kind: 'initProgram',
          data: { admin: feepayer, rfqSigner: rfqSigner ?? feepayer },
       }),
+   };
+}
+
+/** **`create_token_account`** — config PDA collateral ATA for one mint (`CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR` = 102). */
+export async function getCreateTokenAccountIx(
+   admin: Address,
+   mmProgram: Address,
+   mint: Address,
+): Promise<Instruction> {
+   const [configPda] = await getMmConfigPda(mmProgram);
+   const tokenAccount = await getAta(configPda, mint);
+   return {
+      programAddress: mmProgram,
+      accounts: [
+         ws(admin),
+         ro(configPda),
+         rw(tokenAccount),
+         ro(mint),
+         ro(SPL_TOKEN_PROGRAM_ID),
+         ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
+         ro(SYSTEM_PROGRAM_ID),
+      ],
+      data: new Uint8Array([CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR]),
    };
 }
 
@@ -176,9 +194,10 @@ export async function getMmFillBetRfqIx(
    const [configPda] = await getMmConfigPda(mmProgram);
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, marketId);
    const [eventStatePda] = await getEventStatePda(mmProgram, marketId.eventId);
-   const mmTokenAta = await getAta(configPda);
-   const [encumbrancePda] = await getMmEncumbrancePda(mmProgram);
-   const liabilityAta = await getAta(encumbrancePda);
+   const mint = marketId.mint;
+   const mmTokenAta = await getAta(configPda, mint);
+   const [encumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const liabilityAta = await getAta(encumbrancePda, mint);
    const data: FillRfqIxData = {
       instructionDiscriminator: MM_FILL_BET_RFQ_IX_DISCRIMINATOR,
       amountToSend,
@@ -193,7 +212,7 @@ export async function getMmFillBetRfqIx(
          rw(configPda),
          rw(mmTokenAta),
          rw(liabilityAta),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: encodeMarketMakerInstructionData({ kind: 'fillBetRfq', data }),
@@ -204,12 +223,13 @@ export async function getMmFillBetRfqIx(
 export async function getMmFillParlayRfqIx(
    user: Address,
    mmProgram: Address,
+   mint: Address,
    amountToSend: bigint,
 ): Promise<Instruction> {
    const [configPda] = await getMmConfigPda(mmProgram);
-   const mmTokenAta = await getAta(configPda);
-   const [encumbrancePda] = await getMmEncumbrancePda(mmProgram);
-   const liabilityAta = await getAta(encumbrancePda);
+   const mmTokenAta = await getAta(configPda, mint);
+   const [encumbrancePda] = await getMmEncumbrancePda(mmProgram, mint);
+   const liabilityAta = await getAta(encumbrancePda, mint);
    const data: FillRfqIxData = {
       instructionDiscriminator: MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR,
       amountToSend,
@@ -222,20 +242,25 @@ export async function getMmFillParlayRfqIx(
          rw(configPda),
          rw(mmTokenAta),
          rw(liabilityAta),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: encodeMarketMakerInstructionData({ kind: 'fillParlayRfq', data }),
    };
 }
 
-export async function getWithdrawFromTokenAccountIx(admin: Address, mmProgram: Address, destinationAta: Address): Promise<Instruction> {
+export async function getWithdrawFromTokenAccountIx(
+   admin: Address,
+   mmProgram: Address,
+   destinationAta: Address,
+   mint: Address,
+): Promise<Instruction> {
    const [configPda] = await getMmConfigPda(mmProgram);
-   const tokenAccount = await getAta(configPda);
+   const tokenAccount = await getAta(configPda, mint);
    return {
       programAddress: mmProgram,
       data: new Uint8Array([WITHDRAW_FROM_TOKEN_ACCOUNT_IX_DISCRIMINATOR]),
-      accounts: [ws(admin), ro(configPda), rw(tokenAccount), ro(MINT_ID), ro(SPL_TOKEN_PROGRAM_ID), rw(destinationAta)],
+      accounts: [ws(admin), ro(configPda), rw(tokenAccount), ro(mint), ro(SPL_TOKEN_PROGRAM_ID), rw(destinationAta)],
    };
 }
 
@@ -305,7 +330,7 @@ export async function getUpdateEventStateIx(
 }
 
 /**
- * **`init_market`** — create market-data PDA `["market_data", market_id_body_wire, operator]`; instruction tail is
+ * **`init_market`** — create market-data PDA `["market_data", market_id_body, operator, mint]`; instruction tail is
  * `market_id` + oracle odds body (8-byte two-outcome bodies are padded to 12 bytes to match the on-chain floor).
  *
  * **Rust:** `init_market::process` (discriminator 111). Accounts: feepayer, config PDA, market-data PDA, rent sysvar, system program.
@@ -447,6 +472,7 @@ export async function getMmFillParlayQuoteIx(
    mmProgram: Address,
    user: Address,
    liabilityAta: Address,
+   mint: Address,
 ): Promise<Instruction> {
    const full: FillParlayQuoteIxData = {
       instructionDiscriminator: FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
@@ -456,7 +482,7 @@ export async function getMmFillParlayQuoteIx(
    const ixData = encodeFillParlayQuoteIxData(full);
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return {
       programAddress: mmProgram,
       accounts: [
@@ -466,7 +492,7 @@ export async function getMmFillParlayQuoteIx(
          rw(mmParlayQuoteBufferPda),
          rw(mmTokenAta),
          rw(liabilityAta),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: ixData,
@@ -494,7 +520,8 @@ export async function getMmFillBetQuoteIx(
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, params.marketId);
    const [eventStatePda] = await getEventStatePda(mmProgram, params.marketId.eventId);
    const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const mint = params.marketId.mint;
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return {
       programAddress: mmProgram,
       accounts: [
@@ -506,7 +533,7 @@ export async function getMmFillBetQuoteIx(
          rw(mmQuoteBufferPda),
          rw(mmTokenAta),
          rw(liabilityAta),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: ixData,
@@ -568,7 +595,8 @@ export async function getMmFillCashoutQuoteIx(
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, params.marketId);
    const [eventStatePda] = await getEventStatePda(mmProgram, params.marketId.eventId);
    const [mmQuoteBufferPda] = await getMmQuoteBufferPda(mmProgram);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const mint = params.marketId.mint;
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return {
       programAddress: mmProgram,
       accounts: [
@@ -580,7 +608,7 @@ export async function getMmFillCashoutQuoteIx(
          rw(mmQuoteBufferPda),
          rw(mmTokenAta),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: ixData,
@@ -633,6 +661,7 @@ export async function getMmFillCashoutParlayQuoteIx(
    mmProgram: Address,
    user: Address,
    paymentDest: Address,
+   mint: Address,
 ): Promise<Instruction> {
    const full: FillCashoutParlayQuoteIxData = {
       instructionDiscriminator: FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
@@ -642,7 +671,7 @@ export async function getMmFillCashoutParlayQuoteIx(
    const ixData = encodeFillCashoutParlayQuoteIxData(full);
    const [mmConfigPda] = await getMmConfigPda(mmProgram);
    const [mmParlayQuoteBufferPda] = await getMmParlayQuoteBufferPda(mmProgram);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return {
       programAddress: mmProgram,
       accounts: [
@@ -652,7 +681,7 @@ export async function getMmFillCashoutParlayQuoteIx(
          rw(mmParlayQuoteBufferPda),
          rw(mmTokenAta),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: ixData,
@@ -674,7 +703,8 @@ export async function getMmFillCashoutRfqIx(
    const [configPda] = await getMmConfigPda(mmProgram);
    const [marketDataPda] = await getMmMarketDataPda(mmProgram, marketId);
    const [eventStatePda] = await getEventStatePda(mmProgram, marketId.eventId);
-   const mmTokenAta = await getAta(configPda);
+   const mint = marketId.mint;
+   const mmTokenAta = await getAta(configPda, mint);
    const data: FillRfqIxData = {
       instructionDiscriminator: FILL_CASHOUT_RFQ_IX_DISCRIMINATOR,
       amountToSend,
@@ -689,7 +719,7 @@ export async function getMmFillCashoutRfqIx(
          rw(configPda),
          rw(mmTokenAta),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: encodeMarketMakerInstructionData({ kind: 'fillCashoutRfq', data }),
@@ -704,11 +734,12 @@ export async function getMmFillCashoutRfqIx(
 export async function getMmFillCashoutParlayRfqIx(
    user: Address,
    mmProgram: Address,
+   mint: Address,
    amountToSend: bigint,
    paymentDest: Address,
 ): Promise<Instruction> {
    const [configPda] = await getMmConfigPda(mmProgram);
-   const mmTokenAta = await getAta(configPda);
+   const mmTokenAta = await getAta(configPda, mint);
    const data: FillRfqIxData = {
       instructionDiscriminator: FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR,
       amountToSend,
@@ -721,7 +752,7 @@ export async function getMmFillCashoutParlayRfqIx(
          rw(configPda),
          rw(mmTokenAta),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       data: encodeMarketMakerInstructionData({ kind: 'fillCashoutParlayRfq', data }),
@@ -796,6 +827,7 @@ export type MarketMakerInstructionInput =
         mmProgram: Address;
         user: Address;
         liabilityAta: Address;
+        mint: Address;
      }
    | {
         kind: 'getCashoutQuote';
@@ -822,6 +854,7 @@ export type MarketMakerInstructionInput =
         mmProgram: Address;
         user: Address;
         paymentDest: Address;
+        mint: Address;
      }
    | {
         kind: 'fillCashoutRfq';
@@ -835,6 +868,7 @@ export type MarketMakerInstructionInput =
         kind: 'fillCashoutParlayRfq';
         user: Address;
         mmProgram: Address;
+        mint: Address;
         amountToSend: bigint;
         paymentDest: Address;
      }
@@ -883,7 +917,7 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
       case 'fillBetQuote':
          return getMmFillBetQuoteIx(input.params, input.mmProgram, input.user, input.liabilityAta);
       case 'fillParlayQuote':
-         return getMmFillParlayQuoteIx(input.params, input.mmProgram, input.user, input.liabilityAta);
+         return getMmFillParlayQuoteIx(input.params, input.mmProgram, input.user, input.liabilityAta, input.mint);
       case 'getCashoutQuote':
          return getMmGetCashoutQuoteIx(input.params, input.mmProgram, input.user);
       case 'fillCashoutQuote':
@@ -891,7 +925,13 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
       case 'getCashoutQuoteParlay':
          return getMmGetCashoutQuoteParlayIx(input.params, input.mmProgram, input.user);
       case 'fillCashoutParlayQuote':
-         return getMmFillCashoutParlayQuoteIx(input.params, input.mmProgram, input.user, input.paymentDest);
+         return getMmFillCashoutParlayQuoteIx(
+            input.params,
+            input.mmProgram,
+            input.user,
+            input.paymentDest,
+            input.mint,
+         );
       case 'fillCashoutRfq':
          return getMmFillCashoutRfqIx(
             input.user,
@@ -904,6 +944,7 @@ export async function getInstructionIx(input: MarketMakerInstructionInput): Prom
          return getMmFillCashoutParlayRfqIx(
             input.user,
             input.mmProgram,
+            input.mint,
             input.amountToSend,
             input.paymentDest,
          );

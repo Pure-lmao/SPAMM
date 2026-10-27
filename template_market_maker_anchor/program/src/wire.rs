@@ -42,7 +42,13 @@ impl MarketIdArg {
    }
 
    pub fn operator(&self) -> &[u8] {
-      &self.wire[MARKET_ID_BODY_WIRE_LEN..]
+      let start = MARKET_ID_BODY_WIRE_LEN;
+      &self.wire[start..start + 32]
+   }
+
+   pub fn mint(&self) -> &[u8] {
+      let start = MARKET_ID_BODY_WIRE_LEN + 32;
+      &self.wire[start..start + 32]
    }
 }
 

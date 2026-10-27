@@ -53,17 +53,14 @@ use crate::{
       },
    },
    state::{
-      account_bet::BetResult,
-      mm_parlay_quote::ParlayLegWire,
-      FillCashoutParlayQuoteIxData, FillParlayCashoutIxData, PARLAY_LEG_SEL_LEN,
+      CashoutSnapshot, FillCashoutParlayQuoteIxData, FillParlayCashoutIxData,
       FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR, GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN,
-      empty_parlay_leg_sel_buf,
-      get_cashout_quote_parlay_ix_wire_len, write_get_cashout_quote_parlay_ix,
+      PARLAY_LEG_SEL_LEN, get_cashout_quote_parlay_ix_wire_len, write_cashout_quote_parlay_from_bet,
       other::config_signer_seeds,
    },
 };
 
-pub const FILL_PARLAY_CASHOUT_IX_DISCRIMINATOR: u8 = 71;
+pub const FILL_PARLAY_CASHOUT_IX_DISCRIMINATOR: u8 = 91;
 
 /// Scalars needed after ticket validation — keeps the fat ix decode off the ticket frame.
 #[derive(Clone, Copy)]
@@ -101,10 +98,17 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 /// Owns the fat ticket (~3944B). Takes the accounts slice (not 20 pointer args) so the frame fits.
 #[inline(never)]
 fn run_fill_parlay_cashout(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
-   let mut ticket = unsafe { core::mem::zeroed::<ParlayCashoutOrigTicket>() };
+   let mut ticket = ParlayCashoutOrigTicket::blank();
    let (encumbrance_pda_bump, meta) =
       validate_mm_and_ticket_for_parlay_cashout(accounts, data, &mut ticket)?;
-   finish_fill_parlay_cashout_after_ticket(accounts, &ticket, encumbrance_pda_bump, meta)
+   let parsed = FillParlayCashoutIxData::decode(data)?;
+   finish_fill_parlay_cashout_after_ticket(
+      accounts,
+      &ticket,
+      encumbrance_pda_bump,
+      meta,
+      &parsed.snapshots,
+   )
 }
 
 /// Owns decoded ix (~240B); writes ticket via out-param (caller's frame).
@@ -163,7 +167,7 @@ fn validate_mm_and_ticket_for_parlay_cashout(
    if !verify_parlay_quote_buffer(mm_buf, mm_program) {
       return Err(ProgramError::InvalidAccountData);
    }
-   if !verify_token_account(false, mm_token_account, mm_config, mint, token_program)? {
+   if !verify_token_account(false, mm_token_account, mm_config, mint, token_program, true)? {
       return Err(ProgramError::InvalidAccountData);
    }
    let Some(encumbrance_pda_bump) = verify_cashout_mm_encumbrance(
@@ -185,6 +189,7 @@ fn finish_fill_parlay_cashout_after_ticket(
    ticket: &ParlayCashoutOrigTicket,
    encumbrance_pda_bump: u8,
    ix_data_meta: ParlayCashoutIxMeta,
+   snapshots: &[CashoutSnapshot],
 ) -> ProgramResult {
    let (fixed, mm_accounts) = accounts.split_at_mut(17);
    // Exact fixed layout (17). `config_pda` / `associated_token_program` already checked in preamble.
@@ -221,18 +226,6 @@ fn finish_fill_parlay_cashout_after_ticket(
    let mm_token_account = &mm_accounts[5];
    let leg_accounts = &mm_accounts[mm_fixed..];
 
-   let mut legs_buf = unsafe { core::mem::zeroed::<[ParlayLegWire; MAX_PARLAY_LEGS]>() };
-   for i in 0..num_legs {
-      legs_buf[i] = ParlayLegWire {
-         market_id: ticket.legs[i].market_id,
-         side: ticket.legs[i].side,
-         event_state_sequence: ticket.legs[i].cashout_event_state_sequence,
-         event_game_state: ticket.legs[i].cashout_event_game_state,
-         odds_scaled: ticket.legs[i].odds_scaled,
-         result: BetResult::Pending,
-      };
-   }
-
    let max_payment = quote_parlay_cashout_mm(
       user,
       clock_sysvar,
@@ -240,10 +233,11 @@ fn finish_fill_parlay_cashout_after_ticket(
       mm_config,
       mm_buf,
       leg_accounts,
+      bet_pda,
       ix_data_meta.amount,
       ix_data_meta.min_payout,
       num_legs,
-      &legs_buf[..num_legs],
+      snapshots,
       ticket.payout_removed,
    )?;
    let timestamp = clock_unix_timestamp_u32(clock_sysvar)?;
@@ -273,6 +267,7 @@ fn finish_fill_parlay_cashout_after_ticket(
       mm_encumbrance_pda,
       encumbrance_pda_bump,
       mm_program.address(),
+      mint.address(),
       mm_liability_token_account,
       payment_dest,
       max_payment,
@@ -304,11 +299,12 @@ fn finish_fill_parlay_cashout_after_ticket(
       token_program,
       rent_sysvar,
       system_program,
+      mm_encumbrance_pda,
       mm_program.address(),
       ix_data_meta.cashout_id,
       ix_data_meta.amount,
       ix_data_meta.num_legs,
-      &ticket.legs[..num_legs],
+      snapshots,
       ticket.payout_removed,
       ticket.delay,
       ticket.orig_amount,
@@ -332,10 +328,11 @@ fn quote_parlay_cashout_mm(
    mm_config: &AccountView,
    mm_buf: &AccountView,
    leg_accounts: &[AccountView],
+   bet_pda: &AccountView,
    amount: u64,
    min_payout: u64,
    num_legs: usize,
-   legs: &[ParlayLegWire],
+   snapshots: &[CashoutSnapshot],
    payout_removed: u64,
 ) -> Result<u64, ProgramError> {
    let wire_len = get_cashout_quote_parlay_ix_wire_len(num_legs);
@@ -349,7 +346,8 @@ fn quote_parlay_cashout_mm(
       payout_removed,
       min_payout,
       num_legs,
-      legs,
+      bet_pda,
+      snapshots,
    )?;
 
    if !cpi_get_cashout_quote_parlay(
@@ -373,7 +371,6 @@ fn quote_parlay_cashout_mm(
    Ok(max_payment)
 }
 
-/// Owns `[ParlayLegSel; MAX_PARLAY_LEGS]` on this frame only (keeps it off `quote_parlay_cashout_mm`).
 #[inline(never)]
 fn pack_cashout_quote_parlay_ix(
    out: &mut [u8],
@@ -381,13 +378,19 @@ fn pack_cashout_quote_parlay_ix(
    payout_removed: u64,
    min_payout: u64,
    num_legs: usize,
-   legs: &[ParlayLegWire],
+   bet_pda: &AccountView,
+   snapshots: &[CashoutSnapshot],
 ) -> Result<(), ProgramError> {
-   let mut sels = empty_parlay_leg_sel_buf::<MAX_PARLAY_LEGS>();
-   for i in 0..num_legs {
-      sels[i] = legs[i].sel();
-   }
-   write_get_cashout_quote_parlay_ix(out, amount, payout_removed, min_payout, num_legs, &sels[..num_legs])
+   let raw = bet_pda.try_borrow()?;
+   write_cashout_quote_parlay_from_bet(
+      out,
+      amount,
+      payout_removed,
+      min_payout,
+      num_legs,
+      raw.as_ref(),
+      snapshots,
+   )
 }
 
 #[inline(never)]

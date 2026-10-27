@@ -13,8 +13,8 @@ import {
    encodeGetQuoteParlayIxData,
    getAta,
    getEventStatePda,
+   getMmEncumbrancePda,
    getMmMarketDataPda,
-   MINT_ID,
    MM_FILL_BET_QUOTE_IX_DISCRIMINATOR,
    MM_FILL_BET_RFQ_IX_DISCRIMINATOR,
    MM_FILL_CASHOUT_PARLAY_QUOTE_IX_DISCRIMINATOR,
@@ -31,6 +31,7 @@ import {
    SPL_TOKEN_PROGRAM_ID,
    SYSTEM_PROGRAM_ID,
    CONFIG_PDA,
+   SYSVAR_RENT_ID,
 } from 'spamm-aggregator-sdk';
 
 import {
@@ -47,7 +48,6 @@ import {
 } from './codex.js';
 import {
    ANCHOR_TEMPLATE_MM_CONFIG_PDA,
-   ANCHOR_TEMPLATE_MM_ENCUMBRANCE_PDA,
    ANCHOR_TEMPLATE_MM_PARLAY_QUOTE_BUFFER_PDA,
    ANCHOR_TEMPLATE_MM_PROGRAM_ID,
    ANCHOR_TEMPLATE_MM_QUOTE_BUFFER_PDA,
@@ -81,15 +81,16 @@ function ix(accounts: Instruction['accounts'], data: Uint8Array): Instruction {
    return { programAddress: PROGRAM, accounts, data };
 }
 
-export async function collateralAta(): Promise<Address> {
-   return getAta(CONFIG);
+export async function collateralAta(mint: Address): Promise<Address> {
+   return getAta(CONFIG, mint);
 }
 
-export async function liabilityAta(): Promise<Address> {
-   return getAta(ANCHOR_TEMPLATE_MM_ENCUMBRANCE_PDA);
+export async function liabilityAta(mint: Address): Promise<Address> {
+   const [encumbrance] = await getMmEncumbrancePda(PROGRAM, mint);
+   return getAta(encumbrance, mint);
 }
 
-/** Creates config, both quote buffers, and the collateral ATA. `admin` must sign and pay. */
+/** Creates config and both quote buffers. Open a collateral ATA per mint with `getCreateTokenAccountIx`. */
 export async function getInitProgramIx(admin: Address, rfqSigner: Address = admin): Promise<Instruction> {
    return ix(
       [
@@ -97,13 +98,26 @@ export async function getInitProgramIx(admin: Address, rfqSigner: Address = admi
          rw(CONFIG),
          rw(QUOTE_BUFFER),
          rw(PARLAY_BUFFER),
-         rw(await collateralAta()),
-         ro(MINT_ID),
+         ro(SYSVAR_RENT_ID),
+         ro(SYSTEM_PROGRAM_ID),
+      ],
+      encodeInitProgramIxData(admin, rfqSigner),
+   );
+}
+
+/** Config PDA collateral ATA for one mint (discriminator 102). */
+export async function getCreateTokenAccountIx(admin: Address, mint: Address): Promise<Instruction> {
+   return ix(
+      [
+         ws(admin),
+         ro(CONFIG),
+         rw(await collateralAta(mint)),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          ro(SPL_ASSOCIATED_TOKEN_PROGRAM_ID),
          ro(SYSTEM_PROGRAM_ID),
       ],
-      encodeInitProgramIxData(admin, rfqSigner),
+      new Uint8Array([102]),
    );
 }
 
@@ -116,7 +130,7 @@ export async function getInitEventIx(admin: Address, eventId: EventId): Promise<
    assertEventId(eventId);
    const [eventState] = await getEventStatePda(PROGRAM, eventId);
    return ix(
-      [ws(admin), ro(CONFIG), rw(eventState), ro(SYSTEM_PROGRAM_ID)],
+      [ws(admin), ro(CONFIG), rw(eventState), ro(SYSVAR_RENT_ID), ro(SYSTEM_PROGRAM_ID)],
       encodeInitEventIxData(eventId),
    );
 }
@@ -126,7 +140,7 @@ export async function getInitMarketIx(admin: Address, marketId: MarketId): Promi
    assertMarketId(marketId);
    const [market] = await getMmMarketDataPda(PROGRAM, marketId);
    return ix(
-      [ws(admin), ro(CONFIG), rw(market), ro(SYSTEM_PROGRAM_ID)],
+      [ws(admin), ro(CONFIG), rw(market), ro(SYSVAR_RENT_ID), ro(SYSTEM_PROGRAM_ID)],
       encodeInitMarketIxData(marketId),
    );
 }
@@ -145,7 +159,7 @@ export async function getCloseEventIx(admin: Address, eventId: EventId): Promise
    assertEventId(eventId);
    const [eventState] = await getEventStatePda(PROGRAM, eventId);
    return ix(
-      [ws(admin), ro(CONFIG), rw(eventState)],
+      [ws(admin), ro(CONFIG), rw(eventState), ro(SYSTEM_PROGRAM_ID)],
       encodeCloseEventIxData(eventId),
    );
 }
@@ -154,7 +168,7 @@ export async function getCloseMarketIx(admin: Address, marketId: MarketId): Prom
    assertMarketId(marketId);
    const [market] = await getMmMarketDataPda(PROGRAM, marketId);
    return ix(
-      [ws(admin), ro(CONFIG), rw(market)],
+      [ws(admin), ro(CONFIG), rw(market), ro(SYSTEM_PROGRAM_ID)],
       encodeCloseMarketIxData(marketId),
    );
 }
@@ -175,13 +189,13 @@ export async function getUpdateEventStateIx(
 }
 
 /** Withdraw the full collateral ATA balance to `destination`. */
-export async function getWithdrawIx(admin: Address, destination: Address): Promise<Instruction> {
+export async function getWithdrawIx(admin: Address, destination: Address, mint: Address): Promise<Instruction> {
    return ix(
       [
          ws(admin),
          ro(CONFIG),
-         rw(await collateralAta()),
-         ro(MINT_ID),
+         rw(await collateralAta(mint)),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
          rw(destination),
       ],
@@ -220,9 +234,9 @@ export async function getFillBetQuoteIx(
          eventMeta,
          rw(CONFIG),
          rw(QUOTE_BUFFER),
-         rw(await collateralAta()),
-         rw(await liabilityAta()),
-         ro(MINT_ID),
+         rw(await collateralAta(data.marketId.mint)),
+         rw(await liabilityAta(data.marketId.mint)),
+         ro(data.marketId.mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       encodeFillBetQuoteIxData({ ...data, instructionDiscriminator: MM_FILL_BET_QUOTE_IX_DISCRIMINATOR }),
@@ -248,6 +262,7 @@ export async function getGetQuoteParlayIx(
 
 export async function getFillParlayQuoteIx(
    user: Address,
+   mint: Address,
    data: Omit<FillParlayQuoteIxData, 'instructionDiscriminator'>,
 ): Promise<Instruction> {
    return ix(
@@ -256,9 +271,9 @@ export async function getFillParlayQuoteIx(
          rs(CONFIG_PDA),
          rw(CONFIG),
          rw(PARLAY_BUFFER),
-         rw(await collateralAta()),
-         rw(await liabilityAta()),
-         ro(MINT_ID),
+         rw(await collateralAta(mint)),
+         rw(await liabilityAta(mint)),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       encodeFillParlayQuoteIxData({ ...data, instructionDiscriminator: MM_FILL_QUOTE_PARLAY_IX_DISCRIMINATOR }),
@@ -292,9 +307,9 @@ export async function getFillCashoutQuoteIx(
          eventMeta,
          rw(CONFIG),
          rw(QUOTE_BUFFER),
-         rw(await collateralAta()),
+         rw(await collateralAta(data.marketId.mint)),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(data.marketId.mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       encodeFillCashoutQuoteIxData({ ...data, instructionDiscriminator: MM_FILL_CASHOUT_QUOTE_IX_DISCRIMINATOR }),
@@ -324,6 +339,7 @@ export async function getGetCashoutQuoteParlayIx(
 export async function getFillCashoutParlayQuoteIx(
    user: Address,
    paymentDest: Address,
+   mint: Address,
    data: Omit<FillCashoutParlayQuoteIxData, 'instructionDiscriminator'>,
 ): Promise<Instruction> {
    return ix(
@@ -332,9 +348,9 @@ export async function getFillCashoutParlayQuoteIx(
          rs(CONFIG_PDA),
          rw(CONFIG),
          rw(PARLAY_BUFFER),
-         rw(await collateralAta()),
+         rw(await collateralAta(mint)),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       encodeFillCashoutParlayQuoteIxData({
@@ -361,25 +377,25 @@ export async function getFillBetRfqIx(user: Address, marketId: MarketId, amountT
          market,
          eventState,
          rw(CONFIG),
-         rw(await collateralAta()),
-         rw(await liabilityAta()),
-         ro(MINT_ID),
+         rw(await collateralAta(marketId.mint)),
+         rw(await liabilityAta(marketId.mint)),
+         ro(marketId.mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       encodeFillRfqIxData(MM_FILL_BET_RFQ_IX_DISCRIMINATOR, amountToSend),
    );
 }
 
-export async function getFillParlayRfqIx(user: Address, amountToSend: bigint): Promise<Instruction> {
+export async function getFillParlayRfqIx(user: Address, mint: Address, amountToSend: bigint): Promise<Instruction> {
    assertU64(amountToSend, 'amountToSend');
    return ix(
       [
          ro(user),
          rs(CONFIG_PDA),
          rw(CONFIG),
-         rw(await collateralAta()),
-         rw(await liabilityAta()),
-         ro(MINT_ID),
+         rw(await collateralAta(mint)),
+         rw(await liabilityAta(mint)),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       encodeFillRfqIxData(MM_FILL_PARLAY_RFQ_IX_DISCRIMINATOR, amountToSend),
@@ -402,9 +418,9 @@ export async function getFillCashoutRfqIx(
          market,
          eventState,
          rw(CONFIG),
-         rw(await collateralAta()),
+         rw(await collateralAta(marketId.mint)),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(marketId.mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       encodeFillRfqIxData(MM_FILL_CASHOUT_RFQ_IX_DISCRIMINATOR, amountToSend),
@@ -414,6 +430,7 @@ export async function getFillCashoutRfqIx(
 export async function getFillCashoutParlayRfqIx(
    user: Address,
    paymentDest: Address,
+   mint: Address,
    amountToSend: bigint,
 ): Promise<Instruction> {
    assertU64(amountToSend, 'amountToSend');
@@ -422,9 +439,9 @@ export async function getFillCashoutParlayRfqIx(
          ro(user),
          rs(CONFIG_PDA),
          rw(CONFIG),
-         rw(await collateralAta()),
+         rw(await collateralAta(mint)),
          rw(paymentDest),
-         ro(MINT_ID),
+         ro(mint),
          ro(SPL_TOKEN_PROGRAM_ID),
       ],
       encodeFillRfqIxData(MM_FILL_CASHOUT_PARLAY_RFQ_IX_DISCRIMINATOR, amountToSend),

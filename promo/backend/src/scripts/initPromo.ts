@@ -21,7 +21,7 @@ import {
 } from '../adminRun';
 import { getPromoMarketDataPda } from '../instructions';
 import { ODDS_SCALE } from '../constants';
-import { parseAllowList, parseFlags, parseOperatorFlag, parseSendOptions } from './cliFlags';
+import { parseAllowList, parseFlags, parseMintFlag, parseOperatorFlag, parseSendOptions } from './cliFlags';
 
 function parseOdds(input: string): bigint {
    if (/^\d+$/.test(input.trim())) {
@@ -59,11 +59,12 @@ async function main(): Promise<void> {
    assertPromoMarketParts(parts);
 
    const operator = parseOperatorFlag(flags);
+   const mint = parseMintFlag(flags);
    const allowedAccounts = parseAllowList(process.argv.slice(2));
 
    const ctx = await createPromoAdminContext();
    const marketParts = parseMarketKeyPartsFromFlags({ ...flags, 'market-key': marketKey });
-   const marketId = promoMarketIdFromParts(marketParts, operator);
+   const marketId = promoMarketIdFromParts(marketParts, operator, mint);
 
    const outcomes = flags.outcomes === '3' ? 3 : 2;
    const payload = await buildPromoInitMarketFromParts(
@@ -74,6 +75,7 @@ async function main(): Promise<void> {
       outcomes,
       parseUsdc(maxUsdc),
       parseUsdc(maxTotalUsdc),
+      mint,
    );
 
    const o0 = parseOdds(odds0);

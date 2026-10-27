@@ -1,4 +1,4 @@
-//! Freebet RFQ parlay fill (disc 18). Stake from issuer ATA.
+//! Freebet RFQ parlay fill (disc 23). Stake from issuer ATA.
 //!
 //! Accounts: **14** then **5** MM (no per-leg PDAs).
 //!
@@ -36,10 +36,10 @@ use crate::{
       fill_bet::FillBetStake,
       fill_rfq_parlay::decode_and_run_fill_rfq_parlay,
    },
-   state::split_freebet_id_prefix,
+   state::{PromoType, split_freebet_id_prefix},
 };
 
-pub const FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR: u8 = 18;
+pub const FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR: u8 = 23;
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -85,7 +85,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_account: issuer_ata,
          authority: issuer_pda,
          issuer_sign: Some((issuer_bump, auth)),
-         freebet_id,
+         promo_type: PromoType::Freebet,
+         promo_account: *freebet_pda.address(),
          freebet: Some(&fb),
       },
    )?;

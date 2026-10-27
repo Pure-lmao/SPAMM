@@ -418,16 +418,27 @@ impl Env {
             AccountMeta::new(mm_config_pda(), false),
             AccountMeta::new(mm_quote_buffer_pda(), false),
             AccountMeta::new(mm_parlay_quote_buffer_pda(), false),
-            AccountMeta::new(mm_tok_ata, false),
-            AccountMeta::new_readonly(mint_pubkey(), false),
-            AccountMeta::new_readonly(tok_pk, false),
-            AccountMeta::new_readonly(ata_pk, false),
             AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
             AccountMeta::new_readonly(sys_pk, false),
          ],
       );
       let r = self.run_ix(mm_init);
       assert!(r.program_result.is_ok(), "mm init_program {:?}", r);
+      let create_ata = self.mm_ix(
+         102,
+         vec![],
+         vec![
+            AccountMeta::new(mm_admin(), true),
+            AccountMeta::new_readonly(mm_config_pda(), false),
+            AccountMeta::new(mm_tok_ata, false),
+            AccountMeta::new_readonly(mint_pubkey(), false),
+            AccountMeta::new_readonly(tok_pk, false),
+            AccountMeta::new_readonly(ata_pk, false),
+            AccountMeta::new_readonly(sys_pk, false),
+         ],
+      );
+      let ra = self.run_ix(create_ata);
+      assert!(ra.program_result.is_ok(), "mm create_token_account {:?}", ra);
 
       let mut seen_events = std::collections::HashSet::new();
       for (mid, _body) in markets {
@@ -505,27 +516,48 @@ impl Env {
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),
          AccountMeta::new_readonly(mm_config_pda(), false),
-         AccountMeta::new(encumbrance_pda(), false),
-         AccountMeta::new(liability_token_ata(), false),
          AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new(mm_list_pda(), false),
-         AccountMeta::new_readonly(mint_pubkey(), false),
-         AccountMeta::new_readonly(token::ID, false),
-         AccountMeta::new_readonly(associated_token::ID, false),
          AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
          AccountMeta::new_readonly(sys_pk, false),
-         AccountMeta::new_readonly(mm_collateral_ata(), false),
          AccountMeta::new_readonly(mm_quote_buffer_pda(), false),
          AccountMeta::new_readonly(mm_parlay_quote_buffer_pda(), false),
       ]
    }
 
-   /// Seed empty encumbrance + liability slots, then run on-chain `register_mm` (creates PDA + ATA).
+   /// Register the MM, then open the default-mint encumbrance vault.
    pub fn register_mm_execute(&mut self) -> InstructionResult {
+      let reg = self.agg_ix(2, vec![], Self::register_mm_metas());
+      let rr = self.run_ix(reg);
+      if rr.program_result.is_err() {
+         return rr;
+      }
+      self.init_mm_mint_vault()
+   }
+
+   pub fn init_mm_mint_vault(&mut self) -> InstructionResult {
+      let sys_pk = keyed_account_for_system_program().0;
       self.upsert(encumbrance_pda(), system_owned_empty());
       self.upsert(liability_token_ata(), system_owned_empty());
-      let reg = self.agg_ix(2, vec![], Self::register_mm_metas());
-      self.run_ix(reg)
+      let ix = self.agg_ix(
+         4,
+         vec![],
+         vec![
+            AccountMeta::new(mm_admin(), true),
+            AccountMeta::new_readonly(mm_program_id(), false),
+            AccountMeta::new_readonly(mm_config_pda(), false),
+            AccountMeta::new_readonly(mm_list_pda(), false),
+            AccountMeta::new(encumbrance_pda(), false),
+            AccountMeta::new(liability_token_ata(), false),
+            AccountMeta::new_readonly(mm_collateral_ata(), false),
+            AccountMeta::new_readonly(mint_pubkey(), false),
+            AccountMeta::new_readonly(token::ID, false),
+            AccountMeta::new_readonly(associated_token::ID, false),
+            AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
+            AccountMeta::new_readonly(sys_pk, false),
+         ],
+      );
+      self.run_ix(ix)
    }
 
    /// Aggregator active + MM program init + `register_mm` only (no events/markets/fills).
@@ -559,7 +591,9 @@ impl Env {
       let sys_pk = keyed_account_for_system_program().0;
       let np = netting_pda_for_event(eid);
       self.upsert(np, system_owned_empty());
-      let data = eid.as_wire_bytes().to_vec();
+      let mut data = eid.as_wire_bytes().to_vec();
+      data.extend_from_slice(market_operator().as_ref());
+      data.extend_from_slice(mint_pubkey().as_ref());
       let ix = self.agg_ix(
          40,
          data,
@@ -685,16 +719,28 @@ impl Env {
             AccountMeta::new(keys.config, false),
             AccountMeta::new(keys.quote_buf, false),
             AccountMeta::new(keys.parlay_buf, false),
-            AccountMeta::new(mm_tok_ata, false),
-            AccountMeta::new_readonly(mint_pubkey(), false),
-            AccountMeta::new_readonly(tok_pk, false),
-            AccountMeta::new_readonly(ata_pk, false),
             AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
             AccountMeta::new_readonly(sys_pk, false),
          ],
       );
       let r = self.run_ix(mm_init);
       assert!(r.program_result.is_ok(), "mm init_program {:?}", r);
+      let create_ata = self.mm_ix_for(
+         keys.program_id,
+         102,
+         vec![],
+         vec![
+            AccountMeta::new(keys.admin, true),
+            AccountMeta::new_readonly(keys.config, false),
+            AccountMeta::new(mm_tok_ata, false),
+            AccountMeta::new_readonly(mint_pubkey(), false),
+            AccountMeta::new_readonly(tok_pk, false),
+            AccountMeta::new_readonly(ata_pk, false),
+            AccountMeta::new_readonly(sys_pk, false),
+         ],
+      );
+      let ra = self.run_ix(create_ata);
+      assert!(ra.program_result.is_ok(), "mm create_token_account {:?}", ra);
 
       if keys.slot != 0 {
          self.clone_oracle_accounts_from_default(keys, markets);
@@ -790,8 +836,8 @@ impl Env {
          }
          let (md_pk, md_bump) = {
             let w = market_id_wire_bytes(mid);
-            let (body, operator) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
-            Pubkey::find_program_address(&[b"market_data", body, operator], &keys.program_id)
+            let (body, operator, mint) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
+            Pubkey::find_program_address(&[b"market_data", body, operator, mint], &keys.program_id)
          };
          let mut md = self
             .get_account(&honest.market_data(mid))
@@ -842,26 +888,43 @@ impl Env {
          AccountMeta::new(keys.admin, true),
          AccountMeta::new_readonly(keys.program_id, false),
          AccountMeta::new_readonly(keys.config, false),
-         AccountMeta::new(keys.encumbrance(), false),
-         AccountMeta::new(keys.liability_ata(), false),
          AccountMeta::new_readonly(config_pda(), false),
          AccountMeta::new(mm_list_pda(), false),
-         AccountMeta::new_readonly(mint_pubkey(), false),
-         AccountMeta::new_readonly(token::ID, false),
-         AccountMeta::new_readonly(associated_token::ID, false),
          AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
          AccountMeta::new_readonly(sys_pk, false),
-         AccountMeta::new_readonly(keys.collateral_ata(), false),
          AccountMeta::new_readonly(keys.quote_buf, false),
          AccountMeta::new_readonly(keys.parlay_buf, false),
       ]
    }
 
    pub fn register_mm_execute_for(&mut self, keys: &MmKeys) -> InstructionResult {
+      let reg = self.agg_ix(2, vec![], Self::register_mm_metas_for(keys));
+      let rr = self.run_ix(reg);
+      if rr.program_result.is_err() {
+         return rr;
+      }
+      let sys_pk = keyed_account_for_system_program().0;
       self.upsert(keys.encumbrance(), system_owned_empty());
       self.upsert(keys.liability_ata(), system_owned_empty());
-      let reg = self.agg_ix(2, vec![], Self::register_mm_metas_for(keys));
-      self.run_ix(reg)
+      let ix = self.agg_ix(
+         4,
+         vec![],
+         vec![
+            AccountMeta::new(keys.admin, true),
+            AccountMeta::new_readonly(keys.program_id, false),
+            AccountMeta::new_readonly(keys.config, false),
+            AccountMeta::new_readonly(mm_list_pda(), false),
+            AccountMeta::new(keys.encumbrance(), false),
+            AccountMeta::new(keys.liability_ata(), false),
+            AccountMeta::new_readonly(keys.collateral_ata(), false),
+            AccountMeta::new_readonly(mint_pubkey(), false),
+            AccountMeta::new_readonly(token::ID, false),
+            AccountMeta::new_readonly(associated_token::ID, false),
+            AccountMeta::new_readonly(rent_sysvar_pubkey(), false),
+            AccountMeta::new_readonly(sys_pk, false),
+         ],
+      );
+      self.run_ix(ix)
    }
 
    /// Init + register an extra copy of the example MM (aggregator already bootstrapped).
@@ -970,8 +1033,8 @@ impl Env {
          }
          let (md_pk, md_bump) = {
             let w = market_id_wire_bytes(mid);
-            let (body, operator) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
-            Pubkey::find_program_address(&[b"market_data", body, operator], &keys.program_id)
+            let (body, operator, mint) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
+            Pubkey::find_program_address(&[b"market_data", body, operator, mint], &keys.program_id)
          };
          let mut md = self
             .get_account(&honest.market_data(mid))

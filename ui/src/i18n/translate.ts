@@ -71,6 +71,8 @@ const EXACT_SLIP_REASONS: Record<string, MessageKey> = {
    "Invalid amount.": "slip.invalidAmount",
    "Freebet cannot be used on this slip.": "slip.freebetBlocked",
    "Freebet stake must match the voucher amount.": "slip.freebetStake",
+   "Boost cannot be used on this slip.": "slip.boostBlocked",
+   "Stake is above the boost maximum.": "slip.boostStake",
    "Min. odds must be above 1.00 (scaled > ODDS_SCALE).": "slip.minOddsFloor",
    "No parlay quote available. Wait for quotes or adjust stake.": "slip.waitParlayQuote",
    "No MM routes from quotes. Wait for quotes or reduce amount.": "slip.noMmRoutes",

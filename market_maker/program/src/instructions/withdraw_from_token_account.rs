@@ -34,8 +34,8 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], _data: &[u8])
 
    verify_signer(&admin)?;
    verify_mm_config_auth(&admin, &config_pda, program_id)?;
-   verify_token_account(true, token_account, config_pda, mint, token_program)?;
-   verify_mint(&mint)?;
+   verify_token_account(true, token_account, config_pda, mint, token_program, true)?;
+   verify_mint(&mint, mint.address())?;
    verify_token_program(&token_program)?;
 
    let balance = get_token_account_balance(token_account)?;

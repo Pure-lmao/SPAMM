@@ -97,6 +97,7 @@ fn scenario_netting_create_add_fill_m4() {
       period: 1,
       is_pregame: true,
       operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
    };
    let body = crate::common::oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
@@ -104,6 +105,8 @@ fn scenario_netting_create_add_fill_m4() {
    use spamm_aggregator::instructions::{AddLineToLiabilityNettingIxData, ADD_LINE_TO_LIABILITY_NETTING_IX_LEN};
    let add = AddLineToLiabilityNettingIxData {
       event_id: eid,
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 4,
    };
@@ -264,6 +267,7 @@ fn scenario_soccer_mkt0_no_netting_double_liability_deposit() {
       period: 0,
       is_pregame: true,
       operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
    };
    let body = oracle_body_two_outcome(ODDS_1_9_SCALED, ODDS_1_9_SCALED);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);

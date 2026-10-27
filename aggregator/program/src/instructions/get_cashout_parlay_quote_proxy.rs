@@ -31,14 +31,14 @@ use crate::{
          require_cashout_sequence_at_least, validate_cashout_size,
       },
       fill_helpers::invoke_parlay_quote_cpi,
-      freebet_helpers::require_not_freebet,
+      freebet_helpers::require_not_promo,
       reject_duplicate_mm_programs, verify_parlay_pda,
    },
    state::{
       account_bet::BetResult,
       account_parlay_bet::ParlayBetAccountData,
-      empty_parlay_leg_sel_buf, get_cashout_quote_parlay_ix_wire_len, write_get_cashout_quote_parlay_ix,
-      FillParlayCashoutIxData, ParlayLegSel, ProxyCashoutQuoteData, GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN,
+      get_cashout_quote_parlay_ix_wire_len, write_cashout_quote_parlay_from_bet,
+      FillParlayCashoutIxData, ProxyCashoutQuoteData, GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN,
       PARLAY_LEG_SEL_LEN,
    },
 };
@@ -47,7 +47,7 @@ const MM_FIXED: usize = 3;
 const CASHOUT_PARLAY_IX_BUF: usize =
    GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN + MAX_PARLAY_LEGS * PARLAY_LEG_SEL_LEN;
 
-pub const GET_PARLAY_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 34;
+pub const GET_PARLAY_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 204;
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -73,13 +73,11 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       return Err(ProgramError::InvalidAccountData);
    }
 
-   let mut sels = empty_parlay_leg_sel_buf::<MAX_PARLAY_LEGS>();
    let payout_removed = decode_parlay_cashout_ticket(
       user,
       original_parlay_pda,
       &parsed,
       num_legs,
-      &mut sels,
    )?;
 
    let wire_len = get_cashout_quote_parlay_ix_wire_len(num_legs);
@@ -87,26 +85,46 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       return Err(ProgramError::InvalidInstructionData);
    }
    let mut qbuf = [0u8; CASHOUT_PARLAY_IX_BUF];
-   write_get_cashout_quote_parlay_ix(
+   write_proxy_cashout_quote_ix(
       &mut qbuf[..wire_len],
-      parsed.amount,
-      payout_removed,
-      parsed.min_payout,
+      original_parlay_pda,
+      &parsed,
       num_legs,
-      &sels[..num_legs],
+      payout_removed,
    )?;
 
    collect_parlay_cashout_proxy_quotes(
       user,
       clock_sysvar,
+      original_parlay_pda,
       mm_accounts,
       per_mm,
       number_of_mms,
       num_legs,
       &parsed,
-      &sels[..num_legs],
       payout_removed,
       &qbuf[..wire_len],
+   )
+}
+
+/// Header plus one selection decoded from the open parlay.
+#[inline(never)]
+fn write_proxy_cashout_quote_ix(
+   out: &mut [u8],
+   original_parlay_pda: &AccountView,
+   parsed: &FillParlayCashoutIxData,
+   num_legs: usize,
+   payout_removed: u64,
+) -> Result<(), ProgramError> {
+   let raw = original_parlay_pda.try_borrow()?;
+   write_cashout_quote_parlay_from_bet(
+      out,
+      parsed.amount,
+      payout_removed,
+      parsed.min_payout,
+      num_legs,
+      raw.as_ref(),
+      &parsed.snapshots[..num_legs],
    )
 }
 
@@ -117,11 +135,10 @@ fn decode_parlay_cashout_ticket(
    original_parlay_pda: &AccountView,
    parsed: &FillParlayCashoutIxData,
    num_legs: usize,
-   sels: &mut [ParlayLegSel],
 ) -> Result<u64, ProgramError> {
    let raw = original_parlay_pda.try_borrow()?;
    let header = ParlayBetAccountData::decode_header(raw.as_ref())?;
-   require_not_freebet(header.freebet_id)?;
+   require_not_promo(header.promo_type)?;
    if header.bet_id != parsed.orig_bet_id
       || header.result != BetResult::Pending
       || header.num_legs != parsed.num_legs
@@ -134,21 +151,12 @@ fn decode_parlay_cashout_ticket(
       header.bet_id,
       header.bump,
    )?;
-   if unlikely(sels.len() < num_legs) {
-      return Err(ProgramError::InvalidInstructionData);
-   }
    for i in 0..num_legs {
       let leg = ParlayBetAccountData::decode_leg(raw.as_ref(), i)?;
       if leg.result != BetResult::Pending {
          return Err(SpammError::InvalidCashout.into());
       }
       require_cashout_sequence_at_least(parsed.snapshots[i].event_state_sequence, leg.event_state_sequence)?;
-      sels[i] = ParlayLegSel {
-         market_id: leg.market_id,
-         side: leg.side,
-         event_state_sequence: parsed.snapshots[i].event_state_sequence,
-         event_game_state: parsed.snapshots[i].event_game_state,
-      };
    }
    validate_cashout_size(header.amount, parsed.amount)?;
    proportional_payout(header.amount, header.payout, parsed.amount)
@@ -159,12 +167,12 @@ fn decode_parlay_cashout_ticket(
 fn collect_parlay_cashout_proxy_quotes(
    user: &AccountView,
    clock_sysvar: &AccountView,
+   original_parlay_pda: &AccountView,
    mm_accounts: &[AccountView],
    per_mm: usize,
    number_of_mms: usize,
    num_legs: usize,
    parsed: &FillParlayCashoutIxData,
-   sels: &[ParlayLegSel],
    payout_removed: u64,
    qbuf: &[u8],
 ) -> ProgramResult {
@@ -189,7 +197,7 @@ fn collect_parlay_cashout_proxy_quotes(
       if !verify_parlay_quote_buffer(mm_buf, mm_program) {
          continue;
       }
-      if !legs_ok_for_proxy(sels, parsed, num_legs, mm_program, leg_accounts) {
+      if !legs_ok_for_proxy(original_parlay_pda, parsed, num_legs, mm_program, leg_accounts) {
          continue;
       }
 
@@ -227,17 +235,23 @@ fn collect_parlay_cashout_proxy_quotes(
 
 #[inline(never)]
 fn legs_ok_for_proxy(
-   sels: &[ParlayLegSel],
+   original_parlay_pda: &AccountView,
    parsed: &FillParlayCashoutIxData,
    num_legs: usize,
    mm_program: &AccountView,
    leg_accounts: &[AccountView],
 ) -> bool {
-   if sels.len() < num_legs || leg_accounts.len() < 2 * num_legs {
+   if leg_accounts.len() < 2 * num_legs {
       return false;
    }
+   let Ok(raw) = original_parlay_pda.try_borrow() else {
+      return false;
+   };
    for li in 0..num_legs {
-      let mid = &sels[li].market_id;
+      let Ok(leg) = ParlayBetAccountData::decode_leg(raw.as_ref(), li) else {
+         return false;
+      };
+      let mid = &leg.market_id;
       if !verify_mm_market_data_pda(&leg_accounts[2 * li], mm_program, &mid.as_bytes())
          || !verify_event_state(
             &leg_accounts[2 * li + 1],

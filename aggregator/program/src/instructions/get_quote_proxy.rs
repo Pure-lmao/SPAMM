@@ -42,7 +42,7 @@ use crate::{
 
 const MM_ACCOUNTS_PER_MM: usize = 5;
 
-pub const GET_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 30;
+pub const GET_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 200;
 
 /// Pack `GetQuoteIxData` once; callers reuse the buffer and patch `side` as needed.
 #[inline(always)]

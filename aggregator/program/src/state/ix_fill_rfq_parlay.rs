@@ -4,22 +4,26 @@ use pinocchio::{error::ProgramError, hint::unlikely};
 use pinocchio_log::log;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
+#[cfg(not(target_os = "solana"))]
+extern crate alloc;
+
 use crate::{
    constants::MAX_RFQ_PARLAY_LEGS,
    errors::SpammError,
-   helpers::parlay_helpers::ensure_parlay_odds_product_matches,
+   helpers::parlay_helpers::ensure_parlay_odds_product_matches_at,
 };
 
 use super::{
    ix_common::{
       validate_amount_over_min, validate_odds_above_scale,
-      validate_parlay_leg_quoted, IX_ED25519_SIGNATURE_LEN,
+      validate_parlay_leg_quoted_at, IX_ED25519_SIGNATURE_LEN,
    },
    mm_parlay_quote::{
-      decode_trailing_parlay_leg_quoted, write_parlay_leg_quoted,
-      ParlayLegQuoted, PARLAY_LEG_QUOTED_LEN,
+      decode_packed_leg, ParlayLegQuoted, PARLAY_LEG_QUOTED_LEN,
    },
 };
+#[cfg(not(target_os = "solana"))]
+use super::mm_parlay_quote::write_parlay_leg_quoted;
 
 /// Fixed prefix; `num_legs` is last so trailing legs start immediately after the header.
 #[derive(Copy, Clone, ZeroPod)]
@@ -35,47 +39,27 @@ pub struct FillRfqParlayIxHeader {
 
 pub const FILL_RFQ_PARLAY_IX_HEADER_LEN: usize = <FillRfqParlayIxHeader as ZeroPodFixed>::SIZE;
 
-/// Owned RFQ parlay ix (wire = header + live legs only + 64-byte signature).
-///
-/// Host `size_of` ≈ 3240 with `MAX_RFQ_PARLAY_LEGS = 40` (padded `ParlayLegQuoted`). Never
-/// return this by value from a decode helper — SBF frames are 4096 and a return slot doubles it.
-#[derive(Clone)]
-pub struct FillRfqParlayIxData {
+/// Header fields plus the packed live-leg bytes already in the instruction.
+#[derive(Copy, Clone)]
+pub struct FillRfqParlayView<'a> {
    pub bet_id: u64,
    pub amount: u64,
    pub max_stake: u64,
    pub odds_scaled: u32,
    pub offer_expiry: u32,
    pub num_legs: u8,
-   /// Capacity buffer; only `0..num_legs` are live / written on the wire.
-   pub legs: [ParlayLegQuoted; MAX_RFQ_PARLAY_LEGS],
+   pub leg_bytes: &'a [u8],
 }
 
-impl FillRfqParlayIxData {
-   pub const NUM_LEGS_OFFSET: usize = offset_of!(FillRfqParlayIxHeaderZc, num_legs);
-
+impl<'a> FillRfqParlayView<'a> {
    #[inline(always)]
-   pub fn body_len(num_legs: usize) -> usize {
-      FILL_RFQ_PARLAY_IX_HEADER_LEN + num_legs * PARLAY_LEG_QUOTED_LEN
+   pub fn leg(&self, index: usize) -> Result<ParlayLegQuoted, ProgramError> {
+      decode_packed_leg(self.leg_bytes, index)
    }
 
-   #[inline(always)]
-   pub fn wire_len(num_legs: usize) -> usize {
-      Self::body_len(num_legs) + IX_ED25519_SIGNATURE_LEN
-   }
-
-   #[inline(always)]
-   pub fn live_legs(&self) -> &[ParlayLegQuoted] {
-      &self.legs[..self.num_legs as usize]
-   }
-
-   /// Decode into `out` in place. Do not assign `empty_parlay_leg_quoted_buf()` into `out.legs`
-   /// (that materializes a second 3200-byte temporary on this frame).
+   /// Checks the header, one leg at a time, and the odds product. Returns the trailing signature.
    #[inline(never)]
-   pub fn decode_into(
-      out: &mut Self,
-      data: &[u8],
-   ) -> Result<[u8; IX_ED25519_SIGNATURE_LEN], ProgramError> {
+   pub fn decode(data: &'a [u8]) -> Result<(Self, [u8; IX_ED25519_SIGNATURE_LEN]), ProgramError> {
       if data.len() < FILL_RFQ_PARLAY_IX_HEADER_LEN + IX_ED25519_SIGNATURE_LEN {
          return Err(ProgramError::InvalidInstructionData);
       }
@@ -87,37 +71,69 @@ impl FillRfqParlayIxData {
          log!("{}: num_legs must be in 2..={}", LABEL, MAX_RFQ_PARLAY_LEGS);
          return Err(SpammError::InvalidParlayLegCount.into());
       }
-      out.bet_id = zc.bet_id.get();
-      out.amount = zc.amount.get();
-      out.odds_scaled = zc.odds_scaled.get();
-      out.max_stake = zc.max_stake.get();
-      out.offer_expiry = zc.offer_expiry.get();
-      out.num_legs = zc.num_legs;
-      unsafe {
-         core::ptr::write_bytes(out.legs.as_mut_ptr(), 0, MAX_RFQ_PARLAY_LEGS);
+      let legs_len = num.checked_mul(PARLAY_LEG_QUOTED_LEN).ok_or(ProgramError::ArithmeticOverflow)?;
+      let body_len = FILL_RFQ_PARLAY_IX_HEADER_LEN
+         .checked_add(legs_len).ok_or(ProgramError::ArithmeticOverflow)?;
+      let expected = body_len
+         .checked_add(IX_ED25519_SIGNATURE_LEN).ok_or(ProgramError::ArithmeticOverflow)?;
+      if data.len() != expected {
+         return Err(ProgramError::InvalidInstructionData);
       }
-      decode_trailing_parlay_leg_quoted(
-         data,
-         FILL_RFQ_PARLAY_IX_HEADER_LEN,
-         num,
-         MAX_RFQ_PARLAY_LEGS,
-         IX_ED25519_SIGNATURE_LEN,
-         &mut out.legs,
-      )?;
-      validate_amount_over_min(out.amount, LABEL)?;
-      if unlikely(out.amount > out.max_stake) {
+      let parsed = Self {
+         bet_id: zc.bet_id.get(),
+         amount: zc.amount.get(),
+         max_stake: zc.max_stake.get(),
+         odds_scaled: zc.odds_scaled.get(),
+         offer_expiry: zc.offer_expiry.get(),
+         num_legs: zc.num_legs,
+         leg_bytes: &data[FILL_RFQ_PARLAY_IX_HEADER_LEN..body_len],
+      };
+      validate_amount_over_min(parsed.amount, 1, LABEL)?;
+      if unlikely(parsed.amount > parsed.max_stake) {
          log!("{}: amount exceeds max_stake", LABEL);
          return Err(SpammError::StakeExceedsMaxStake.into());
       }
-      validate_odds_above_scale(out.odds_scaled, LABEL)?;
-      validate_parlay_leg_quoted(num, out.live_legs(), LABEL)?;
-      ensure_parlay_odds_product_matches(num, out.live_legs(), out.odds_scaled)?;
-      let body_len = Self::body_len(num);
+      validate_odds_above_scale(parsed.odds_scaled, LABEL)?;
+      validate_parlay_leg_quoted_at(num, |i| parsed.leg(i), LABEL)?;
+      ensure_parlay_odds_product_matches_at(num, |i| parsed.leg(i), parsed.odds_scaled)?;
       let mut sig = [0u8; IX_ED25519_SIGNATURE_LEN];
       sig.copy_from_slice(&data[body_len..]);
-      Ok(sig)
+      Ok((parsed, sig))
+   }
+}
+
+/// Host builder for `fill_rfq_parlay` wire bytes. On-chain decode is [`FillRfqParlayView`].
+pub struct FillRfqParlayIxData {
+   pub bet_id: u64,
+   pub amount: u64,
+   pub max_stake: u64,
+   pub odds_scaled: u32,
+   pub offer_expiry: u32,
+   pub num_legs: u8,
+   /// Capacity buffer; only `0..num_legs` are written on the wire.
+   #[cfg(not(target_os = "solana"))]
+   pub legs: alloc::boxed::Box<[ParlayLegQuoted; MAX_RFQ_PARLAY_LEGS]>,
+}
+
+impl FillRfqParlayIxData {
+   pub const NUM_LEGS_OFFSET: usize = offset_of!(FillRfqParlayIxHeaderZc, num_legs);
+
+   pub fn body_len(num_legs: usize) -> usize {
+      FILL_RFQ_PARLAY_IX_HEADER_LEN + num_legs * PARLAY_LEG_QUOTED_LEN
    }
 
+   #[inline(always)]
+   pub fn wire_len(num_legs: usize) -> usize {
+      Self::body_len(num_legs) + IX_ED25519_SIGNATURE_LEN
+   }
+
+   #[cfg(not(target_os = "solana"))]
+   #[inline(always)]
+   pub fn live_legs(&self) -> &[ParlayLegQuoted] {
+      &self.legs[..self.num_legs as usize]
+   }
+
+   #[cfg(not(target_os = "solana"))]
    #[inline(always)]
    pub fn write_wire_with_signature(
       &self,

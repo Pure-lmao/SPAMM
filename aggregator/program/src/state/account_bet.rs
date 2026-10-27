@@ -11,6 +11,8 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{constants::MAX_NUMBER_OF_MMS, readers::read_address_ref_unchecked, state::{EventGameState, MarketId, ids::MARKET_ID_OPERATOR_OFFSET}};
 
+use super::promo::PromoType;
+
 pub const BET_ACCOUNT_SEED: &[u8] = b"bet";
 pub const BET_ACCOUNT_DISCRIMINATOR: u8 = 1;
 
@@ -126,7 +128,9 @@ pub struct BetAccountHeader {
    pub amount: u64,
    pub payout: u64,
    pub timestamp: u32,
-   pub freebet_id: u32,
+   pub promo_type: PromoType,
+   /// Freebet or boost PDA. Default address when `promo_type` is `None`.
+   pub promo_account: Address,
    pub event_state_sequence: u16,
    pub event_game_state: EventGameState,
    pub result: BetResult,
@@ -163,7 +167,8 @@ pub struct BetAccountData {
    pub amount: u64,
    pub payout: u64,
    pub timestamp: u32,
-   pub freebet_id: u32,
+   pub promo_type: PromoType,
+   pub promo_account: Address,
    pub event_state_sequence: u16,
    pub event_game_state: EventGameState,
    pub result: BetResult,
@@ -186,7 +191,8 @@ impl BetAccountData {
          amount: h.amount.into(),
          payout: h.payout.into(),
          timestamp: h.timestamp.into(),
-         freebet_id: h.freebet_id.into(),
+         promo_type: h.promo_type.into(),
+         promo_account: h.promo_account,
          event_state_sequence: h.event_state_sequence.into(),
          event_game_state: h.event_game_state.to_zc(),
          result: h.result.into(),
@@ -215,7 +221,8 @@ impl BetAccountData {
          amount: zc.amount.get(),
          payout: zc.payout.get(),
          timestamp: zc.timestamp.get(),
-         freebet_id: zc.freebet_id.get(),
+         promo_type: PromoType::from_u8(zc.promo_type.get())?,
+         promo_account: zc.promo_account,
          event_state_sequence: zc.event_state_sequence.get(),
          event_game_state: EventGameState::from_zc(&zc.event_game_state),
          result: BetResult::from_u8(zc.result.get())?,

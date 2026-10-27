@@ -35,12 +35,15 @@ pub struct MarketIdWire {
    pub period: u8,
    pub is_pregame: bool,
    pub operator: Pubkey,
+   pub mint: Pubkey,
 }
 
 impl MarketIdWire {
    pub fn from_market(id: &MarketId) -> Self {
       let mut operator = [0u8; 32];
       operator.copy_from_slice(id.operator.as_ref());
+      let mut mint = [0u8; 32];
+      mint.copy_from_slice(id.mint.as_ref());
       Self {
          event: id.event_id.event,
          league: id.event_id.league,
@@ -50,6 +53,7 @@ impl MarketIdWire {
          period: id.period,
          is_pregame: id.is_pregame,
          operator: Pubkey::new_from_array(operator),
+         mint: Pubkey::new_from_array(mint),
       }
    }
 
@@ -189,6 +193,7 @@ mod layout {
          period: 2,
          is_pregame: true,
          operator: Address::new_from_array([0x11; 32]),
+         mint: Address::new_from_array([0x22; 32]),
       }
    }
 

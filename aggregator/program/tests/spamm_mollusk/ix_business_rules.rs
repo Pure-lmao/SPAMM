@@ -11,7 +11,7 @@ use spamm_aggregator::instructions::{
    REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN, RemoveLineFromLiabilityNettingIxData,
 };
 use spamm_aggregator::state::account_bet::BetResult;
-use spamm_aggregator::state::{EventGameState, FreebetState};
+use spamm_aggregator::state::{EventGameState, PromoState};
 
 use crate::common::{
    add_line_account_metas, admin, agg_program_id, assert_program_err, assert_spamm_err, bet_pda_for,
@@ -275,7 +275,7 @@ fn freebet_used_cannot_revoke_or_refill() {
       ))
       .program_result
       .is_ok());
-   assert_eq!(decode_freebet(&env, FREEBET_ID_BASIC).state, FreebetState::Used);
+   assert_eq!(decode_freebet(&env, FREEBET_ID_BASIC).state, PromoState::Used);
    let rev = env.run_ix(revoke_freebet_instruction(FREEBET_ID_BASIC));
    assert_spamm_err(&rev, SpammError::FreebetNotAvailable);
    let bet2 = bet_pda_for(&user(), 8011);
@@ -797,6 +797,8 @@ fn two_user_netting_lifecycle_close() {
    let np = netting_pda_for_event(&event_id_soccer());
    let add = AddLineToLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };
@@ -892,6 +894,8 @@ fn two_user_netting_lifecycle_close() {
       .is_ok());
    let rem = RemoveLineFromLiabilityNettingIxData {
       event_id: event_id_soccer(),
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 400,
    };

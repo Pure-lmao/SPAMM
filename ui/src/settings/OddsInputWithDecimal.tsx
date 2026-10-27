@@ -14,7 +14,7 @@ export function OddsInputWithDecimal({
    className?: string;
 }): ReactElement {
    const { oddsFormat } = useSettings();
-   const decimal = parseUserOddsToDecimal(value, oddsFormat);
+   const decimal = oddsFormat === "decimal" ? null : parseUserOddsToDecimal(value, oddsFormat);
    const hint = decimal != null ? formatTranslatedDecimal(decimal) : null;
 
    return (

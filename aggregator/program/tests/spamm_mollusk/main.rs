@@ -51,4 +51,5 @@ mod ix_settle_parlay;
 mod ix_withdraw;
 mod ix_account_budget;
 mod ix_business_rules;
+mod ix_mint_and_boost;
 mod ix_adversarial;

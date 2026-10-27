@@ -1,4 +1,4 @@
-//! Freebet RFQ single-bet fill (disc 17). Stake from issuer ATA.
+//! Freebet RFQ single-bet fill (disc 22). Stake from issuer ATA.
 //!
 //! Accounts: **14** then **8** MM.
 //!
@@ -39,10 +39,10 @@ use crate::{
       fill_bet::FillBetStake,
       fill_rfq_bet::run_fill_rfq_bet,
    },
-   state::FreebetFillRfqBetIxData,
+   state::{FreebetFillRfqBetIxData, PromoType},
 };
 
-pub const FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR: u8 = 17;
+pub const FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR: u8 = 22;
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -92,7 +92,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_account: issuer_ata,
          authority: issuer_pda,
          issuer_sign: Some((issuer_bump, auth)),
-         freebet_id,
+         promo_type: PromoType::Freebet,
+         promo_account: *freebet_pda.address(),
          freebet: Some(&fb),
       },
    )?;

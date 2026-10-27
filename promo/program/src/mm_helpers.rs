@@ -116,11 +116,11 @@ fn market_id_wire_bytes(market_id: &MarketId) -> [u8; MarketId::WIRE_SIZE] {
    market_wire
 }
 
-/// Market-data PDA: `["market_data", market_id_body_wire, operator]`.
+/// Market-data PDA: `["market_data", market_id_body, operator, mint]`.
 #[inline(always)]
 pub fn find_market_data_pda_from_wire(program_id: &Address, market_wire: &[u8; MARKET_ID_LEN]) -> (Address, u8) {
-   let (body, operator) = market_id_pda_seed_parts(market_wire);
-   let seeds: [&[u8]; 3] = [MM_MARKET_DATA_PDA_SEED, body, operator];
+   let (body, operator, mint) = market_id_pda_seed_parts(market_wire);
+   let seeds: [&[u8]; 4] = [MM_MARKET_DATA_PDA_SEED, body, operator, mint];
    Address::find_program_address(&seeds, program_id)
 }
 
@@ -148,9 +148,9 @@ pub fn verify_market_data_pda(
    };
 
    let market_wire = market_id_wire_bytes(market_id);
-   let (body, operator) = market_id_pda_seed_parts(&market_wire);
+   let (body, operator, mint) = market_id_pda_seed_parts(&market_wire);
    let expected_pda = Address::derive_address(
-      &[MM_MARKET_DATA_PDA_SEED, body, operator],
+      &[MM_MARKET_DATA_PDA_SEED, body, operator, mint],
       Some(bump),
       program_id,
    );

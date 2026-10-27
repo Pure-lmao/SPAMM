@@ -1,6 +1,6 @@
 //! Account-budget and multi-MM fills (64-account tx cap).
 
-use spamm_aggregator::constants::{MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS, MIN_BET_AMOUNT};
+use spamm_aggregator::constants::{MAX_PARLAY_LEGS, MAX_RFQ_PARLAY_LEGS};
 use spamm_aggregator::helpers::calc_potential_profit;
 use spamm_aggregator::instructions::{
    FillBetIxData, FillCashoutIxData, FillParlayIxData, FillRfqParlayIxData, GRADE_BETS_IX_DISCRIMINATOR,
@@ -109,7 +109,7 @@ fn fill_bet_min_amount_succeeds() {
       bet_id: 7102,
       market_id: mid,
       side: 0,
-      amount: MIN_BET_AMOUNT,
+      amount: 100_000,
       min_odds_scaled: 15_000,
       event_state_sequence: 1,
       event_game_state: EventGameState::zeroed(),
@@ -122,8 +122,8 @@ fn fill_bet_min_amount_succeeds() {
       fill_bet_netting_placeholder(),
    ));
    assert!(r.program_result.is_ok(), "{:?}", r);
-   assert_eq!(decode_bet(&env, &bet).header.amount, MIN_BET_AMOUNT);
-   let _ = calc_potential_profit(MIN_BET_AMOUNT, 20_000);
+   assert_eq!(decode_bet(&env, &bet).header.amount, 100_000);
+   let _ = calc_potential_profit(100_000, 20_000);
 }
 
 #[test]
@@ -201,7 +201,7 @@ fn fill_rfq_parlay_forty_legs_safe_odds() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: MAX_RFQ_PARLAY_LEGS as u8,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    assert!(ix.accounts.len() <= MAX_TX_ACCOUNTS, "{}", ix.accounts.len());

@@ -32,7 +32,7 @@ use crate::{
          accept_cashout_payment, parse_cashout_quote_return_for_mm, require_cashout_sequence_at_least,
          split_fillers, validate_cashout_size,
       },
-      freebet_helpers::require_not_freebet,
+      freebet_helpers::require_not_promo,
       reject_duplicate_mm_programs, verify_bet_pda,
    },
    state::{
@@ -45,7 +45,7 @@ use crate::{
 
 const MM_ACCOUNTS_PER_MM: usize = 5;
 
-pub const GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 33;
+pub const GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 203;
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -76,7 +76,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       BetAccountData::decode_fillers_into(raw.as_ref(), n, &mut orig_fillers_buf)?;
       h
    };
-   require_not_freebet(orig.freebet_id)?;
+   require_not_promo(orig.promo_type)?;
    if orig.bet_id != parsed.orig_bet_id || orig.result != BetResult::Pending {
       return Err(SpammError::InvalidCashout.into());
    }

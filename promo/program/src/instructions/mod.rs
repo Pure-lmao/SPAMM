@@ -2,6 +2,7 @@ use pinocchio::{error::ProgramError, AccountView, Address, ProgramResult};
 use pinocchio_log::log;
 
 use crate::instructions::{
+   create_token_account::CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR,
    init_program::INIT_PROGRAM_IX_DISCRIMINATOR,
    fill_bet_quote::FILL_BET_QUOTE_IX_DISCRIMINATOR,
    fill_parlay_quote::FILL_QUOTE_PARLAY_IX_DISCRIMINATOR,
@@ -30,6 +31,7 @@ mod get_quote_parlay;
 mod init_event;
 mod init_market;
 mod init_program;
+mod create_token_account;
 mod force_close_pda;
 mod update_event_state;
 mod update_oracle;
@@ -46,6 +48,7 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
    match d {
       UPDATE_ORACLE_IX_DISCRIMINATOR => update_oracle::process(program_id, accounts, data),
       INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(program_id, accounts, data),
+      CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR => create_token_account::process(program_id, accounts, data),
       SET_RFQ_SIGNER_IX_DISCRIMINATOR => set_rfq_signer::process(program_id, accounts),
 
       UPDATE_STATUS_IX_DISCRIMINATOR => update_status::process(program_id, accounts, data),

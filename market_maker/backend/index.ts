@@ -5,7 +5,9 @@ import { createRpcClients, logSolanaError, sendAndConfirmInstructionGroups, send
 import { loadKeypairSignerFromJsonFile } from "../client/utils";
 import type { ESPNOdds, GroupedEvent } from "../../api/types";
 import type { Instruction } from "@solana/instructions";
-import type { Address, KeyPairSigner } from "@solana/kit";
+import { address, type Address, type KeyPairSigner } from "@solana/kit";
+
+const DEVNET_USDC_MINT: Address = address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
 import { getProps } from "../../api/playerProps";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -153,6 +155,7 @@ async function runMarketMakerCycle() {
                   period: market.period_id,
                   isPregame: true,
                   operator: market.operator as Address,
+                  mint: DEVNET_USDC_MINT,
                };
                try {
                   const odds = JSON.parse(market.last_odds) as number[];
@@ -349,12 +352,17 @@ function revigOdds(odds: number[]): number[] {
 }
 async function closeEventAndMarkets(event: GroupedEvent, clients: RpcClients) {
    const ixs: Instruction[][] = [];
+   const nettingOperator = address(event.markets?.[0]?.operator ?? ADMIN_SIGNER.address);
    ixs.push([await getCloseNettingAccountIx(
       {
          sport: event.sport_id,
          league: event.league_id,
          event: BigInt(event.id),
-      }, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID
+      },
+      nettingOperator,
+      DEVNET_USDC_MINT,
+      ADMIN_SIGNER.address,
+      MARKET_MAKER_PROGRAM_ID,
    )]);
    ixs.push([await getCloseEventIx(
       ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID,
@@ -378,6 +386,7 @@ async function closeEventAndMarkets(event: GroupedEvent, clients: RpcClients) {
             period: market.period_id,
             isPregame: true,
             operator: market.operator as Address,
+            mint: DEVNET_USDC_MINT,
          },
       )]);
    }

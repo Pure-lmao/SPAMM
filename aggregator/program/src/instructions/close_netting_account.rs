@@ -8,7 +8,7 @@
 //! 3. `netting_pda` (writable)
 //! 4. `system_program` (readonly) — required for the lamport transfer on close
 //!
-//! Instruction `data`: `event_id` (`EventId::WIRE_SIZE` bytes)
+//! Instruction `data`: [`NettingScopeIxData`]
 
 use pinocchio::{
    AccountView, ProgramResult, error::ProgramError,
@@ -20,11 +20,11 @@ use crate::{
       close_pda_return_rent, verify_mm_admin, verify_mm_program_executable, verify_netting_pda,
       verify_signer, verify_system_program,
    },
-   state::{EventId, account_netting::netting_has_open_profit},
+   state::{NettingScopeIxData, account_netting::netting_has_open_profit},
 };
 
 
-pub const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 43;
+pub const CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 133;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -43,15 +43,15 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_mm_admin(admin, mm_program, mm_config_pda)?;
    verify_system_program(&system_program)?;
 
-   let event_id = match EventId::decode(data) {
-      Some(v) => v,
-      None => {
-         log!("close_netting_account: data length is invalid");
-         return Err(ProgramError::InvalidInstructionData);
-      }
-   };
+   let scope = NettingScopeIxData::decode(data)?;
 
-   if !verify_netting_pda(netting_pda, mm_program, &event_id.as_wire_bytes()) {
+   if !verify_netting_pda(
+      netting_pda,
+      mm_program,
+      &scope.event_id.as_wire_bytes(),
+      &scope.operator,
+      &scope.mint,
+   ) {
       log!("close_netting_account: invalid netting pda");
       return Err(ProgramError::InvalidAccountData);
    }

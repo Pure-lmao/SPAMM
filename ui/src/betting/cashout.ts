@@ -35,19 +35,20 @@ const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 export function walletRowFreebetId(row: WalletBetRow): number {
    if (row.kind === "single") {
-      return row.data.freebetId;
+      return row.data.promoType === 1 ? 1 : 0;
    }
-   return row.freebetId ?? row.account?.freebetId ?? 0;
+   const type = row.promoType ?? row.account?.promoType ?? 0;
+   return type === 1 ? 1 : 0;
 }
 
 export function canCashoutRow(row: WalletBetRow): boolean {
    if (row.kind === "single") {
-      return row.data.result === BetResult.Pending && row.data.freebetId === 0;
+      return row.data.result === BetResult.Pending && row.data.promoType === 0;
    }
    if (row.result !== BetResult.Pending) {
       return false;
    }
-   if ((row.account?.freebetId ?? 0) !== 0) {
+   if ((row.promoType ?? row.account?.promoType ?? 0) !== 0) {
       return false;
    }
    return row.account != null;
@@ -376,10 +377,11 @@ export async function buildSignClaimCashoutTx(params: {
    walletSigner: TransactionSigner;
    escrow: CashoutEscrowAccountData;
    ticketFeepayer: Address;
+   mint: Address;
 }): Promise<SignedV1Tx> {
    const ix = await getClaimCashoutEscrowIx(params.walletSigner.address, params.escrow, {
       feepayer: params.ticketFeepayer,
-   });
+   }, params.mint);
    return buildSignV1Transaction(params.rpc, {
       feePayer: params.walletSigner,
       instructions: [ix],

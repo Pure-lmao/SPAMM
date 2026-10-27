@@ -164,7 +164,10 @@ pub struct MmEncumbrancePdaData {
    pub bump: u8,
    /// Sum of per-line peaks (and unnetted ticket P). Withdraw/deregister reserve.
    pub encumbrance: u64,
+   /// Cashout tickets whose filling MM is this vault. Close and deregister require zero.
+   pub open_cashout_tickets: u32,
 }
 pub const MM_ENCUMBRANCE_PDA_LEN: usize = <MmEncumbrancePdaData as ZeroPodFixed>::SIZE;
 pub const MM_ENCUMBRANCE_PDA_BUMP_OFFSET: usize = offset_of!(MmEncumbrancePdaDataZc, bump);
 pub const MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET: usize = offset_of!(MmEncumbrancePdaDataZc, encumbrance);
+pub const MM_ENCUMBRANCE_PDA_OPEN_CASHOUTS_OFFSET: usize = offset_of!(MmEncumbrancePdaDataZc, open_cashout_tickets);

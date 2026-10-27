@@ -8,7 +8,7 @@
 import './bootstrapEnv';
 import { createPromoAdminContext } from '../adminRun';
 import { decodePromoConfigAccount } from '../codex';
-import { PROMO_PROGRAM_ID } from '../constants';
+import { DEFAULT_PROMO_MINT, PROMO_PROGRAM_ID } from '../constants';
 import { getAta, getMmConfigPda, readAccountDataRaw } from '../spammSdk';
 import { parseFlags } from './cliFlags';
 
@@ -16,7 +16,7 @@ async function main(): Promise<void> {
    const flags = parseFlags(process.argv.slice(2));
    const ctx = await createPromoAdminContext();
    const [configPda, bump] = await getMmConfigPda(ctx.programId);
-   const collateralAta = await getAta(configPda);
+   const collateralAta = await getAta(configPda, DEFAULT_PROMO_MINT);
    const raw = await readAccountDataRaw(ctx.rpcs.rpc, configPda);
 
    if (raw === null) {

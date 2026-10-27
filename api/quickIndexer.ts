@@ -21,7 +21,6 @@ import { AGGREGATOR_PROGRAM_ID,
    getFreebetData, 
    ODDS_SCALE, 
    SYSTEM_PROGRAM_ID, 
-   MINT_ID, 
    type BetAccountData, 
    type CashoutAccountData, 
    type CashoutEscrowAccountData, 
@@ -36,8 +35,10 @@ import { AGGREGATOR_PROGRAM_ID,
    type FillRfqParlayIxData, 
    type ParlayLegQuoted, 
    type EventGameState, 
-   type DecodedAggregatorInstruction, 
+   type AggregatorInstructionData, 
 } from "spamm-aggregator-sdk";
+
+const DEVNET_USDC_MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
 import { createRpcClients } from "../aggregator/client/txSend";
 import { withRpcRetry } from "../market_maker/client/txSend";
 import { foldParlayResult, safeJSONStringify } from "./utils";
@@ -110,6 +111,8 @@ export type BetRecord = {
    min_odds_requested: number;
    payout: number;
    freebet_id: number;
+   /** `0` none, `1` freebet, `2` boost. `freebet_id` holds that promo's numeric id. */
+   promo_type: number;
    timestamp: number;
    result: BetResult;
    fillers: Filler[];
@@ -273,15 +276,35 @@ function ticketOddsScaled(amount: bigint, payout: bigint, fallback: bigint): big
    return (payout * ODDS_SCALE) / amount;
 }
 
-function isFreebetFillKind(kind: DecodedAggregatorInstruction["kind"]): boolean {
+function isFreebetFillKind(kind: AggregatorInstructionData["kind"]): boolean {
    return kind === "freebetFillBet"
       || kind === "freebetFillRfqBet"
       || kind === "freebetFillParlay"
       || kind === "freebetFillRfqParlay";
 }
 
-function fillBetPdaIndex(kind: DecodedAggregatorInstruction["kind"]): number {
+function isBoostFillKind(kind: AggregatorInstructionData["kind"]): boolean {
+   return kind === "boostedFillBet"
+      || kind === "boostedFillRfqBet"
+      || kind === "boostedFillParlay"
+      || kind === "boostedFillRfqParlay";
+}
+
+function fillBetPdaIndex(kind: AggregatorInstructionData["kind"]): number {
+   if (isBoostFillKind(kind)) {
+      return 6;
+   }
    return isFreebetFillKind(kind) ? 5 : 3;
+}
+
+function promoFromFill(decoded: AggregatorInstructionData): { promoType: number; promoId: number } {
+   if (isFreebetFillKind(decoded.kind) && "freebetId" in decoded) {
+      return { promoType: 1, promoId: decoded.freebetId };
+   }
+   if (isBoostFillKind(decoded.kind) && "boostId" in decoded) {
+      return { promoType: 2, promoId: decoded.boostId };
+   }
+   return { promoType: 0, promoId: 0 };
 }
 
 function parseUiTokenAmount(raw: unknown): bigint {
@@ -313,7 +336,7 @@ function tokenIncreaseForOwner(meta: unknown, owner: string): number | null {
          continue;
       }
       const row = item as { owner?: string; mint?: string; uiTokenAmount?: unknown };
-      if (row.owner !== owner || row.mint !== MINT_ID) {
+      if (row.owner !== owner || row.mint !== DEVNET_USDC_MINT) {
          continue;
       }
       preAmt += parseUiTokenAmount(row.uiTokenAmount);
@@ -323,7 +346,7 @@ function tokenIncreaseForOwner(meta: unknown, owner: string): number | null {
          continue;
       }
       const row = item as { owner?: string; mint?: string; uiTokenAmount?: unknown };
-      if (row.owner !== owner || row.mint !== MINT_ID) {
+      if (row.owner !== owner || row.mint !== DEVNET_USDC_MINT) {
          continue;
       }
       postAmt += parseUiTokenAmount(row.uiTokenAmount);
@@ -359,6 +382,19 @@ function rowToCashoutEscrowRecord(row: DbCashoutEscrowRow): CashoutEscrowRecord 
    };
 }
 
+function ensureBetPromoTypeColumn(database: ReturnType<typeof getDb>): void {
+   const table = database.query<{ name: string }, []>(
+      `SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'bet_accounts'`,
+   ).get();
+   if (table == null) {
+      return;
+   }
+   const cols = database.query<{ name: string }, []>(`PRAGMA table_info(bet_accounts)`).all();
+   if (!cols.some((col: { name: string }) => col.name === "promo_type")) {
+      database.run(`ALTER TABLE bet_accounts ADD COLUMN promo_type INTEGER NOT NULL DEFAULT 0`);
+   }
+}
+
 function createBetAccountsTable(database: ReturnType<typeof getDb>): void {
    database.run(`CREATE TABLE IF NOT EXISTS bet_accounts (
       id TEXT PRIMARY KEY,
@@ -382,8 +418,10 @@ function createBetAccountsTable(database: ReturnType<typeof getDb>): void {
       last_update_slot INTEGER NOT NULL,
       status TEXT NOT NULL,
       freebet_id INTEGER,
+      promo_type INTEGER NOT NULL DEFAULT 0,
       fillers TEXT NOT NULL DEFAULT '[]'
    )`);
+   ensureBetPromoTypeColumn(database);
 }
 
 function createCashoutAccountsTable(database: ReturnType<typeof getDb>): void {
@@ -468,10 +506,12 @@ function addBetAccount(
    timestamp: number,
    meta: UpdateMeta,
    freebetId: number,
+   promoType: number,
    replaceExisting: boolean,
    fillers: Filler[] = [],
 ): void {
    const database = getDb();
+   ensureBetPromoTypeColumn(database);
    // A later fill carrying fresh on-chain account data may refresh an existing row — but only while the
    // row is still pending and the new data is not older. This lets a subsequent successful account fetch
    // correct an earlier synthetic fallback row, while graded/claimed records are never overwritten.
@@ -488,14 +528,15 @@ function addBetAccount(
          timestamp = excluded.timestamp,
          last_update_slot = excluded.last_update_slot,
          freebet_id = excluded.freebet_id,
+         promo_type = excluded.promo_type,
          fillers = excluded.fillers
          WHERE bet_accounts.status = '${BetRecordStatus.Pending}'
             AND excluded.last_update_slot >= bet_accounts.last_update_slot`
       : ` ON CONFLICT(id) DO NOTHING`;
    database.run(`INSERT INTO bet_accounts
       (id, bet_id, type, user_address, selections, amount_requested, amount_filled, min_odds_requested, payout,
-      timestamp, result, created_at, created_sig, last_update_slot, status, freebet_id, fillers)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)${conflictClause}`,
+      timestamp, result, created_at, created_sig, last_update_slot, status, freebet_id, promo_type, fillers)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)${conflictClause}`,
       [
          betAddress, 
          betId.toString(), 
@@ -513,6 +554,7 @@ function addBetAccount(
          meta.lastUpdateSlot,
          BetRecordStatus.Pending,
          freebetId ?? 0,
+         promoType ?? 0,
          safeJSONStringify(fillers),
       ]
    );
@@ -615,11 +657,23 @@ function escrowPaymentForAddress(escrowAddress: string): number | null {
    return row == null ? null : Number(row.payment);
 }
 
-function updateBetOrCashoutAccountSettled(accountAddress: string, settledAt: number, settledSig: string, slot: number): void {
+function updateBetOrCashoutAccountSettled(
+   accountAddress: string,
+   settledAt: number,
+   settledSig: string,
+   slot: number,
+   finalPayout: number | null = null,
+): void {
    const database = getDb();
-   // Funds were paid out on settle, so record the known payout as the final payout and close out the record.
-   database.run(`UPDATE bet_accounts SET claimed_at = ?, claimed_sig = ?, final_payout = payout, status = ?, last_update_slot = ? WHERE id = ?`,
-      [settledAt, settledSig, BetRecordStatus.Claimed, slot, accountAddress]);
+   // Copy the payout stored at fill. The transaction token delta is one snapshot for every
+   // instruction, so it cannot be split across a batched settle.
+   if (finalPayout == null) {
+      database.run(`UPDATE bet_accounts SET claimed_at = ?, claimed_sig = ?, final_payout = payout, status = ?, last_update_slot = ? WHERE id = ?`,
+         [settledAt, settledSig, BetRecordStatus.Claimed, slot, accountAddress]);
+   } else {
+      database.run(`UPDATE bet_accounts SET claimed_at = ?, claimed_sig = ?, final_payout = ?, status = ?, last_update_slot = ? WHERE id = ?`,
+         [settledAt, settledSig, finalPayout, BetRecordStatus.Claimed, slot, accountAddress]);
+   }
    database.run(`UPDATE cashout_accounts SET claimed_at = ?, claimed_sig = ?, final_payout = payout, status = ?, last_update_slot = ? WHERE id = ?`,
       [settledAt, settledSig, BetRecordStatus.Claimed, slot, accountAddress]);
 };
@@ -970,6 +1024,7 @@ function getBetRecords(): BetRecord[] {
 
 export function getClosedBetRecordsByUser(userAddress: string): BetRecord[] {
    const database = getDb();
+   ensureBetPromoTypeColumn(database);
    // "Closed" includes every terminal status, not just claimed bets.
    const betAccounts = database.query<DbBetRow, string[]>(`SELECT * FROM bet_accounts WHERE user_address = ? AND status IN (?, ?, ?) ORDER BY created_at DESC`)
       .all(userAddress, BetRecordStatus.Claimed, BetRecordStatus.CashedOut, BetRecordStatus.Reverted);
@@ -981,7 +1036,7 @@ async function indexAggregatorInstruction(
    transactionMeta: TransactionMeta,
    blockTime: number,
 ): Promise<void> {
-   let decodedTransaction: DecodedAggregatorInstruction;
+   let decodedTransaction: AggregatorInstructionData;
    try {
       decodedTransaction = decodeAggregatorInstructionData(ix.data);
    } catch (error) {
@@ -997,7 +1052,7 @@ async function indexAggregatorInstruction(
    const userAddress = ix.accounts[1]!;
    const userOwner = ix.accounts[2]!;
 
-   if (decodedTransaction.kind === "fillBet" || decodedTransaction.kind === "fillRfqBet" || decodedTransaction.kind === "freebetFillBet" || decodedTransaction.kind === "freebetFillRfqBet") {
+   if (decodedTransaction.kind === "fillBet" || decodedTransaction.kind === "fillRfqBet" || decodedTransaction.kind === "freebetFillBet" || decodedTransaction.kind === "freebetFillRfqBet" || decodedTransaction.kind === "boostedFillBet" || decodedTransaction.kind === "boostedFillRfqBet") {
       const data = decodedTransaction.data;
       const betPda = ix.accounts[fillBetPdaIndex(decodedTransaction.kind)]!;
       let betAccount: BetAccountData;
@@ -1007,7 +1062,7 @@ async function indexAggregatorInstruction(
          betAccount = await getBetData(client.rpc, betPda);
       } catch {
          fetchedFromChain = false;
-         if (decodedTransaction.kind === "fillRfqBet" || decodedTransaction.kind === "freebetFillRfqBet") {
+         if (decodedTransaction.kind === "fillRfqBet" || decodedTransaction.kind === "freebetFillRfqBet" || decodedTransaction.kind === "boostedFillRfqBet") {
             oddsScaled = (decodedTransaction.data as FillRfqBetIxData).oddsScaled;
          } else {
             oddsScaled = (decodedTransaction.data as FillBetIxData).minOddsScaled;
@@ -1028,10 +1083,12 @@ async function indexAggregatorInstruction(
             eventGameState: data.eventGameState,
             numFillers: 0,
             fillers: [],
-            freebetId: decodedTransaction.kind === "freebetFillBet" || decodedTransaction.kind === "freebetFillRfqBet" ? decodedTransaction.freebetId : 0,
+            promoType: promoFromFill(decodedTransaction).promoType,
+            promoAccount: SYSTEM_PROGRAM_ID,
          };
       }
       const filledOdds = ticketOddsScaled(betAccount.amount, betAccount.payout, oddsScaled);
+      const promo = promoFromFill(decodedTransaction);
       addBetAccount(
          betPda,
          userAddress,
@@ -1044,13 +1101,14 @@ async function indexAggregatorInstruction(
          betAccount.payout,
          betAccount.timestamp,
          meta,
-         decodedTransaction.kind === "freebetFillBet" || decodedTransaction.kind === "freebetFillRfqBet" ? decodedTransaction.freebetId : 0,
+         promo.promoId,
+         betAccount.promoType || promo.promoType,
          fetchedFromChain,
          fillersFromBetAccount(betAccount.fillers),
       );
    }
 
-   else if (decodedTransaction.kind === "fillParlay" || decodedTransaction.kind === "fillRfqParlay" || decodedTransaction.kind === "freebetFillParlay" || decodedTransaction.kind === "freebetFillRfqParlay") {
+   else if (decodedTransaction.kind === "fillParlay" || decodedTransaction.kind === "fillRfqParlay" || decodedTransaction.kind === "freebetFillParlay" || decodedTransaction.kind === "freebetFillRfqParlay" || decodedTransaction.kind === "boostedFillParlay" || decodedTransaction.kind === "boostedFillRfqParlay") {
       const betPda = ix.accounts[fillBetPdaIndex(decodedTransaction.kind)]!;
       let parlayAccount: ParlayBetAccountData;
       let oddsScaled = 0n;
@@ -1059,7 +1117,7 @@ async function indexAggregatorInstruction(
          parlayAccount = await getParlayData(client.rpc, betPda);
       } catch {
          fetchedFromChain = false;
-         if (decodedTransaction.kind === "fillRfqParlay" || decodedTransaction.kind === "freebetFillRfqParlay") {
+         if (decodedTransaction.kind === "fillRfqParlay" || decodedTransaction.kind === "freebetFillRfqParlay" || decodedTransaction.kind === "boostedFillRfqParlay") {
             oddsScaled = (decodedTransaction.data as FillRfqParlayIxData).oddsScaled;
          } else {
             oddsScaled = (decodedTransaction.data as FillParlayIxData).minOddsScaled;
@@ -1084,10 +1142,12 @@ async function indexAggregatorInstruction(
                marketId: leg.marketId,
                side: leg.side,
             })),
-            freebetId: decodedTransaction.kind === "freebetFillParlay" || decodedTransaction.kind === "freebetFillRfqParlay" ? decodedTransaction.freebetId : 0,
+            promoType: promoFromFill(decodedTransaction).promoType,
+            promoAccount: SYSTEM_PROGRAM_ID,
          };
       }
       const activeLegs = parlayAccount.legs.slice(0, parlayAccount.numLegs);
+      const promo = promoFromFill(decodedTransaction);
       addBetAccount(
          betPda,
          userAddress,
@@ -1100,7 +1160,8 @@ async function indexAggregatorInstruction(
          parlayAccount.payout,
          parlayAccount.timestamp,
          meta,
-         decodedTransaction.kind === "freebetFillParlay" || decodedTransaction.kind === "freebetFillRfqParlay" ? decodedTransaction.freebetId : 0,
+         promo.promoId,
+         parlayAccount.promoType || promo.promoType,
          fetchedFromChain,
       );
    }
@@ -1132,6 +1193,7 @@ async function indexAggregatorInstruction(
                player: 0n,
                isPregame: true,
                operator: SYSTEM_PROGRAM_ID,
+               mint: SYSTEM_PROGRAM_ID,
             },
             side: 255,
             amount: data.amount,
@@ -1210,6 +1272,7 @@ async function indexAggregatorInstruction(
                   player: 0n,
                   isPregame: true,
                   operator: SYSTEM_PROGRAM_ID,
+                  mint: SYSTEM_PROGRAM_ID,
                },
                255,
                snapshot.eventStateSequence,
@@ -1259,12 +1322,14 @@ async function indexAggregatorInstruction(
       updateParlayOrCashoutAccountResult(parlayAddress, mask, Number(transactionMeta.slot), blockTime, transactionMeta.signature);
    }
 
-   else if (decodedTransaction.kind === "settleBet" || decodedTransaction.kind === "settleFreebet") {
+   else if (decodedTransaction.kind === "settleBet" || decodedTransaction.kind === "settleFreebet" || decodedTransaction.kind === "settleBoostedBet") {
       const ticketAddress = ix.accounts[1]!;
+      // Ticket payout, not the transaction token delta. pre/post balances are one snapshot for
+      // the whole transaction, so a batch of settles would stamp the combined increase on each row.
       updateBetOrCashoutAccountSettled(ticketAddress, blockTime, transactionMeta.signature, Number(transactionMeta.slot));
    }
 
-   else if (decodedTransaction.kind === "settleParlay" || decodedTransaction.kind === "settleFreebetParlay") {
+   else if (decodedTransaction.kind === "settleParlay" || decodedTransaction.kind === "settleFreebetParlay" || decodedTransaction.kind === "settleBoostedParlay") {
       const ticketAddress = ix.accounts[1]!;
       updateBetOrCashoutAccountSettled(ticketAddress, blockTime, transactionMeta.signature, Number(transactionMeta.slot));
    }

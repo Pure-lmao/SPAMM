@@ -24,21 +24,22 @@
 //! 4. `mm_token_account` (writable)
 
 use pinocchio::{
-   AccountView, Address, ProgramResult, cpi::{Signer, invoke_signed},
+   AccountView, Address, ProgramResult, address::address_eq, cpi::{Signer, invoke_signed},
    error::ProgramError, hint::unlikely,
    instruction::{InstructionAccount, InstructionView},
 };
 use pinocchio_log::log;
 
 use crate::{
-   constants::MAX_RFQ_PARLAY_LEGS, errors::SpammError, helpers::{
+   constants::RFQ_NETWORK_DOMAIN, errors::SpammError, helpers::{
+      min_amount_for_decimals,
       calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, get_encumbrance, get_token_account_balance, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_program_executable, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
       fill_helpers::{
          compute_liability_shortfall, create_parlay_bet_account, require_exact_token_increase,
       },
       freebet_helpers::{odds_in_freebet_range, require_freebet_mm_allowed, require_freebet_operator_allowed, verify_freebet_for_fill},
-   }, instructions::fill_bet::FillBetStake, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
-      FILL_PARLAY_RFQ_IX_DISCRIMINATOR, FillRfqIxData, FillRfqParlayIxData, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, build_rfq_parlay_message, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds}, rfq_message::{RFQ_PARLAY_MESSAGE_LEN, rfq_parlay_message_len},
+   }, instructions::fill_bet::FillBetStake, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature_parts, state::{
+      FILL_PARLAY_RFQ_IX_DISCRIMINATOR, FillRfqIxData, FillRfqParlayView, MM_CONFIG_PDA_RFQ_SIGNER_OFFSET, PromoType, RFQ_PARLAY_MESSAGE_HEADER_LEN, RFQ_PARLAY_MESSAGE_KIND, RfqParlayMessageHeader, validate_amount_over_min, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds},
    }, writers::write_u64_le_unchecked,
 };
 
@@ -49,27 +50,26 @@ fn verify_rfq_parlay_ed25519(
    user: &Address,
    mm_program: &Address,
    mm_config_pda: &AccountView,
-   parsed_ix: &FillRfqParlayIxData,
+   parsed_ix: &FillRfqParlayView,
    signature: &[u8; 64],
 ) -> Result<(), ProgramError> {
    let rfq_signer = unsafe {
       read_address_ref_unchecked(mm_config_pda.data_ptr(), MM_CONFIG_PDA_RFQ_SIGNER_OFFSET)
    };
-   let n = parsed_ix.num_legs as usize;
-   let msg_len = rfq_parlay_message_len(n);
-   let mut message = [0u8; RFQ_PARLAY_MESSAGE_LEN];
-   build_rfq_parlay_message(
-      &mut message[..msg_len],
-      user,
-      parsed_ix.bet_id,
-      parsed_ix.num_legs,
-      parsed_ix.live_legs(),
-      parsed_ix.max_stake,
-      parsed_ix.odds_scaled,
-      parsed_ix.offer_expiry,
-      mm_program,
-   )?;
-   verify_rfq_ed25519_signature(rfq_signer, signature, &message[..msg_len])
+   let mut header = [0u8; RFQ_PARLAY_MESSAGE_HEADER_LEN];
+   RfqParlayMessageHeader {
+      network_domain: RFQ_NETWORK_DOMAIN,
+      kind: RFQ_PARLAY_MESSAGE_KIND,
+      user: *user,
+      bet_id: parsed_ix.bet_id,
+      max_stake: parsed_ix.max_stake,
+      odds_scaled: parsed_ix.odds_scaled,
+      offer_expiry: parsed_ix.offer_expiry,
+      mm_program_id: *mm_program,
+      num_legs: parsed_ix.num_legs,
+   }
+   .write_header(&mut header)?;
+   verify_rfq_ed25519_signature_parts(rfq_signer, signature, &[&header, parsed_ix.leg_bytes])
 }
 
 #[inline(never)]
@@ -110,7 +110,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_account: user_ata,
          authority: user,
          issuer_sign: None,
-         freebet_id: 0,
+         promo_type: PromoType::None,
+         promo_account: Address::default(),
          freebet: None,
       },
    )
@@ -135,9 +136,7 @@ pub(crate) fn decode_and_run_fill_rfq_parlay(
    data: &[u8],
    stake: FillBetStake<'_>,
 ) -> ProgramResult {
-   // One owned ix on this frame only (~3240B). Never return-by-value decode (doubles past 4KiB).
-   let mut parsed_ix = unsafe { core::mem::zeroed::<FillRfqParlayIxData>() };
-   let signature = FillRfqParlayIxData::decode_into(&mut parsed_ix, data)?;
+   let (parsed_ix, signature) = FillRfqParlayView::decode(data)?;
    run_fill_rfq_parlay(
       feepayer,
       user,
@@ -171,7 +170,7 @@ pub(crate) fn run_fill_rfq_parlay(
    system_program: &AccountView,
    clock_sysvar: &AccountView,
    mm_accounts: &mut [AccountView],
-   parsed_ix: &FillRfqParlayIxData,
+   parsed_ix: &FillRfqParlayView,
    signature: [u8; 64],
    stake: FillBetStake<'_>,
 ) -> ProgramResult {
@@ -193,8 +192,7 @@ pub(crate) fn run_fill_rfq_parlay(
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_clock_sysvar(clock_sysvar)?;
-   verify_mint(mint)?;
-   verify_token_account(true, stake.token_account, stake.authority, mint, token_program)?;
+   verify_token_account(true, stake.token_account, stake.authority, mint, token_program, stake.issuer_sign.is_some())?;
    verify_config_pda(config_pda, true)?;
    ensure_pda_unused(bet_pda, "fill_rfq_parlay")?;
 
@@ -203,6 +201,19 @@ pub(crate) fn run_fill_rfq_parlay(
    let odds_scaled = parsed_ix.odds_scaled;
    let num_legs_u8 = parsed_ix.num_legs;
    let num_legs = num_legs_u8 as usize;
+   if unlikely(num_legs == 0) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   let bet_mint = parsed_ix.leg(0)?.market_id.mint;
+   for i in 1..num_legs {
+      if unlikely(!address_eq(&parsed_ix.leg(i)?.market_id.mint, &bet_mint)) {
+         log!("fill_rfq_parlay: leg mints differ");
+         return Err(ProgramError::InvalidInstructionData);
+      }
+   }
+   let decimals = verify_mint(mint, &bet_mint)?;
+   let min_stake = min_amount_for_decimals(decimals);
+   validate_amount_over_min(amount, min_stake, "fill_rfq_parlay")?;
 
    let now = clock_unix_timestamp_u32(clock_sysvar)?;
    if unlikely(now > parsed_ix.offer_expiry) {
@@ -211,10 +222,10 @@ pub(crate) fn run_fill_rfq_parlay(
    }
 
    if let Some(fb) = stake.freebet {
-      verify_freebet_for_fill(fb, user.address(), amount, num_legs_u8, now)?;
+      verify_freebet_for_fill(fb, user.address(), &bet_mint, amount, num_legs_u8, now)?;
       require_freebet_mm_allowed(fb, mm_program_account.address())?;
       for i in 0..num_legs {
-         require_freebet_operator_allowed(fb, &parsed_ix.legs[i].market_id.operator)?;
+         require_freebet_operator_allowed(fb, &parsed_ix.leg(i)?.market_id.operator)?;
       }
       if !odds_in_freebet_range(odds_scaled, fb) {
          return Err(SpammError::FreebetOddsOutOfRange.into());
@@ -235,11 +246,11 @@ pub(crate) fn run_fill_rfq_parlay(
       &signature,
    )?;
 
-   if unlikely(!verify_token_account(false, mm_token_account, mm_config_pda, mint, token_program)?) {
+   if unlikely(!verify_token_account(false, mm_token_account, mm_config_pda, mint, token_program, true)?) {
       log!("fill_rfq_parlay: invalid mm token account");
       return Err(ProgramError::InvalidAccountData);
    }
-   if verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account).is_none() {
+   if verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account, mint.address()).is_none() {
       log!("fill_rfq_parlay: invalid encumbrance pda");
       return Err(ProgramError::InvalidAccountData);
    }
@@ -249,6 +260,7 @@ pub(crate) fn run_fill_rfq_parlay(
       mm_encumbrance_pda,
       mint,
       token_program,
+      true,
    )?) {
       log!("fill_rfq_parlay: invalid mm liability token account");
       return Err(ProgramError::InvalidAccountData);
@@ -345,7 +357,6 @@ pub(crate) fn run_fill_rfq_parlay(
    )
 }
 
-/// Owns `[ParlayLegWire; MAX_RFQ_PARLAY_LEGS]` on this frame only.
 #[inline(never)]
 fn create_parlay_bet_from_rfq_legs(
    feepayer: &AccountView,
@@ -362,13 +373,9 @@ fn create_parlay_bet_from_rfq_legs(
    filled_payout: u64,
    now: u32,
    num_legs: usize,
-   parsed_ix: &FillRfqParlayIxData,
+   parsed_ix: &FillRfqParlayView,
    mm_program: &pinocchio::Address,
 ) -> ProgramResult {
-   let mut stored = unsafe { core::mem::zeroed::<[crate::state::ParlayLegWire; MAX_RFQ_PARLAY_LEGS]>() };
-   for i in 0..num_legs {
-      stored[i] = parsed_ix.legs[i].with_pending();
-   }
    create_parlay_bet_account(
       feepayer,
       user,
@@ -384,9 +391,10 @@ fn create_parlay_bet_from_rfq_legs(
       amount,
       filled_payout,
       now,
-      stake.freebet_id,
+      stake.promo_type,
+      &stake.promo_account,
       num_legs,
-      &stored[..num_legs],
+      |i| Ok(parsed_ix.leg(i)?.with_pending()),
       mm_program,
       stake.issuer_sign,
       "fill_rfq_parlay",

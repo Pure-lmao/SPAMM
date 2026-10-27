@@ -22,37 +22,41 @@ export function getRegisterIx(mmAdmin: Address): Promise<Instruction> {
    return getRegisterMmIx(mmAdmin, PROGRAM);
 }
 
-export function getDeregisterIx(aggregatorAdmin: Address, mmAdmin: Address): Promise<Instruction> {
-   return getDeregisterMmIx(aggregatorAdmin, mmAdmin, PROGRAM);
+export function getDeregisterIx(aggregatorAdmin: Address, mmAdmin: Address, mint: Address): Promise<Instruction> {
+   return getDeregisterMmIx(aggregatorAdmin, mmAdmin, PROGRAM, mint);
 }
 
-export function getCreateNettingIx(eventId: EventId, mmAdmin: Address): Promise<Instruction> {
-   return getCreateNettingAccountIx(eventId, mmAdmin, PROGRAM);
+export function getCreateNettingIx(eventId: EventId, operator: Address, mint: Address, mmAdmin: Address): Promise<Instruction> {
+   return getCreateNettingAccountIx(eventId, operator, mint, mmAdmin, PROGRAM);
 }
 
 export function getAddNettingLineIx(
    eventId: EventId,
+   operator: Address,
+   mint: Address,
    period: number,
    mkt: number,
    admin: Address,
 ): Promise<Instruction> {
-   return getAddLineToNettingAccountIx(eventId, period, mkt, admin, PROGRAM);
+   return getAddLineToNettingAccountIx(eventId, operator, mint, period, mkt, admin, PROGRAM);
 }
 
 export function getRemoveNettingLineIx(
    eventId: EventId,
+   operator: Address,
+   mint: Address,
    period: number,
    mkt: number,
    admin: Address,
 ): Promise<Instruction> {
-   return getRemoveLineFromNettingAccountIx(eventId, period, mkt, admin, PROGRAM);
+   return getRemoveLineFromNettingAccountIx(eventId, operator, mint, period, mkt, admin, PROGRAM);
 }
 
-export function getCloseNettingIx(eventId: EventId, mmAdmin: Address): Promise<Instruction> {
-   return getCloseNettingAccountIx(eventId, mmAdmin, PROGRAM);
+export function getCloseNettingIx(eventId: EventId, operator: Address, mint: Address, mmAdmin: Address): Promise<Instruction> {
+   return getCloseNettingAccountIx(eventId, operator, mint, mmAdmin, PROGRAM);
 }
 
-export function getWithdrawLiabilityIx(amount: bigint, mmAdmin: Address): Promise<Instruction> {
+export function getWithdrawLiabilityIx(amount: bigint, mmAdmin: Address, mint: Address): Promise<Instruction> {
    assertU64(amount, 'amount');
-   return getWithdrawFromLiabilityAccountIx(amount, mmAdmin, PROGRAM);
+   return getWithdrawFromLiabilityAccountIx(amount, mmAdmin, PROGRAM, mint);
 }

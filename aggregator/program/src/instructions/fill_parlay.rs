@@ -30,23 +30,24 @@
 //! + [`ParlayLegSel`] × `num_legs` only (no padding; max [`MAX_PARLAY_LEGS`]).
 
 use pinocchio::{
-   AccountView, ProgramResult, cpi::{Signer, invoke_signed},
+   AccountView, Address, ProgramResult, address::address_eq, cpi::{Signer, invoke_signed},
    error::ProgramError, hint::unlikely, instruction::{InstructionAccount, InstructionView},
 };
 #[cfg(feature = "log")]
 use pinocchio_log::log;
 
 use crate::{
-   constants::{MAX_PARLAY_LEGS}, errors::SpammError, helpers::{
+   constants::MAX_PARLAY_LEGS, errors::SpammError, helpers::{
+      min_amount_for_decimals,
       calc_potential_payout, calc_potential_profit, clock_unix_timestamp_u32, ensure_pda_unused, get_encumbrance, get_token_account_balance, verify_associated_token_program, verify_clock_sysvar, verify_config_pda, verify_mint, verify_mm_config_pda, verify_mm_encumbrance_pda, verify_mm_program_executable, verify_parlay_quote_buffer, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_account, verify_token_program,
       fill_helpers::{
          compute_liability_shortfall, create_parlay_bet_account, require_exact_token_increase,
          invoke_mm_get_quote_parlay, parse_parlay_quote_return_for_mm,
       },
       freebet_helpers::{odds_in_freebet_range, require_freebet_mm_allowed, require_freebet_operator_allowed, verify_freebet_for_fill},
-      parlay_helpers::{apply_leg_odds, ensure_parlay_odds_product_matches},
+      parlay_helpers::product_scaled_odds,
    }, instructions::fill_bet::FillBetStake, state::{
-      FILL_QUOTE_PARLAY_IX_DISCRIMINATOR, FillParlayIxData, FillParlayQuoteIxData, ParlayLegSel, ParlayLegWire, empty_parlay_leg_buf, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds},
+      FILL_QUOTE_PARLAY_IX_DISCRIMINATOR, FillParlayQuoteIxData, FillParlayView, PromoType, validate_amount_over_min, other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, config_signer_seeds},
    }, writers::write_u64_le_unchecked,
 };
 
@@ -58,7 +59,7 @@ fn invoke_get_quote_parlay(
    num_legs: usize,
    amount: u64,
    min_odds_scaled: u32,
-   legs: &[ParlayLegSel],
+   leg_bytes: &[u8],
    user: &AccountView,
    clock_sysvar: &AccountView,
    mm_program_account: &AccountView,
@@ -70,7 +71,7 @@ fn invoke_get_quote_parlay(
       num_legs,
       amount,
       min_odds_scaled,
-      legs,
+      leg_bytes,
       user,
       clock_sysvar,
       mm_program_account,
@@ -91,7 +92,7 @@ fn cpi_get_quote_parlay(
    num_legs: usize,
    amount: u64,
    min_odds_scaled: u32,
-   legs: &[ParlayLegSel],
+   leg_bytes: &[u8],
    user: &AccountView,
    clock_sysvar: &AccountView,
    mint: &AccountView,
@@ -103,7 +104,7 @@ fn cpi_get_quote_parlay(
    mm_liability_token_account: &AccountView,
    mm_token_account: &AccountView,
    leg_accounts: &mut [AccountView],
-   quoted_legs_out: &mut [ParlayLegWire],
+   leg_odds_out: &mut [u32],
 ) -> Result<(u64, u32), ProgramError> {
    if !verify_mm_config_pda(mm_config_pda, mm_program_account) {
       #[cfg(feature = "log")]
@@ -117,19 +118,23 @@ fn cpi_get_quote_parlay(
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   if !verify_token_account(false, mm_token_account, mm_config_pda, mint, token_program)? {
+   if !verify_token_account(false, mm_token_account, mm_config_pda, mint, token_program, true)? {
       #[cfg(feature = "log")]
       log!("fill_parlay: invalid mm token account");
       return Err(ProgramError::InvalidInstructionData);
    }
 
-   let Some(_encumbrance_pda_bump) = verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account) else {
+   let Some(_encumbrance_pda_bump) = verify_mm_encumbrance_pda(
+      mm_encumbrance_pda,
+      mm_program_account,
+      mint.address(),
+   ) else {
       #[cfg(feature = "log")]
       log!("fill_parlay: invalid encumbrance pda");
       return Err(ProgramError::InvalidInstructionData);
    };
 
-   if !verify_token_account(false, mm_liability_token_account, mm_encumbrance_pda, mint, token_program)? {
+   if !verify_token_account(false, mm_liability_token_account, mm_encumbrance_pda, mint, token_program, true)? {
       #[cfg(feature = "log")]
       log!("fill_parlay: invalid mm liability token account");
       return Err(ProgramError::InvalidInstructionData);
@@ -139,7 +144,7 @@ fn cpi_get_quote_parlay(
       num_legs,
       amount,
       min_odds_scaled,
-      legs,
+      leg_bytes,
       user,
       clock_sysvar,
       mm_program_account,
@@ -148,19 +153,22 @@ fn cpi_get_quote_parlay(
       leg_accounts,
    )?;
 
-   if unlikely(quoted_legs_out.len() < num_legs) {
+   if unlikely(leg_odds_out.len() < num_legs) {
       return Err(ProgramError::InvalidInstructionData);
    }
-   let mut leg_odds = [0u32; MAX_PARLAY_LEGS];
    let Some((max_amount, odds_scaled, _num)) =
-      parse_parlay_quote_return_for_mm(mm_program_account, &mut leg_odds).filter(|(m, _, _)| *m > 0)
+      parse_parlay_quote_return_for_mm(mm_program_account, leg_odds_out).filter(|(m, _, _)| *m > 0)
    else {
       #[cfg(feature = "log")]
       log!("fill_parlay: empty quote from mm");
       return Err(ProgramError::InvalidInstructionData);
    };
-   apply_leg_odds(num_legs, &legs[..num_legs], &leg_odds[..num_legs], quoted_legs_out);
-   ensure_parlay_odds_product_matches(num_legs, &quoted_legs_out[..num_legs], odds_scaled)?;
+   let product = product_scaled_odds(&leg_odds_out[..num_legs])?;
+   if unlikely(product != odds_scaled) {
+      #[cfg(feature = "log")]
+      log!("fill_parlay: parlay odds product mismatch");
+      return Err(SpammError::ParlayOddsMismatch.into());
+   }
 
    #[cfg(feature = "log")]
    log!("fill_parlay: max_amount: {}, odds_scaled: {}", max_amount, odds_scaled);
@@ -317,7 +325,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_account: user_ata,
          authority: user,
          issuer_sign: None,
-         freebet_id: 0,
+         promo_type: PromoType::None,
+         promo_account: Address::default(),
          freebet: None,
       },
    )
@@ -342,7 +351,7 @@ pub(crate) fn decode_and_run_fill_parlay(
    data: &[u8],
    stake: FillBetStake<'_>,
 ) -> ProgramResult {
-   let parsed = FillParlayIxData::decode(data)?;
+   let parsed = FillParlayView::decode(data)?;
    run_fill_parlay(
       feepayer,
       user,
@@ -375,7 +384,7 @@ pub(crate) fn run_fill_parlay(
    system_program: &AccountView,
    clock_sysvar: &AccountView,
    mm_and_legs: &mut [AccountView],
-   parsed: FillParlayIxData,
+   parsed: FillParlayView<'_>,
    stake: FillBetStake<'_>,
 ) -> ProgramResult {
    let [
@@ -399,27 +408,38 @@ pub(crate) fn run_fill_parlay(
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
    verify_clock_sysvar(clock_sysvar)?;
-   verify_mint(mint)?;
-   verify_token_account(true, stake.token_account, stake.authority, mint, token_program)?;
+   verify_token_account(true, stake.token_account, stake.authority, mint, token_program, stake.issuer_sign.is_some())?;
    verify_config_pda(config_pda, true)?;
    verify_mm_program_executable(mm_program_account)?;
    ensure_pda_unused(bet_pda, "fill_parlay")?;
 
-   let FillParlayIxData {
+   let FillParlayView {
       bet_id,
       amount,
       min_odds_scaled,
       num_legs: num_legs_u8,
-      legs,
+      leg_bytes,
    } = parsed;
    let num_legs = num_legs_u8 as usize;
+   if unlikely(num_legs == 0) {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   let bet_mint = parsed.leg(0)?.market_id.mint;
+   for i in 1..num_legs {
+      if unlikely(!address_eq(&parsed.leg(i)?.market_id.mint, &bet_mint)) {
+         return Err(ProgramError::InvalidInstructionData);
+      }
+   }
+   let decimals = verify_mint(mint, &bet_mint)?;
+   let min_stake = min_amount_for_decimals(decimals);
+   validate_amount_over_min(amount, min_stake, "fill_parlay")?;
 
    let now = clock_unix_timestamp_u32(clock_sysvar)?;
    if let Some(fb) = stake.freebet {
-      verify_freebet_for_fill(fb, user.address(), amount, num_legs_u8, now)?;
+      verify_freebet_for_fill(fb, user.address(), &bet_mint, amount, num_legs_u8, now)?;
       require_freebet_mm_allowed(fb, mm_program_account.address())?;
       for i in 0..num_legs {
-         require_freebet_operator_allowed(fb, &legs[i].market_id.operator)?;
+         require_freebet_operator_allowed(fb, &parsed.leg(i)?.market_id.operator)?;
       }
    }
 
@@ -430,12 +450,12 @@ pub(crate) fn run_fill_parlay(
       return Err(ProgramError::NotEnoughAccountKeys);
    }
 
-   let mut quoted_legs = empty_parlay_leg_buf::<MAX_PARLAY_LEGS>();
+   let mut leg_odds = [0u32; MAX_PARLAY_LEGS];
    let (max_amount, odds_scaled) = cpi_get_quote_parlay(
       num_legs,
       amount,
       min_odds_scaled,
-      &legs[..num_legs],
+      leg_bytes,
       user,
       clock_sysvar,
       mint,
@@ -447,7 +467,7 @@ pub(crate) fn run_fill_parlay(
       mm_liability_token_account,
       mm_token_account,
       leg_accounts,
-      &mut quoted_legs,
+      &mut leg_odds,
    )?;
 
    if let Some(fb) = stake.freebet {
@@ -472,8 +492,13 @@ pub(crate) fn run_fill_parlay(
       config_pda,
    )?;
 
-   if stake.freebet.is_some() && filled_amount != amount {
-      return Err(SpammError::FreebetAmountMismatch.into());
+   if filled_amount != amount {
+      if stake.freebet.is_some() {
+         return Err(SpammError::FreebetAmountMismatch.into());
+      }
+      if stake.promo_type == PromoType::Boost {
+         return Err(SpammError::BoostAmountMismatch.into());
+      }
    }
 
    create_parlay_bet_account(
@@ -491,9 +516,10 @@ pub(crate) fn run_fill_parlay(
       filled_amount,
       filled_payout,
       now,
-      stake.freebet_id,
+      stake.promo_type,
+      &stake.promo_account,
       num_legs,
-      &quoted_legs[..num_legs],
+      |i| Ok(parsed.leg(i)?.with_odds_pending(leg_odds[i])),
       mm_program_account.address(),
       stake.issuer_sign,
       "fill_parlay",

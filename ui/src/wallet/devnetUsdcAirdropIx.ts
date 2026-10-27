@@ -1,11 +1,12 @@
 import { AccountRole, address, type Address, type Instruction } from "@solana/kit";
 import {
    getAta,
-   MINT_ID,
    SPL_ASSOCIATED_TOKEN_PROGRAM_ID,
    SPL_TOKEN_PROGRAM_ID,
    SYSTEM_PROGRAM_ID,
 } from "spamm-aggregator-sdk";
+
+const DEVNET_USDC_MINT: Address = address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
 
 const DEVNET_USDC_AIRDROP_PROGRAM: Address = address("4sN8PnN2ki2W4TFXAfzR645FWs8nimmsYeNtxM8RBK6A");
 
@@ -21,15 +22,15 @@ const rw = (a: Address) => ({ address: a, role: AccountRole.WRITABLE });
 const ws = (a: Address) => ({ address: a, role: AccountRole.WRITABLE_SIGNER });
 
 /**
- * Devnet faucet-style transfer into the user's USDC ATA (`MINT_ID`).
+ * Devnet faucet-style transfer into the user's USDC ATA.
  * Account order and `data` match the on-chain program layout.
  */
 export async function buildDevnetUsdcAirdropIx(user: Address): Promise<Instruction> {
-   const userAta = await getAta(user);
+   const userAta = await getAta(user, DEVNET_USDC_MINT);
    return {
       programAddress: DEVNET_USDC_AIRDROP_PROGRAM,
       accounts: [
-         rw(MINT_ID),
+         rw(DEVNET_USDC_MINT),
          rw(userAta),
          ws(user),
          ws(user),

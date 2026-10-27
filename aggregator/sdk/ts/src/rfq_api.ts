@@ -35,6 +35,7 @@ export type MarketIdJson = {
    period: number;
    isPregame: boolean;
    operator: string;
+   mint: string;
 };
 
 /** `POST /api/rfq` request body (JSON). */
@@ -264,6 +265,7 @@ export function marketIdToJson(marketId: MarketId): MarketIdJson {
       period: marketId.period,
       isPregame: marketId.isPregame,
       operator: marketId.operator,
+      mint: marketId.mint,
    };
 }
 
@@ -279,6 +281,7 @@ export function marketIdFromJson(json: MarketIdJson): MarketId {
       period: json.period,
       isPregame: json.isPregame,
       operator: address(json.operator),
+      mint: address(json.mint),
    };
 }
 
@@ -321,6 +324,7 @@ function parseMarketIdJson(raw: unknown, label: string): MarketIdJson {
       period: requireNumber(raw, 'period'),
       isPregame: raw.isPregame === true,
       operator: requireString(raw, 'operator'),
+      mint: requireString(raw, 'mint'),
    };
 }
 

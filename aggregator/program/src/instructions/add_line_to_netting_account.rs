@@ -20,7 +20,7 @@ use crate::{
    state::{add_netting_line, account_netting::ensure_netting_space_for_extra_line, AddLineToLiabilityNettingIxData},
 };
 
-pub const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 41;
+pub const ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 131;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -45,7 +45,13 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let period = parsed_data.period;
    let mkt = parsed_data.mkt;
 
-   if !verify_netting_pda(netting_pda, mm_program, &event_id.as_wire_bytes()) {
+   if !verify_netting_pda(
+      netting_pda,
+      mm_program,
+      &event_id.as_wire_bytes(),
+      &parsed_data.operator,
+      &parsed_data.mint,
+   ) {
       log!("add_line_to_netting_account: invalid netting pda");
       return Err(ProgramError::InvalidAccountData);
    }

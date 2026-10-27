@@ -32,7 +32,7 @@ use crate::{
       verify_associated_token_program, verify_authority, verify_config_pda, verify_mint,
       verify_mm_admin, verify_mm_encumbrance_pda, verify_mm_list_pda, verify_mm_program_executable,
       verify_parlay_quote_buffer, verify_quote_buffer, verify_rent_sysvar, verify_signer,
-      verify_system_program, verify_token_account, verify_token_program, get_encumbrance,
+      verify_system_program, verify_token_account, verify_token_program, get_encumbrance, get_open_cashout_tickets,
    },
    state::{
       MM_LIST_HEADER_LEN,
@@ -126,7 +126,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_system_program(system_program)?;
    verify_token_program(token_program)?;
    verify_associated_token_program(associated_token_program)?;
-   verify_mint(mint)?;
+   verify_mint(mint, mint.address())?;
    verify_mm_list_pda(mm_list_pda)?;
    verify_token_account(
       true,
@@ -134,6 +134,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mm_encumbrance_pda,
       mint,
       token_program,
+      true,
    )?;
    verify_token_account(
       true,
@@ -141,6 +142,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       mm_config_pda,
       mint,
       token_program,
+      true,
    )?;
 
    if unlikely(!verify_quote_buffer(mm_quote_buffer, mm_program)) {
@@ -154,14 +156,15 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    let (idx, number_of_mms) = find_mm_program_in_list(mm_list_pda, mm_program.address())?;
 
-   let Some(encumbrance_bump) = verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program) else {
+   let Some(encumbrance_bump) = verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program, mint.address()) else {
       log!("deregister_mm: invalid mm encumbrance pda");
       return Err(ProgramError::InvalidAccountOwner);
    };
 
    let encumbrance = get_encumbrance(mm_encumbrance_pda)?;
-   if unlikely(encumbrance != 0) {
-      log!("deregister_mm: encumbrance must be zero");
+   let open_cashouts = get_open_cashout_tickets(mm_encumbrance_pda)?;
+   if unlikely(encumbrance != 0 || open_cashouts != 0) {
+      log!("deregister_mm: encumbrance and open cashouts must be zero");
       return Err(ProgramError::InvalidAccountData);
    }
 
@@ -169,6 +172,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let encumbrance_pda_seeds = [
       Seed::from(MM_ENCUMBRANCE_PDA_SEED),
       Seed::from(mm_program.address().as_ref()),
+      Seed::from(mint.address().as_ref()),
       Seed::from(&encumbrance_bump_seed),
    ];
    let encumbrance_pda_signer = Signer::from(&encumbrance_pda_seeds);

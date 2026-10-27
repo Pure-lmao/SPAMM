@@ -566,7 +566,7 @@ fn settle_parlay_from_rfq_fill() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    assert!(env
       .run_ix(fill_rfq_parlay_instruction(&data, &sig, bet, bat))
@@ -630,7 +630,7 @@ fn settle_parlay_max_rfq_legs() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: n,
-      legs: table,
+      legs: Box::new(table),
    };
    assert!(env
       .run_ix(fill_rfq_parlay_instruction(&data, &sig, bet, bat))

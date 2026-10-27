@@ -1,12 +1,40 @@
-use pinocchio::error::ProgramError;
+use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use super::ids::EventId;
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
+pub struct NettingScopeIxData {
+   pub event_id: EventId,
+   pub operator: Address,
+   pub mint: Address,
+}
+
+pub const NETTING_SCOPE_IX_LEN: usize = <NettingScopeIxData as ZeroPodFixed>::SIZE;
+
+impl NettingScopeIxData {
+   #[inline(always)]
+   pub fn decode(data: &[u8]) -> Result<Self, ProgramError> {
+      if data.len() != NETTING_SCOPE_IX_LEN {
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      let zc = <Self as ZeroPodFixed>::from_bytes(data)
+         .map_err(|_| ProgramError::InvalidInstructionData)?;
+      Ok(Self {
+         event_id: EventId::from_zc(&zc.event_id).ok_or(ProgramError::InvalidInstructionData)?,
+         operator: zc.operator,
+         mint: zc.mint,
+      })
+   }
+}
+
+#[derive(Copy, Clone, ZeroPod)]
+#[repr(C)]
 pub struct AddLineToLiabilityNettingIxData {
    pub event_id: EventId,
+   pub operator: Address,
+   pub mint: Address,
    pub period: u8,
    pub mkt: u16,
 }
@@ -24,6 +52,8 @@ impl AddLineToLiabilityNettingIxData {
          .map_err(|_| ProgramError::InvalidInstructionData)?;
       Ok(Self {
          event_id: EventId::from_zc(&zc.event_id).ok_or(ProgramError::InvalidInstructionData)?,
+         operator: zc.operator,
+         mint: zc.mint,
          period: zc.period,
          mkt: zc.mkt.get(),
       })
@@ -36,6 +66,8 @@ impl AddLineToLiabilityNettingIxData {
       }
       let zc = AddLineToLiabilityNettingIxDataZc {
          event_id: self.event_id.to_zc(),
+         operator: self.operator,
+         mint: self.mint,
          period: self.period,
          mkt: self.mkt.into(),
       };
@@ -50,6 +82,8 @@ impl AddLineToLiabilityNettingIxData {
 #[repr(C)]
 pub struct RemoveLineFromLiabilityNettingIxData {
    pub event_id: EventId,
+   pub operator: Address,
+   pub mint: Address,
    pub period: u8,
    pub mkt: u16,
 }
@@ -67,6 +101,8 @@ impl RemoveLineFromLiabilityNettingIxData {
          .map_err(|_| ProgramError::InvalidInstructionData)?;
       Ok(Self {
          event_id: EventId::from_zc(&zc.event_id).ok_or(ProgramError::InvalidInstructionData)?,
+         operator: zc.operator,
+         mint: zc.mint,
          period: zc.period,
          mkt: zc.mkt.get(),
       })
@@ -79,6 +115,8 @@ impl RemoveLineFromLiabilityNettingIxData {
       }
       let zc = RemoveLineFromLiabilityNettingIxDataZc {
          event_id: self.event_id.to_zc(),
+         operator: self.operator,
+         mint: self.mint,
          period: self.period,
          mkt: self.mkt.into(),
       };

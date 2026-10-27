@@ -21,7 +21,7 @@ anchor-debug = []
 idl-build = ["anchor-lang/idl-build", "anchor-spl/idl-build"]
 
 [dependencies]
-anchor-lang = "0.32.1"
+anchor-lang = { version = "0.32.1", features = ["init-if-needed"] }
 anchor-spl = "0.32.1"
 pinocchio = { version = "0.11.1", default-features = false, features = ["copy"] }
 solana-sdk-ids = "2"

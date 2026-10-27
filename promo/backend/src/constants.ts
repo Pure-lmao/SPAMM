@@ -12,5 +12,10 @@ export const DEFAULT_MARKET_OPERATOR: Address = address(
    'BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW',
 );
 
+/** Devnet USDC. Promo CLI markets use this unless `--mint` is set. */
+export const DEFAULT_PROMO_MINT: Address = address(
+   'Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr',
+);
+
 /** Initial event-state sequence for new promo markets (pre-game bootstrap). */
 export const PROMO_BOOTSTRAP_EVENT_SEQUENCE = 1;

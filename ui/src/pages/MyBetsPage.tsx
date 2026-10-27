@@ -15,7 +15,11 @@ import { requestWalletBalanceRefresh } from "../wallet/walletBalanceRefresh";
 import {
    BetResult,
    LIVE_CASHOUT_DELAY,
+   PROMO_BOOST,
+   PROMO_FREEBET,
    getSettleBetIx,
+   getSettleBoostedBetIx,
+   getSettleBoostedParlayIx,
    getSettleFreebetIx,
    getSettleFreebetParlayIx,
    getSettleParlayIx,
@@ -302,12 +306,14 @@ function BetStakeGrid({
    payout,
    result,
    freebet,
+   boost = false,
    finalPayout = null,
 }: {
    amount: bigint;
    payout: bigint;
    result: BetResult;
    freebet?: boolean;
+   boost?: boolean;
    finalPayout?: bigint | null;
 }): ReactElement {
    const { oddsFormat } = useSettings();
@@ -327,6 +333,7 @@ function BetStakeGrid({
             <dd>
                <strong>{formatUsdcBaseUnitsForUi(amount)}</strong> USDC
                {freebet === true && <span className="my-bets-card__stake-freebet"> {t("myBets.freebet")}</span>}
+               {boost === true && <span className="my-bets-card__stake-freebet"> {t("myBets.boost")}</span>}
             </dd>
          </div>
          {result !== BetResult.CashedOut && (
@@ -803,6 +810,7 @@ function CardActions({
             walletSigner,
             escrow,
             ticketFeepayer: ticketFeepayerOfRow(row),
+            mint: row.kind === "single" ? row.data.marketId.mint : row.legs[0]!.marketId.mint,
          });
          const sendAndConfirm = sendAndConfirmTransactionFactory({
             rpc,
@@ -897,7 +905,8 @@ function BetCard({
                amount={b.amount}
                payout={b.payout}
                result={b.result}
-               freebet={b.freebetId !== 0}
+               freebet={b.promoType === PROMO_FREEBET}
+               boost={b.promoType === PROMO_BOOST}
                finalPayout={finalPayout}
             />
             {actions}
@@ -1077,7 +1086,8 @@ function ParlayBetCard({
                amount={row.amount}
                payout={row.payout}
                result={row.result}
-               freebet={walletRowFreebetId(row) !== 0}
+               freebet={(row.promoType ?? row.account?.promoType) === PROMO_FREEBET || walletRowFreebetId(row) !== 0}
+               boost={(row.promoType ?? row.account?.promoType) === PROMO_BOOST}
                finalPayout={row.finalPayout ?? null}
             />
             {actions}
@@ -1338,22 +1348,26 @@ export function MyBetsPage(): ReactElement {
             graded.map((row) => {
                const betPda = address(row.address);
                if (row.kind === "single") {
-                  if (row.data.freebetId !== 0) {
+                  if (row.data.promoType === PROMO_FREEBET || row.data.promoType === PROMO_BOOST) {
                      if (row.issuerAuth == null) {
-                        throw new Error("Freebet issuer not found");
+                        throw new Error("Promo issuer not found");
                      }
-                     return getSettleFreebetIx(userAddr, betPda, row.data, row.issuerAuth);
+                     return row.data.promoType === PROMO_BOOST
+                        ? getSettleBoostedBetIx(userAddr, betPda, row.data, row.issuerAuth)
+                        : getSettleFreebetIx(userAddr, betPda, row.data, row.issuerAuth);
                   }
                   return getSettleBetIx(userAddr, betPda, row.data);
                }
                if (row.account == null) {
                   throw new Error("Parlay account missing");
                }
-               if (row.account.freebetId !== 0) {
+               if (row.account.promoType === PROMO_FREEBET || row.account.promoType === PROMO_BOOST) {
                   if (row.issuerAuth == null) {
-                     throw new Error("Freebet issuer not found");
+                     throw new Error("Promo issuer not found");
                   }
-                  return getSettleFreebetParlayIx(userAddr, betPda, row.account, row.issuerAuth);
+                  return row.account.promoType === PROMO_BOOST
+                     ? getSettleBoostedParlayIx(userAddr, betPda, row.account, row.issuerAuth)
+                     : getSettleFreebetParlayIx(userAddr, betPda, row.account, row.issuerAuth);
                }
                return getSettleParlayIx(userAddr, betPda, row.account);
             }),

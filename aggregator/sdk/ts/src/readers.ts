@@ -12,6 +12,7 @@ import {
    decodeCashoutParlayAccountDataStrict,
    decodeConfigAccountData,
    decodeEventStateData,
+   decodeBoostAccountData,
    decodeFreebetAccountData,
    decodeFreebetIssuerAccountData,
    decodeMmAccountConfig,
@@ -31,6 +32,7 @@ import {
    getCashoutParlayPda,
    getConfigPda,
    getEventStatePda,
+   getBoostPda,
    getFreebetIssuerPda,
    getFreebetPda,
    getAta,
@@ -47,9 +49,10 @@ import {
    CASHOUT_ACCOUNT_DISCRIMINATOR,
    CASHOUT_ESCROW_DISCRIMINATOR,
    CASHOUT_PARLAY_ACCOUNT_DISCRIMINATOR,
-   DecodedAccountData,
+   type DecodedAccountData,
    EVENT_GAME_STATE_LEN,
    MARKET_ID_WIRE_SIZE,
+   BOOST_ACCOUNT_DISCRIMINATOR,
    FREEBET_ACCOUNT_DISCRIMINATOR,
    PARLAY_BET_ACCOUNT_DISCRIMINATOR,
    type BetAccountData,
@@ -59,6 +62,7 @@ import {
    type ConfigAccountData,
    type EventId,
    type EventStateData,
+   type BoostAccountData,
    type FreebetAccountData,
    type FreebetIssuerAccountData,
    type MarketId,
@@ -100,7 +104,8 @@ export const BET_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
    amount: add(U64_LEN),
    payout: add(U64_LEN),
    timestamp: add(U32_LEN),
-   freebetId: add(U32_LEN),
+   promoType: add(1),
+   promoAccount: add(ADDRESS_LEN),
    eventStateSequence: add(2),
    eventGameState: add(EVENT_GAME_STATE_LEN),
    result: add(1),
@@ -121,7 +126,8 @@ export const PARLAY_BET_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
    amount: add(U64_LEN),
    payout: add(U64_LEN),
    timestamp: add(U32_LEN),
-   freebetId: add(U32_LEN),
+   promoType: add(1),
+   promoAccount: add(ADDRESS_LEN),
    fillerAddress: add(ADDRESS_LEN),
    result: add(1),
    numLegs: add(1),
@@ -157,6 +163,30 @@ export const FREEBET_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
    amount: add(U64_LEN),
    issuerAuth: add(ADDRESS_LEN),
    user: add(ADDRESS_LEN),
+   mint: add(ADDRESS_LEN),
+   allowedMms: add(0),
+} as const));
+
+/**
+ * Byte offsets for on-chain `BoostAccountHeader` (`account_boost.rs`, packed ZeroPod).
+ * Allowed MM addresses follow at {@link BOOST_ACCOUNT_HEADER_LEN}.
+ */
+export const BOOST_ACCOUNT_WIRE_OFFSETS = packedOffsets((add) => ({
+   discriminator: add(1),
+   bump: add(1),
+   state: add(1),
+   numMms: add(1),
+   minLegs: add(1),
+   numOperators: add(1),
+   boostId: add(U32_LEN),
+   expiry: add(U32_LEN),
+   minOddsScaled: add(U32_LEN),
+   maxOddsScaled: add(U32_LEN),
+   boostBps: add(U32_LEN),
+   maxStake: add(U64_LEN),
+   issuerAuth: add(ADDRESS_LEN),
+   user: add(ADDRESS_LEN),
+   mint: add(ADDRESS_LEN),
    allowedMms: add(0),
 } as const));
 
@@ -340,10 +370,10 @@ export async function getTokenAccountBalance(rpc: Rpc<SolanaRpcApi>, account: Ad
 }
 
 /**
- * User wallet USDC balance (default {@link MINT_ID} ATA). Returns `0n` if the ATA is missing or RPC errors.
+ * User wallet token balance for `mint`. Returns `0n` if the ATA is missing or RPC errors.
  */
-export async function getWalletUsdcTokenBalance(rpc: Rpc<SolanaRpcApi>, owner: Address): Promise<bigint> {
-   const ata = await getAta(owner);
+export async function getWalletUsdcTokenBalance(rpc: Rpc<SolanaRpcApi>, owner: Address, mint: Address): Promise<bigint> {
+   const ata = await getAta(owner, mint);
    try {
       return await getTokenAccountBalance(rpc, ata);
    } catch {
@@ -355,18 +385,18 @@ export async function getWalletUsdcTokenBalance(rpc: Rpc<SolanaRpcApi>, owner: A
  * Liability vault ATA balance for an MM program (ATA owner = MM encumbrance PDA on the aggregator).
  * Same ATA derivation as `getWithdrawFromLiabilityAccountIx` / `settleFillerAccountRow` in `instructions.ts`.
  */
-export async function getMmLiabilityAtaBalance(rpc: Rpc<SolanaRpcApi>, mmProgramId: Address): Promise<bigint> {
-   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgramId);
-   const liabilityAta = await getAta(mmEncumbrancePda);
+export async function getMmLiabilityAtaBalance(rpc: Rpc<SolanaRpcApi>, mmProgramId: Address, mint: Address): Promise<bigint> {
+   const [mmEncumbrancePda] = await getMmEncumbrancePda(mmProgramId, mint);
+   const liabilityAta = await getAta(mmEncumbrancePda, mint);
    return getTokenAccountBalance(rpc, liabilityAta);
 }
 
 /**
  * MM collateral token ATA balance (ATA owner = MM config PDA on the MM program).
  */
-export async function getMmTokenAtaBalance(rpc: Rpc<SolanaRpcApi>, mmProgramId: Address): Promise<bigint> {
+export async function getMmTokenAtaBalance(rpc: Rpc<SolanaRpcApi>, mmProgramId: Address, mint: Address): Promise<bigint> {
    const [mmConfigPda] = await getMmConfigPda(mmProgramId);
-   const mmTokenAta = await getAta(mmConfigPda);
+   const mmTokenAta = await getAta(mmConfigPda, mint);
    return getTokenAccountBalance(rpc, mmTokenAta);
 }
 
@@ -568,8 +598,10 @@ export async function getNettingAccountData(
    rpc: Rpc<SolanaRpcApi>,
    mmProgramId: Address,
    eventId: EventId,
+   operator: Address,
+   mint: Address,
 ): Promise<NettingAccountData> {
-   const [addr] = await getNettingPda(mmProgramId, eventId);
+   const [addr] = await getNettingPda(mmProgramId, eventId, operator, mint);
    const raw = await readAccountDataRaw(rpc, addr);
    if (raw === null) {
       throw new Error('Netting account not found');
@@ -593,8 +625,9 @@ export async function getEventStateData(
 export async function getMmEncumbranceData(
    rpc: Rpc<SolanaRpcApi>,
    mmProgramId: Address,
+   mint: Address,
 ): Promise<MmEncumbranceAccountData> {
-   const [addr] = await getMmEncumbrancePda(mmProgramId);
+   const [addr] = await getMmEncumbrancePda(mmProgramId, mint);
    const raw = await readAccountDataRaw(rpc, addr);
    if (raw === null) {
       throw new Error('MM encumbrance account not found');
@@ -885,10 +918,10 @@ export async function getFreebetIssuerData(
    return decodeFreebetIssuerAccountData(raw);
 }
 
-type GetFreebetDataKey = Address | Readonly<{ auth: Address; freebetId: number }>;
+type GetFreebetDataKey = Address | Readonly<{ auth: Address; mint: Address; freebetId: number }>;
 
-function isFreebetPdaKey(key: GetFreebetDataKey): key is Readonly<{ auth: Address; freebetId: number }> {
-   return typeof key === 'object' && key !== null && 'auth' in key && 'freebetId' in key;
+function isFreebetPdaKey(key: GetFreebetDataKey): key is Readonly<{ auth: Address; mint: Address; freebetId: number }> {
+   return typeof key === 'object' && key !== null && 'auth' in key && 'mint' in key && 'freebetId' in key;
 }
 
 export async function getFreebetData(
@@ -896,7 +929,7 @@ export async function getFreebetData(
    key: GetFreebetDataKey,
 ): Promise<FreebetAccountData> {
    const address = isFreebetPdaKey(key)
-      ? (await getFreebetPda(key.auth, key.freebetId))[0]
+      ? (await getFreebetPda(key.auth, key.mint, key.freebetId))[0]
       : key;
    const raw = await readAccountDataRaw(rpc, address);
    if (raw === null) {
@@ -912,7 +945,7 @@ export async function getFreebetsData(
       user?: Address;
       /** Issuer auth embedded in the PDA seeds. */
       issuerAuth?: Address;
-      /** Voucher lifecycle state (e.g. `FreebetState.Available`). */
+      /** Voucher lifecycle state (e.g. `PromoState.Available`). */
       state?: FreebetAccountData['state'];
    }>,
 ): Promise<ReadonlyArray<Readonly<{ address: Address; data: FreebetAccountData }>>> {
@@ -951,6 +984,64 @@ export async function getFreebetsData(
    return rows.map((row) => ({
       address: row.address,
       data: decodeFreebetAccountData(row.data),
+   }));
+}
+
+type GetBoostDataKey = Address | Readonly<{ auth: Address; mint: Address; boostId: number }>;
+
+function isBoostPdaKey(key: GetBoostDataKey): key is Readonly<{ auth: Address; mint: Address; boostId: number }> {
+   return typeof key === 'object' && key !== null && 'auth' in key && 'mint' in key && 'boostId' in key;
+}
+
+export async function getBoostData(rpc: Rpc<SolanaRpcApi>, key: GetBoostDataKey): Promise<BoostAccountData> {
+   const address = isBoostPdaKey(key) ? (await getBoostPda(key.auth, key.mint, key.boostId))[0] : key;
+   const raw = await readAccountDataRaw(rpc, address);
+   if (raw === null) {
+      throw new Error(`Boost account not found: ${String(address)}`);
+   }
+   return decodeBoostAccountData(raw);
+}
+
+export async function getBoostsData(
+   rpc: Rpc<SolanaRpcApi>,
+   optional?: Readonly<{
+      user?: Address;
+      issuerAuth?: Address;
+      state?: BoostAccountData['state'];
+   }>,
+): Promise<ReadonlyArray<Readonly<{ address: Address; data: BoostAccountData }>>> {
+   const filters: (GetProgramAccountsMemcmpFilter | { readonly dataSize: bigint })[] = [
+      memcmp(BigInt(BOOST_ACCOUNT_WIRE_OFFSETS.discriminator), u8WireByte(BOOST_ACCOUNT_DISCRIMINATOR)),
+   ];
+   const segments: MemcmpSeg[] = [];
+   if (optional?.user !== undefined) {
+      segments.push({
+         offset: BOOST_ACCOUNT_WIRE_OFFSETS.user,
+         bytes: new Uint8Array(addressEncoder.encode(optional.user)),
+      });
+   }
+   if (optional?.issuerAuth !== undefined) {
+      segments.push({
+         offset: BOOST_ACCOUNT_WIRE_OFFSETS.issuerAuth,
+         bytes: new Uint8Array(addressEncoder.encode(optional.issuerAuth)),
+      });
+   }
+   if (optional?.state !== undefined) {
+      segments.push({ offset: BOOST_ACCOUNT_WIRE_OFFSETS.state, bytes: u8WireByte(optional.state) });
+   }
+   const merged = mergeAdjacentMemcmpSegments(segments);
+   for (const m of merged) {
+      if (filters.length >= MAX_GET_PROGRAM_ACCOUNTS_FILTERS) {
+         throw new RangeError(
+            `getBoostsData: at most ${MAX_GET_PROGRAM_ACCOUNTS_FILTERS} filters after merging (use readProgramAccountsRaw for custom filter sets)`,
+         );
+      }
+      filters.push(memcmp(BigInt(m.offset), m.bytes));
+   }
+   const rows = await readProgramAccountsRaw(rpc, AGGREGATOR_PROGRAM_ID, filters);
+   return rows.map((row) => ({
+      address: row.address,
+      data: decodeBoostAccountData(row.data),
    }));
 }
 

@@ -1,4 +1,4 @@
-//! Create the MM market-data PDA for one market: `["market_data", market_id_body_wire, operator]`.
+//! Create the MM market-data PDA for one market: `["market_data", market_id_body, operator, mint]`.
 //!
 //! On-chain account layout: **`[u8 disc][u8 bump][u32 sequence LE][oracle_body padded to ≥12]`** —
 //! `get_quote` reads odds from `oracle_body` at offset **6** (2 or 3 × `u32` LE;
@@ -84,11 +84,12 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       unsafe {
          core::ptr::write(market_wire.as_mut_ptr().cast(), zc);
       }
-      let (body, operator) = market_id_pda_seed_parts(&market_wire);
+      let (body, operator, mint) = market_id_pda_seed_parts(&market_wire);
       let signer = [
          Seed::from(MM_MARKET_DATA_PDA_SEED),
          Seed::from(body),
          Seed::from(operator),
+         Seed::from(mint),
          Seed::from(&b as &[u8]),
       ];
       let signers = [Signer::from(&signer)];

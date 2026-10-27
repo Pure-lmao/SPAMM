@@ -11,6 +11,7 @@ import { useCluster, useWallet } from "@solana/connector/react";
 import { useAppTransactionSigner } from "./useAppTransactionSigner";
 import { signErrorMessageForUi } from "./walletStandardV1Signer";
 import { getWalletUsdcTokenBalance } from "spamm-aggregator-sdk";
+import { DEFAULT_MARKET_MINT } from "../betting/chainIds";
 import { formatUsdcBaseUnitsForUi, USDC_BASE_UNITS_PER_TOKEN } from "../betting/usdc";
 import { buildSignV1Transaction, httpToWsRpcUrl, resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { buildDevnetUsdcAirdropIx } from "./devnetUsdcAirdropIx";
@@ -78,7 +79,7 @@ export function UsdcBalancePanel(): ReactElement | null {
       try {
          const userAddr = address(account);
          const [usdcBal, solBalRes] = await Promise.all([
-            getWalletUsdcTokenBalance(rpc, userAddr),
+            getWalletUsdcTokenBalance(rpc, userAddr, DEFAULT_MARKET_MINT),
             rpc.getBalance(userAddr).send(),
          ]);
          if (!cancelledRef.current) {

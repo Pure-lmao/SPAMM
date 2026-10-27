@@ -16,10 +16,10 @@ use crate::{
       verify_signer,
       freebet_helpers::{consume_freebet, decode_and_verify_freebet_for_ix},
    },
-   state::FreebetState,
+   state::PromoState,
 };
 
-pub const REVOKE_FREEBET_IX_DISCRIMINATOR: u8 = 64;
+pub const REVOKE_FREEBET_IX_DISCRIMINATOR: u8 = 166;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [auth, issuer_pda, freebet_pda] = accounts else {
@@ -37,7 +37,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       log!("revoke_freebet: auth mismatch");
       return Err(SpammError::InvalidFreebet.into());
    }
-   if unlikely(fb.state != FreebetState::Available) {
+   if unlikely(fb.state != PromoState::Available) {
       log!("revoke_freebet: not available");
       return Err(SpammError::FreebetNotAvailable.into());
    }

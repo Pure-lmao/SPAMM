@@ -310,6 +310,7 @@ export async function gradePromoBets(promoId: number): Promise<number> {
          period: promo.period_id,
          isPregame: true,
          operator: DEFAULT_MARKET_OPERATOR,
+         mint: address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"),
       },
    });
    const resultAddresses: [BetResult, Address][] = [];

@@ -110,6 +110,18 @@ impl RfqParlayMessageHeader {
    }
 
    #[inline(always)]
+   pub fn write_header(&self, out: &mut [u8]) -> Result<(), ProgramError> {
+      if out.len() != RFQ_PARLAY_MESSAGE_HEADER_LEN {
+         return Err(ProgramError::InvalidInstructionData);
+      }
+      let zc = self.to_zc();
+      unsafe {
+         core::ptr::write(out.as_mut_ptr().cast(), zc);
+      }
+      Ok(())
+   }
+
+   #[inline(always)]
    pub fn write_wire(&self, out: &mut [u8], legs: &[ParlayLegQuoted]) -> Result<(), ProgramError> {
       let n = self.num_legs as usize;
       let expected = rfq_parlay_message_len(n);

@@ -20,7 +20,7 @@ use crate::{helpers::{get_encumbrance, get_token_account_balance, verify_config_
 readers::read_u64_le_unchecked, state::other::MM_ENCUMBRANCE_PDA_SEED};
 
 
-pub const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR: u8 = 50;
+pub const WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR: u8 = 150;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
@@ -42,20 +42,20 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_signer(&mm_authority)?;
    verify_config_pda(config_pda, true)?;
    verify_mm_admin(mm_authority, mm_program_account, mm_config_pda)?;
-   verify_mint(mint)?;
+   verify_mint(mint, mint.address())?;
    verify_token_program(token_program)?;
 
    let Some(valid_mm_encumbrance_pda_bump) =
-      verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account)
+      verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program_account, mint.address())
    else {
       log!("withdraw_from_liability_account: invalid mm encumbrance pda");
       return Err(ProgramError::InvalidAccountOwner);
    };
 
-   verify_token_account(true, 
-      mm_liability_token_account, mm_encumbrance_pda, mint, token_program)?;
-   verify_token_account(true, 
-      mm_token_account, mm_config_pda, mint, token_program)?;
+   verify_token_account(true,
+      mm_liability_token_account, mm_encumbrance_pda, mint, token_program, true)?;
+   verify_token_account(true,
+      mm_token_account, mm_config_pda, mint, token_program, true)?;
 
    if data.len() != 8 {
       log!("withdraw_from_liability_account: data length mismatch");
@@ -81,6 +81,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let encumbrance_pda_seeds = [
       Seed::from(MM_ENCUMBRANCE_PDA_SEED),
       Seed::from(mm_program_account.address().as_ref()),
+      Seed::from(mint.address().as_ref()),
       Seed::from(&mm_encumbrance_pda_bump_seed),
    ];
 

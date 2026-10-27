@@ -26,6 +26,12 @@ pub mod spamm_template_market_maker_anchor {
       instructions::init_program::handler(ctx, admin, rfq_signer)
    }
 
+   /// `CreateTokenAccount` `init_if_needed` + `associated_token` creates the config ATA before this runs.
+   #[instruction(discriminator = 102)]
+   pub fn create_token_account(_ctx: Context<CreateTokenAccount>) -> Result<()> {
+      Ok(())
+   }
+
    #[instruction(discriminator = 101)]
    pub fn set_rfq_signer(ctx: Context<SetRfqSigner>) -> Result<()> {
       instructions::set_rfq_signer::handler(ctx)

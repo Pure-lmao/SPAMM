@@ -228,6 +228,90 @@ pub fn validate_parlay_same_event_odds<L: ParlayLegOddsView>(
    Ok(())
 }
 
+/// Same rules as [`validate_parlay_same_event_odds`], reading one leg at a time.
+#[inline(never)]
+pub fn validate_parlay_same_event_odds_at<L, F>(
+   num_legs: usize,
+   mut leg_at: F,
+) -> Result<(), ProgramError>
+where
+   L: ParlayLegOddsView,
+   F: FnMut(usize) -> Result<L, ProgramError>,
+{
+   let mut groups: [Option<(EventId, bool)>; MAX_RFQ_PARLAY_LEGS] = [None; MAX_RFQ_PARLAY_LEGS];
+   let mut group_count = 0usize;
+
+   for i in 0..num_legs {
+      let leg = leg_at(i)?;
+      let eid = leg.market_id().event_id;
+      let positive = leg.odds_scaled() > 0;
+      let mut found = false;
+      for g in groups.iter_mut().take(group_count) {
+         if let Some((ref ge, ref mut has_pos)) = g {
+            if ge.eq(&eid) {
+               *has_pos |= positive;
+               found = true;
+               break;
+            }
+         }
+      }
+      if !found {
+         groups[group_count] = Some((eid, positive));
+         group_count += 1;
+      }
+   }
+
+   for g in groups.iter().take(group_count) {
+      let Some((_, has_positive)) = g else {
+         continue;
+      };
+      if !*has_positive {
+         log!("validate_parlay_same_event_odds: each event group needs at least one positive-odds leg");
+         return Err(SpammError::ParlayEventRuleViolation.into());
+      }
+   }
+   Ok(())
+}
+
+/// Product of already-decoded per-leg odds (`0` odds are skipped, same as [`product_parlay_odds`]).
+#[inline(always)]
+pub fn product_scaled_odds(odds: &[u32]) -> Result<u32, ProgramError> {
+   let mut prod = ODDS_SCALE;
+   for (i, &leg_odds) in odds.iter().enumerate() {
+      log!("product_parlay_odds: leg {} odds_scaled {}", i, leg_odds);
+      if leg_odds > 0 {
+         prod = prod
+            .checked_mul(leg_odds as u128).ok_or(ProgramError::ArithmeticOverflow)?
+            .checked_div(ODDS_SCALE).ok_or(ProgramError::ArithmeticOverflow)?;
+      }
+   }
+   prod.try_into().map_err(|_| ProgramError::ArithmeticOverflow)
+}
+
+/// Reject two live legs that share the same `MarketId` (including opposite sides).
+/// `leg_at` is called again for each pair so the caller never holds the full table.
+#[inline(never)]
+pub fn validate_unique_parlay_market_ids_at<L, F>(
+   num_legs: usize,
+   mut leg_at: F,
+) -> Result<(), ProgramError>
+where
+   L: HasParlayMarketId,
+   F: FnMut(usize) -> Result<L, ProgramError>,
+{
+   for i in 0..num_legs {
+      let a = leg_at(i)?;
+      for j in (i + 1)..num_legs {
+         let b = leg_at(j)?;
+         if a.market_id().eq(b.market_id()) {
+            log!("validate_unique_parlay_market_ids: duplicate market_id at legs {} and {}", i, j);
+            return Err(SpammError::ParlayEventRuleViolation.into());
+         }
+      }
+   }
+   Ok(())
+}
+
 /// Reject two live legs that share the same `MarketId` (including opposite sides).
 #[inline(always)]
 pub fn validate_unique_parlay_market_ids<L: HasParlayMarketId>(
@@ -253,6 +337,35 @@ pub fn ensure_parlay_odds_product_matches<L: ParlayLegOddsView>(
    expected_odds: u32,
 ) -> Result<(), ProgramError> {
    let product = product_parlay_odds(num_legs, legs)?;
+   if unlikely(product != expected_odds) {
+      log!("parlay odds product mismatch");
+      return Err(SpammError::ParlayOddsMismatch.into());
+   }
+   Ok(())
+}
+
+/// Same check as [`ensure_parlay_odds_product_matches`], decoding one leg per step.
+#[inline(always)]
+pub fn ensure_parlay_odds_product_matches_at<L, F>(
+   num_legs: usize,
+   mut leg_at: F,
+   expected_odds: u32,
+) -> Result<(), ProgramError>
+where
+   L: ParlayLegOddsView,
+   F: FnMut(usize) -> Result<L, ProgramError>,
+{
+   let mut prod = ODDS_SCALE;
+   for i in 0..num_legs {
+      let leg = leg_at(i)?;
+      log!("product_parlay_odds: leg {} odds_scaled {}", i, leg.odds_scaled());
+      if leg.odds_scaled() > 0 {
+         prod = prod
+            .checked_mul(leg.odds_scaled() as u128).ok_or(ProgramError::ArithmeticOverflow)?
+            .checked_div(ODDS_SCALE).ok_or(ProgramError::ArithmeticOverflow)?;
+      }
+   }
+   let product: u32 = prod.try_into().map_err(|_| ProgramError::ArithmeticOverflow)?;
    if unlikely(product != expected_odds) {
       log!("parlay odds product mismatch");
       return Err(SpammError::ParlayOddsMismatch.into());
@@ -450,6 +563,7 @@ mod tests {
             period: 1,
             is_pregame: true,
             operator: Address::new_from_array([1u8; 32]),
+            mint: Address::new_from_array([2u8; 32]),
          },
          side: 0,
          event_state_sequence: 1,

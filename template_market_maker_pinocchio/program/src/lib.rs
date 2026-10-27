@@ -18,7 +18,6 @@ mod bpf_entrypoint {
    use pinocchio::{AccountView, Address, ProgramResult};
 
    pinocchio::program_entrypoint!(process_instruction);
-   pinocchio::no_allocator!();
 
    fn process_instruction(
       program_id: &Address,

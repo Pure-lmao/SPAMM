@@ -8,38 +8,22 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use core::mem::offset_of;
 use crate::{
-   constants::{ADDRESS_LEN, MAX_FREEBET_ALLOWED_MMS, MAX_FREEBET_ALLOWED_OPERATORS},
+   constants::{ADDRESS_LEN, MAX_PROMO_ALLOWED_MMS, MAX_PROMO_ALLOWED_OPERATORS},
    readers::read_address_ref_unchecked,
    writers::{write_u32_le_unchecked, write_u64_le_unchecked, write_u8_unchecked},
 };
 
+use super::promo::PromoState;
+
 pub const FREEBET_ACCOUNT_SEED: &[u8] = b"freebet";
 pub const FREEBET_ACCOUNT_DISCRIMINATOR: u8 = 11;
-
-#[repr(u8)]
-#[derive(Copy, Clone, ZeroPod, PartialEq, Eq, Debug)]
-pub enum FreebetState {
-   Available = 0,
-   Used = 1,
-}
-
-impl FreebetState {
-   #[inline(always)]
-   pub fn from_u8(value: u8) -> Result<Self, ProgramError> {
-      match value {
-         0 => Ok(Self::Available),
-         1 => Ok(Self::Used),
-         _ => Err(ProgramError::InvalidAccountData),
-      }
-   }
-}
 
 #[derive(Copy, Clone, ZeroPod)]
 #[repr(C)]
 pub struct FreebetAccountHeader {
    pub discriminator: u8,
    pub bump: u8,
-   pub state: FreebetState,
+   pub state: PromoState,
    pub num_mms: u8,
    pub min_legs: u8,
    pub num_operators: u8,
@@ -50,6 +34,7 @@ pub struct FreebetAccountHeader {
    pub amount: u64,
    pub issuer_auth: Address,
    pub user: Address,
+   pub mint: Address,
 }
 
 pub const FREEBET_ACCOUNT_HEADER_LEN: usize = <FreebetAccountHeader as ZeroPodFixed>::SIZE;
@@ -59,8 +44,8 @@ pub const FREEBET_EXPIRY_OFFSET: usize = offset_of!(FreebetAccountHeaderZc, expi
 
 pub const FREEBET_ACCOUNT_MIN_LEN: usize = FREEBET_ACCOUNT_HEADER_LEN;
 pub const FREEBET_ACCOUNT_MAX_LEN: usize = FREEBET_ACCOUNT_HEADER_LEN
-   + MAX_FREEBET_ALLOWED_MMS * ADDRESS_LEN
-   + MAX_FREEBET_ALLOWED_OPERATORS * ADDRESS_LEN;
+   + MAX_PROMO_ALLOWED_MMS * ADDRESS_LEN
+   + MAX_PROMO_ALLOWED_OPERATORS * ADDRESS_LEN;
 
 #[inline(always)]
 pub const fn freebet_account_len(num_mms: usize, num_operators: usize) -> usize {
@@ -71,7 +56,7 @@ pub const fn freebet_account_len(num_mms: usize, num_operators: usize) -> usize 
 pub struct FreebetAccountData {
    pub discriminator: u8,
    pub bump: u8,
-   pub state: FreebetState,
+   pub state: PromoState,
    pub num_mms: u8,
    pub min_legs: u8,
    pub num_operators: u8,
@@ -82,8 +67,9 @@ pub struct FreebetAccountData {
    pub amount: u64,
    pub issuer_auth: Address,
    pub user: Address,
-   pub allowed_mms: [Address; MAX_FREEBET_ALLOWED_MMS],
-   pub allowed_operators: [Address; MAX_FREEBET_ALLOWED_OPERATORS],
+   pub mint: Address,
+   pub allowed_mms: [Address; MAX_PROMO_ALLOWED_MMS],
+   pub allowed_operators: [Address; MAX_PROMO_ALLOWED_OPERATORS],
 }
 
 impl FreebetAccountData {
@@ -103,6 +89,7 @@ impl FreebetAccountData {
          amount: h.amount.into(),
          issuer_auth: h.issuer_auth,
          user: h.user,
+         mint: h.mint,
       }
    }
 
@@ -119,7 +106,7 @@ impl FreebetAccountData {
       let header = FreebetAccountHeader {
          discriminator: zc.discriminator,
          bump: zc.bump,
-         state: FreebetState::from_u8(zc.state.get())?,
+         state: PromoState::from_u8(zc.state.get())?,
          num_mms: zc.num_mms,
          min_legs: zc.min_legs,
          num_operators: zc.num_operators,
@@ -130,10 +117,11 @@ impl FreebetAccountData {
          amount: zc.amount.get(),
          issuer_auth: zc.issuer_auth,
          user: zc.user,
+         mint: zc.mint,
       };
       let n_mms = header.num_mms as usize;
       let n_ops = header.num_operators as usize;
-      if unlikely(n_mms > MAX_FREEBET_ALLOWED_MMS || n_ops > MAX_FREEBET_ALLOWED_OPERATORS) {
+      if unlikely(n_mms > MAX_PROMO_ALLOWED_MMS || n_ops > MAX_PROMO_ALLOWED_OPERATORS) {
          return Err(ProgramError::InvalidAccountData);
       }
       if unlikely(data.len() != freebet_account_len(n_mms, n_ops)) {
@@ -148,13 +136,13 @@ impl FreebetAccountData {
       let header = Self::decode_header(data)?;
       let n_mms = header.num_mms as usize;
       let n_ops = header.num_operators as usize;
-      let mut allowed_mms = [Address::default(); MAX_FREEBET_ALLOWED_MMS];
+      let mut allowed_mms = [Address::default(); MAX_PROMO_ALLOWED_MMS];
       for i in 0..n_mms {
          let off = FREEBET_ACCOUNT_HEADER_LEN + i * ADDRESS_LEN;
          allowed_mms[i] = *unsafe { read_address_ref_unchecked(data.as_ptr(), off) };
       }
       let ops_off = FREEBET_ACCOUNT_HEADER_LEN + n_mms * ADDRESS_LEN;
-      let mut allowed_operators = [Address::default(); MAX_FREEBET_ALLOWED_OPERATORS];
+      let mut allowed_operators = [Address::default(); MAX_PROMO_ALLOWED_OPERATORS];
       for i in 0..n_ops {
          let off = ops_off + i * ADDRESS_LEN;
          allowed_operators[i] = *unsafe { read_address_ref_unchecked(data.as_ptr(), off) };
@@ -173,6 +161,7 @@ impl FreebetAccountData {
          amount: header.amount,
          issuer_auth: header.issuer_auth,
          user: header.user,
+         mint: header.mint,
          allowed_mms,
          allowed_operators,
       })
@@ -190,8 +179,8 @@ impl FreebetAccountData {
       let expected = freebet_account_len(n_mms, n_ops);
       if unlikely(
          out.len() != expected
-            || n_mms > MAX_FREEBET_ALLOWED_MMS
-            || n_ops > MAX_FREEBET_ALLOWED_OPERATORS
+            || n_mms > MAX_PROMO_ALLOWED_MMS
+            || n_ops > MAX_PROMO_ALLOWED_OPERATORS
             || allowed_mms.len() < n_mms
             || allowed_operators.len() < n_ops
       ) {
@@ -242,7 +231,7 @@ impl FreebetAccountData {
    }
 
    #[inline(always)]
-   pub fn patch_state(data: &mut [u8], state: FreebetState) -> Result<(), ProgramError> {
+   pub fn patch_state(data: &mut [u8], state: PromoState) -> Result<(), ProgramError> {
       if unlikely(data.len() < FREEBET_ACCOUNT_HEADER_LEN) {
          return Err(ProgramError::InvalidAccountData);
       }

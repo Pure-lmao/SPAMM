@@ -14,7 +14,6 @@ import {
    playerPropStatName,
    type MarketId,
    type ProxyMarketMmQuotes,
-   MIN_BET_AMOUNT,
 } from "spamm-aggregator-sdk";
 import { address, type Base64EncodedDataResponse } from "@solana/kit";
 import { createRpcClients, simulateTransaction, withRpcRetry, type RpcClients } from "../aggregator/client/txSendV1.ts";
@@ -378,6 +377,7 @@ async function cacheOdds() {
          },
          isPregame: true,
          operator: address(market.operator),
+         mint: address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"),
       };
 
       const mmProgramsForMarket = mmPrograms.slice(
@@ -390,7 +390,7 @@ async function cacheOdds() {
             betId: QUOTE_PROBE_BET_ID,
             marketId: wireMarketId,
             side: 0,
-            amount: MIN_BET_AMOUNT,
+            amount: 100_000n,
             minOddsScaled,
             eventGameState,
             eventStateSequence: 1,

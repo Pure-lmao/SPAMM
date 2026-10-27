@@ -10,6 +10,7 @@ mod proxy_return;
 mod rent_close;
 pub mod cashout_helpers;
 pub mod fill_helpers;
+pub mod boost_helpers;
 pub mod freebet_helpers;
 pub mod parlay_helpers;
 
@@ -23,5 +24,6 @@ pub use proxy_return::*;
 pub use rent_close::*;
 pub use cashout_helpers::*;
 pub use fill_helpers::*;
+pub use boost_helpers::*;
 pub use freebet_helpers::*;
 pub use parlay_helpers::*;

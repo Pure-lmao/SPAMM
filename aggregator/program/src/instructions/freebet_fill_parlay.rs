@@ -1,4 +1,4 @@
-//! Freebet auction fill for a parlay (disc 16). Stake from issuer ATA.
+//! Freebet auction fill for a parlay (disc 21). Stake from issuer ATA.
 //!
 //! Accounts: **14** then **6 + 2 × L** (`L` = `num_legs`).
 //!
@@ -39,10 +39,10 @@ use crate::{
       fill_bet::FillBetStake,
       fill_parlay::decode_and_run_fill_parlay,
    },
-   state::split_freebet_id_prefix,
+   state::{PromoType, split_freebet_id_prefix},
 };
 
-pub const FREEBET_FILL_PARLAY_IX_DISCRIMINATOR: u8 = 16;
+pub const FREEBET_FILL_PARLAY_IX_DISCRIMINATOR: u8 = 21;
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -88,7 +88,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_account: issuer_ata,
          authority: issuer_pda,
          issuer_sign: Some((issuer_bump, auth)),
-         freebet_id,
+         promo_type: PromoType::Freebet,
+         promo_account: *freebet_pda.address(),
          freebet: Some(&fb),
       },
    )?;

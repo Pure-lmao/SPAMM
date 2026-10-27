@@ -16,7 +16,7 @@
 //! 9. `escrow_ata` (writable)
 //! 10. `mm_program` (readonly) — filling MM
 //! 11. `mm_config_pda` (readonly)
-//! 12. `mm_encumbrance_pda` (readonly) — authority of the liability ATA
+//! 12. `mm_encumbrance_pda` (writable) — filling MM vault; open-cashout count decrements on close
 //! 13. `mm_liability_token_account` (writable) — receives C
 //! 14. `config_pda` (readonly)
 //! 15. `mint` (readonly)
@@ -48,7 +48,7 @@ use crate::{
    },
 };
 
-pub const REVERT_CASHOUT_IX_DISCRIMINATOR: u8 = 75;
+pub const REVERT_CASHOUT_IX_DISCRIMINATOR: u8 = 95;
 
 struct CashoutCloseInfo {
    seed: &'static [u8],
@@ -86,9 +86,9 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    verify_signer(feepayer)?;
    verify_token_program(token_program)?;
    verify_system_program(system_program)?;
-   verify_mint(mint)?;
+   verify_mint(mint, mint.address())?;
    verify_config_pda(config_pda, true)?;
-   verify_token_account(true, user_ata, user, mint, token_program)?;
+   verify_token_account(true, user_ata, user, mint, token_program, false)?;
 
    if unlikely(!address_eq(escrow_pda.owner(), &ID)) {
       return Err(ProgramError::InvalidAccountData);
@@ -111,16 +111,16 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    if unlikely(!address_eq(escrow_pda.address(), &expected_escrow)) {
       return Err(ProgramError::InvalidSeeds);
    }
-   verify_token_account(true, escrow_ata, escrow_pda, mint, token_program)?;
+   verify_token_account(true, escrow_ata, escrow_pda, mint, token_program, true)?;
 
    if !verify_mm_config_pda(mm_config_pda, mm_program) {
       return Err(SpammError::MmNotRegistered.into());
    }
-   if verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program).is_none() {
+   if verify_mm_encumbrance_pda(mm_encumbrance_pda, mm_program, mint.address()).is_none() {
       log!("revert_cashout: invalid mm encumbrance pda");
       return Err(ProgramError::InvalidAccountOwner);
    }
-   verify_token_account(true, mm_liability_token_account, mm_encumbrance_pda, mint, token_program)?;
+   verify_token_account(true, mm_liability_token_account, mm_encumbrance_pda, mint, token_program, true)?;
 
    let close_info = if escrow.is_parlay {
       restore_parlay(
@@ -174,6 +174,7 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    // Token CloseAccount CPIs must finish before close_pda_return_rent (direct lamports).
    safe_close_ata(escrow_ata, rent_recipient, user_ata, escrow_pda, &escrow_signers)?;
    safe_close_ata(cashout_ata, rent_recipient, user_ata, cashout_pda, &co_signers)?;
+   crate::helpers::bump_open_cashout_tickets(mm_encumbrance_pda, -1)?;
    close_pda_return_rent(escrow_pda, rent_recipient)?;
    close_pda_return_rent(cashout_pda, rent_recipient)?;
 
@@ -207,8 +208,8 @@ fn restore_single(
       return Err(SpammError::InvalidCashout.into());
    }
    verify_cashout_pda(cashout_pda, &cashout.mm, cashout.cashout_id, cashout.bump)?;
-   verify_token_account(true, cashout_ata, cashout_pda, mint, token_program)?;
-   verify_token_account(true, original_bet_ata, original_bet_pda, mint, token_program)?;
+   verify_token_account(true, cashout_ata, cashout_pda, mint, token_program, true)?;
+   verify_token_account(true, original_bet_ata, original_bet_pda, mint, token_program, true)?;
 
    let mut orig_fillers_buf = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
    let mut orig = {
@@ -321,8 +322,8 @@ fn restore_parlay(
       cashout.cashout_id,
       cashout.bump,
    )?;
-   verify_token_account(true, cashout_ata, cashout_pda, mint, token_program)?;
-   verify_token_account(true, original_bet_ata, original_bet_pda, mint, token_program)?;
+   verify_token_account(true, cashout_ata, cashout_pda, mint, token_program, true)?;
+   verify_token_account(true, original_bet_ata, original_bet_pda, mint, token_program, true)?;
 
    let (orig_result, cashout_result) = {
       let raw = original_bet_pda.try_borrow()?;

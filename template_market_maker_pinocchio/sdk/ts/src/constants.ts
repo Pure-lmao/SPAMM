@@ -20,11 +20,6 @@ export const PINOCCHIO_TEMPLATE_MM_PARLAY_QUOTE_BUFFER_PDA: Address = address(
    'BaBjAxyMzCb1b2hzDNsysPZAH56XedDLQB1e5SngoBvg',
 );
 
-/** Aggregator `["encumbrance", program id]`. Liability ATA authority. */
-export const PINOCCHIO_TEMPLATE_MM_ENCUMBRANCE_PDA: Address = address(
-   '2XNi16GzroHkt4Wd6kxo7EciXZoFnUaA849fFA9pRCat',
-);
-
 export const INIT_PROGRAM_IX_DISCRIMINATOR = 100;
 export const SET_RFQ_SIGNER_IX_DISCRIMINATOR = 101;
 export const INIT_EVENT_IX_DISCRIMINATOR = 110;

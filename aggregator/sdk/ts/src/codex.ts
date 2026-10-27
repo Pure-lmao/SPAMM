@@ -33,7 +33,7 @@ import {
    transformEncoder,
 } from '@solana/kit';
 
-import { ADDRESS_LEN, MAX_NUMBER_OF_MMS, MAX_FREEBET_ALLOWED_MMS, MAX_FREEBET_ALLOWED_OPERATORS, U32_LEN } from './constants.js';
+import { ADDRESS_LEN, MAX_NUMBER_OF_MMS, MAX_PROMO_ALLOWED_MMS, MAX_PROMO_ALLOWED_OPERATORS, U32_LEN } from './constants.js';
 
 import {
    BetResult,
@@ -171,22 +171,29 @@ import {
    fillRfqParlayIxBodyLen,
    fillRfqParlayIxDataLen,
    getQuoteParlayIxWireLen,
+   BOOST_ACCOUNT_DISCRIMINATOR,
+   BOOST_ACCOUNT_HEADER_LEN,
    FREEBET_ACCOUNT_DISCRIMINATOR,
    FREEBET_ACCOUNT_HEADER_LEN,
    FREEBET_ISSUER_DISCRIMINATOR,
    FREEBET_ISSUER_LEN,
+   ISSUE_BOOST_IX_HEADER_LEN,
    ISSUE_FREEBET_IX_HEADER_LEN,
-   FreebetState,
+   PromoState,
+   type BoostAccountData,
    type FreebetAccountData,
    type FreebetIssuerAccountData,
+   type IssueBoostIxData,
    type IssueFreebetIxData,
+   boostAccountLen,
    freebetAccountLen,
+   issueBoostIxDataLen,
    issueFreebetIxDataLen,
    parlayBetAccountLen,
    parlayQuoteReturnWireLen,
    rfqCashoutParlayMessageLen,
    rfqParlayMessageLen,
-   DecodedAccountData,
+   type DecodedAccountData,
 } from './types.js';
 
 import {
@@ -198,6 +205,7 @@ import {
    validateFillRfqParlayCashoutIxData,
    validateFillRfqParlayIxData,
    validateGetQuoteParlayIxData,
+   validateIssueBoostIxData,
    validateIssueFreebetIxData,
 } from './validate.js';
 
@@ -343,6 +351,7 @@ export const getMarketIdEncoder = (): Encoder<MarketId> =>
       ['period', getU8Encoder()],
       ['isPregame', getBoolU8Encoder()],
       ['operator', getAddressEncoder()],
+      ['mint', getAddressEncoder()],
    ]);
 
 export const getMarketIdDecoder = (): Decoder<MarketId> =>
@@ -353,6 +362,7 @@ export const getMarketIdDecoder = (): Decoder<MarketId> =>
       ['period', getU8Decoder()],
       ['isPregame', getBoolU8Decoder()],
       ['operator', getAddressDecoder()],
+      ['mint', getAddressDecoder()],
    ]);
 
 const getBetFillerWireEncoder = (): Encoder<BetFiller> =>
@@ -385,7 +395,8 @@ const getBetAccountHeaderDecoder = (): Decoder<Omit<BetAccountData, 'fillers'>> 
       ['amount', getU64Decoder()],
       ['payout', getU64Decoder()],
       ['timestamp', getU32Decoder()],
-      ['freebetId', getU32Decoder()],
+      ['promoType', getU8Decoder()],
+      ['promoAccount', getAddressDecoder()],
       ['eventStateSequence', getU16Decoder()],
       ['eventGameState', getEventGameStateDecoder()],
       ['result', getBetResultU8Decoder()],
@@ -438,7 +449,8 @@ export const getBetAccountDataEncoder = (): Encoder<BetAccountData> =>
          ['amount', getU64Encoder()],
          ['payout', getU64Encoder()],
          ['timestamp', getU32Encoder()],
-         ['freebetId', getU32Encoder()],
+         ['promoType', getU8Encoder()],
+         ['promoAccount', getAddressEncoder()],
          ['eventStateSequence', getU16Encoder()],
          ['eventGameState', getEventGameStateEncoder()],
          ['result', getBetResultU8Encoder()],
@@ -456,7 +468,8 @@ export const getBetAccountDataEncoder = (): Encoder<BetAccountData> =>
          amount: data.amount,
          payout: data.payout,
          timestamp: data.timestamp,
-         freebetId: data.freebetId,
+         promoType: data.promoType,
+         promoAccount: data.promoAccount,
          eventStateSequence: data.eventStateSequence,
          eventGameState: data.eventGameState,
          result: data.result,
@@ -478,7 +491,8 @@ export const getBetAccountDataDecoder = (): Decoder<BetAccountData> =>
          ['amount', getU64Decoder()],
          ['payout', getU64Decoder()],
          ['timestamp', getU32Decoder()],
-         ['freebetId', getU32Decoder()],
+         ['promoType', getU8Decoder()],
+         ['promoAccount', getAddressDecoder()],
          ['eventStateSequence', getU16Decoder()],
          ['eventGameState', getEventGameStateDecoder()],
          ['result', getBetResultU8Decoder()],
@@ -496,7 +510,8 @@ export const getBetAccountDataDecoder = (): Decoder<BetAccountData> =>
          amount: decoded.amount,
          payout: decoded.payout,
          timestamp: decoded.timestamp,
-         freebetId: decoded.freebetId,
+         promoType: decoded.promoType,
+         promoAccount: decoded.promoAccount,
          eventStateSequence: decoded.eventStateSequence,
          eventGameState: decoded.eventGameState,
          result: decoded.result,
@@ -674,6 +689,7 @@ export const getMmEncumbranceAccountDataEncoder = (): Encoder<MmEncumbranceAccou
       ['discriminator', getU8Encoder()],
       ['bump', getU8Encoder()],
       ['encumbrance', getU64Encoder()],
+      ['openCashoutTickets', getU32Encoder()],
    ]);
 
 export const getMmEncumbranceAccountDataDecoder = (): Decoder<MmEncumbranceAccountData> =>
@@ -681,6 +697,7 @@ export const getMmEncumbranceAccountDataDecoder = (): Decoder<MmEncumbranceAccou
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
       ['encumbrance', getU64Decoder()],
+      ['openCashoutTickets', getU32Decoder()],
    ]);
 
 export const getMmMarketDataAccountDataEncoder = (): Encoder<MmMarketDataAccountData> =>
@@ -1096,7 +1113,8 @@ const getParlayBetAccountHeaderDecoder = (): Decoder<Omit<ParlayBetAccountData, 
       ['amount', getU64Decoder()],
       ['payout', getU64Decoder()],
       ['timestamp', getU32Decoder()],
-      ['freebetId', getU32Decoder()],
+      ['promoType', getU8Decoder()],
+      ['promoAccount', getAddressDecoder()],
       ['fillerAddress', getAddressDecoder()],
       ['result', getBetResultU8Decoder()],
       ['numLegs', getU8Decoder()],
@@ -1835,6 +1853,8 @@ export function decodeMmParlayQuoteBuffer(data: ReadonlyUint8Array): MmParlayQuo
 export const getAddLineToNettingIxPayloadEncoder = (): Encoder<AddLineToNettingIxData> =>
    getStructEncoder([
       ['eventId', getEventIdEncoder()],
+      ['operator', getAddressEncoder()],
+      ['mint', getAddressEncoder()],
       ['period', getU8Encoder()],
       ['mkt', getU16Encoder()],
    ]);
@@ -1842,6 +1862,8 @@ export const getAddLineToNettingIxPayloadEncoder = (): Encoder<AddLineToNettingI
 export const getAddLineToNettingIxPayloadDecoder = (): Decoder<AddLineToNettingIxData> =>
    getStructDecoder([
       ['eventId', getEventIdDecoder()],
+      ['operator', getAddressDecoder()],
+      ['mint', getAddressDecoder()],
       ['period', getU8Decoder()],
       ['mkt', getU16Decoder()],
    ]);
@@ -2144,12 +2166,12 @@ export function decodeIssueFreebetIxData(data: ReadonlyUint8Array): IssueFreebet
    if (bytes.length !== expected) {
       throw new RangeError(`issue_freebet body len ${bytes.length}; expected ${expected}`);
    }
-   if (header.numMms > MAX_FREEBET_ALLOWED_MMS) {
-      throw new RangeError(`freebet numMms ${header.numMms} > ${MAX_FREEBET_ALLOWED_MMS}`);
+   if (header.numMms > MAX_PROMO_ALLOWED_MMS) {
+      throw new RangeError(`freebet numMms ${header.numMms} > ${MAX_PROMO_ALLOWED_MMS}`);
    }
-   if (header.numOperators > MAX_FREEBET_ALLOWED_OPERATORS) {
+   if (header.numOperators > MAX_PROMO_ALLOWED_OPERATORS) {
       throw new RangeError(
-         `freebet numOperators ${header.numOperators} > ${MAX_FREEBET_ALLOWED_OPERATORS}`,
+         `freebet numOperators ${header.numOperators} > ${MAX_PROMO_ALLOWED_OPERATORS}`,
       );
    }
    let off = ISSUE_FREEBET_IX_HEADER_LEN;
@@ -2197,13 +2219,13 @@ export const decodeFreebetIssuerAccountData = (data: ReadonlyUint8Array): Freebe
    return decoded;
 };
 
-const getFreebetStateDecoder = (): Decoder<FreebetState> =>
+const getPromoStateDecoder = (): Decoder<PromoState> =>
    transformDecoder(getU8Decoder(), (n: number) => {
-      if (n === FreebetState.Available) {
-         return FreebetState.Available;
+      if (n === PromoState.Available) {
+         return PromoState.Available;
       }
-      if (n === FreebetState.Used) {
-         return FreebetState.Used;
+      if (n === PromoState.Used) {
+         return PromoState.Used;
       }
       throw new RangeError(`freebet state ${n}`);
    });
@@ -2212,7 +2234,7 @@ const getFreebetAccountHeaderDecoder = () =>
    getStructDecoder([
       ['discriminator', getU8Decoder()],
       ['bump', getU8Decoder()],
-      ['state', getFreebetStateDecoder()],
+      ['state', getPromoStateDecoder()],
       ['numMms', getU8Decoder()],
       ['minLegs', getU8Decoder()],
       ['numOperators', getU8Decoder()],
@@ -2223,6 +2245,7 @@ const getFreebetAccountHeaderDecoder = () =>
       ['amount', getU64Decoder()],
       ['issuerAuth', addrDecoder],
       ['user', addrDecoder],
+      ['mint', addrDecoder],
    ]);
 
 export const decodeFreebetAccountData = (data: ReadonlyUint8Array): FreebetAccountData => {
@@ -2232,11 +2255,11 @@ export const decodeFreebetAccountData = (data: ReadonlyUint8Array): FreebetAccou
    const bytes = new Uint8Array(data);
    const numMms = bytes[3]!;
    const numOperators = bytes[5]!;
-   if (numMms > MAX_FREEBET_ALLOWED_MMS) {
-      throw new RangeError(`freebet numMms ${numMms} > ${MAX_FREEBET_ALLOWED_MMS}`);
+   if (numMms > MAX_PROMO_ALLOWED_MMS) {
+      throw new RangeError(`freebet numMms ${numMms} > ${MAX_PROMO_ALLOWED_MMS}`);
    }
-   if (numOperators > MAX_FREEBET_ALLOWED_OPERATORS) {
-      throw new RangeError(`freebet numOperators ${numOperators} > ${MAX_FREEBET_ALLOWED_OPERATORS}`);
+   if (numOperators > MAX_PROMO_ALLOWED_OPERATORS) {
+      throw new RangeError(`freebet numOperators ${numOperators} > ${MAX_PROMO_ALLOWED_OPERATORS}`);
    }
    const expected = freebetAccountLen(numMms, numOperators);
    if (bytes.length !== expected) {
@@ -2266,6 +2289,7 @@ export const decodeFreebetAccountData = (data: ReadonlyUint8Array): FreebetAccou
       amount: header.amount,
       issuerAuth: header.issuerAuth,
       user: header.user,
+      mint: header.mint,
       allowedMms,
       allowedOperators,
    };
@@ -2274,6 +2298,156 @@ export const decodeFreebetAccountData = (data: ReadonlyUint8Array): FreebetAccou
 export const getFreebetAccountDataDecoder = (): { decode: (data: ReadonlyUint8Array) => FreebetAccountData } => ({
    decode: decodeFreebetAccountData,
 });
+
+const getIssueBoostIxHeaderEncoder = () =>
+   getStructEncoder([
+      ['boostId', getU32Encoder()],
+      ['expiry', getU32Encoder()],
+      ['maxStake', getU64Encoder()],
+      ['minOddsScaled', getU32BigintEncoder('minOddsScaled')],
+      ['maxOddsScaled', getU32BigintEncoder('maxOddsScaled')],
+      ['boostBps', getU32Encoder()],
+      ['minLegs', getU8Encoder()],
+      ['numMms', getU8Encoder()],
+      ['numOperators', getU8Encoder()],
+   ]);
+
+const getIssueBoostIxHeaderDecoder = () =>
+   getStructDecoder([
+      ['boostId', getU32Decoder()],
+      ['expiry', getU32Decoder()],
+      ['maxStake', getU64Decoder()],
+      ['minOddsScaled', getU32BigintDecoder()],
+      ['maxOddsScaled', getU32BigintDecoder()],
+      ['boostBps', getU32Decoder()],
+      ['minLegs', getU8Decoder()],
+      ['numMms', getU8Decoder()],
+      ['numOperators', getU8Decoder()],
+   ]);
+
+export function encodeIssueBoostIxData(data: IssueBoostIxData): Uint8Array {
+   validateIssueBoostIxData(data);
+   const expected = issueBoostIxDataLen(data.allowedMms.length, data.allowedOperators.length);
+   const header = getIssueBoostIxHeaderEncoder().encode({
+      boostId: data.boostId,
+      expiry: data.expiry,
+      maxStake: data.maxStake,
+      minOddsScaled: data.minOddsScaled,
+      maxOddsScaled: data.maxOddsScaled,
+      boostBps: data.boostBps,
+      minLegs: data.minLegs,
+      numMms: data.allowedMms.length,
+      numOperators: data.allowedOperators.length,
+   });
+   const out = new Uint8Array(expected);
+   out.set(header, 0);
+   let off = header.length;
+   off = writeAddressList(out, off, data.allowedMms);
+   writeAddressList(out, off, data.allowedOperators);
+   return out;
+}
+
+export function decodeIssueBoostIxData(data: ReadonlyUint8Array): IssueBoostIxData {
+   if (data.length < ISSUE_BOOST_IX_HEADER_LEN) {
+      throw new RangeError(`issue boost: expected at least ${ISSUE_BOOST_IX_HEADER_LEN} bytes`);
+   }
+   const bytes = new Uint8Array(data);
+   const header = getIssueBoostIxHeaderDecoder().decode(bytes.subarray(0, ISSUE_BOOST_IX_HEADER_LEN));
+   if (header.numMms > MAX_PROMO_ALLOWED_MMS) {
+      throw new RangeError(`boost numMms ${header.numMms} > ${MAX_PROMO_ALLOWED_MMS}`);
+   }
+   if (header.numOperators > MAX_PROMO_ALLOWED_OPERATORS) {
+      throw new RangeError(`boost numOperators ${header.numOperators} > ${MAX_PROMO_ALLOWED_OPERATORS}`);
+   }
+   const expected = issueBoostIxDataLen(header.numMms, header.numOperators);
+   if (bytes.length !== expected) {
+      throw new RangeError(`issue boost len ${bytes.length}; expected ${expected}`);
+   }
+   let off = ISSUE_BOOST_IX_HEADER_LEN;
+   const allowedMms = decodeAddressList(bytes, off, header.numMms);
+   off += header.numMms * ADDRESS_LEN;
+   const allowedOperators = decodeAddressList(bytes, off, header.numOperators);
+   const decoded: IssueBoostIxData = {
+      boostId: header.boostId,
+      expiry: header.expiry,
+      maxStake: header.maxStake,
+      minOddsScaled: header.minOddsScaled,
+      maxOddsScaled: header.maxOddsScaled,
+      boostBps: header.boostBps,
+      minLegs: header.minLegs,
+      allowedMms,
+      allowedOperators,
+   };
+   validateIssueBoostIxData(decoded);
+   return decoded;
+}
+
+const getBoostAccountHeaderDecoder = () =>
+   getStructDecoder([
+      ['discriminator', getU8Decoder()],
+      ['bump', getU8Decoder()],
+      ['state', getPromoStateDecoder()],
+      ['numMms', getU8Decoder()],
+      ['minLegs', getU8Decoder()],
+      ['numOperators', getU8Decoder()],
+      ['boostId', getU32Decoder()],
+      ['expiry', getU32Decoder()],
+      ['minOddsScaled', getU32BigintDecoder()],
+      ['maxOddsScaled', getU32BigintDecoder()],
+      ['boostBps', getU32Decoder()],
+      ['maxStake', getU64Decoder()],
+      ['issuerAuth', addrDecoder],
+      ['user', addrDecoder],
+      ['mint', addrDecoder],
+   ]);
+
+export const decodeBoostAccountData = (data: ReadonlyUint8Array): BoostAccountData => {
+   if (data.length < BOOST_ACCOUNT_HEADER_LEN) {
+      throw new RangeError(`boost account len ${data.length} < header ${BOOST_ACCOUNT_HEADER_LEN}`);
+   }
+   const bytes = new Uint8Array(data);
+   const numMms = bytes[3]!;
+   const numOperators = bytes[5]!;
+   if (numMms > MAX_PROMO_ALLOWED_MMS) {
+      throw new RangeError(`boost numMms ${numMms} > ${MAX_PROMO_ALLOWED_MMS}`);
+   }
+   if (numOperators > MAX_PROMO_ALLOWED_OPERATORS) {
+      throw new RangeError(`boost numOperators ${numOperators} > ${MAX_PROMO_ALLOWED_OPERATORS}`);
+   }
+   const expected = boostAccountLen(numMms, numOperators);
+   if (bytes.length !== expected) {
+      throw new RangeError(`boost account len ${bytes.length}; expected ${expected}`);
+   }
+   const header = getBoostAccountHeaderDecoder().decode(bytes.subarray(0, BOOST_ACCOUNT_HEADER_LEN));
+   if (header.discriminator !== BOOST_ACCOUNT_DISCRIMINATOR) {
+      throw new RangeError(
+         `boost discriminator ${header.discriminator}; expected ${BOOST_ACCOUNT_DISCRIMINATOR}`,
+      );
+   }
+   let off = BOOST_ACCOUNT_HEADER_LEN;
+   const allowedMms = decodeAddressList(bytes, off, numMms);
+   off += numMms * ADDRESS_LEN;
+   const allowedOperators = decodeAddressList(bytes, off, numOperators);
+   return {
+      discriminator: header.discriminator,
+      bump: header.bump,
+      state: header.state,
+      numMms: header.numMms,
+      minLegs: header.minLegs,
+      numOperators: header.numOperators,
+      boostId: header.boostId,
+      expiry: header.expiry,
+      minOddsScaled: header.minOddsScaled,
+      maxOddsScaled: header.maxOddsScaled,
+      boostBps: header.boostBps,
+      maxStake: header.maxStake,
+      issuerAuth: header.issuerAuth,
+      user: header.user,
+      mint: header.mint,
+      allowedMms,
+      allowedOperators,
+   };
+};
 
 /** Full CPI payload to SPAMM `get_quote` (first byte = `MM_GET_QUOTE_IX_DISCRIMINATOR` in `instructions.ts`). */
 export function encodeGetQuoteIxData(ix: GetQuoteIxData): Uint8Array {
@@ -2574,6 +2748,8 @@ export const decodeAccountData = (data: ReadonlyUint8Array): DecodedAccountData 
          return { kind: 'freebetIssuerAccount', data: decodeFreebetIssuerAccountData(data) };
       case 11:
          return { kind: 'freebetAccount', data: decodeFreebetAccountData(data) };
+      case 12:
+         return { kind: 'boostAccount', data: decodeBoostAccountData(data) };
       default:
          throw new Error(`Unknown account discriminator: ${disc}`);
    }

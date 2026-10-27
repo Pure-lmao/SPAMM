@@ -1,6 +1,6 @@
 import { address, type Address } from '@solana/kit';
 import type { SendAdminOptions } from '../adminRun';
-import { DEFAULT_MARKET_OPERATOR } from '../constants';
+import { DEFAULT_MARKET_OPERATOR, DEFAULT_PROMO_MINT } from '../constants';
 import { MAX_PROMO_ALLOWED } from '../codex';
 
 export function parseFlags(argv: string[]): Record<string, string> {
@@ -36,6 +36,14 @@ export function parseOperatorFlag(flags: Record<string, string>): Address {
    const raw = flags.operator?.trim();
    if (!raw) {
       return DEFAULT_MARKET_OPERATOR;
+   }
+   return address(raw);
+}
+
+export function parseMintFlag(flags: Record<string, string>): Address {
+   const raw = flags.mint?.trim();
+   if (!raw) {
+      return DEFAULT_PROMO_MINT;
    }
    return address(raw);
 }

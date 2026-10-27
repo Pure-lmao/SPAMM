@@ -6,6 +6,7 @@ use crate::instructions::{
    close_market::CLOSE_MARKET_IX_DISCRIMINATOR,
    init_event::INIT_EVENT_IX_DISCRIMINATOR,
    init_market::INIT_MARKET_IX_DISCRIMINATOR,
+   create_token_account::CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR,
    init_program::INIT_PROGRAM_IX_DISCRIMINATOR,
    set_rfq_signer::SET_RFQ_SIGNER_IX_DISCRIMINATOR,
    update_event_state::UPDATE_EVENT_STATE_IX_DISCRIMINATOR,
@@ -34,6 +35,7 @@ mod fill_cashout_parlay_rfq;
 mod init_event;
 mod init_market;
 mod init_program;
+mod create_token_account;
 mod force_close_pda;
 mod update_event_state;
 mod quote_helpers;
@@ -62,6 +64,7 @@ pub fn dispatch(program_id: &Address, d: u8, data: &[u8], accounts: &mut [Accoun
    match d {
       // admin — 100–101
       INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(program_id, accounts, data),
+      CREATE_TOKEN_ACCOUNT_IX_DISCRIMINATOR => create_token_account::process(program_id, accounts, data),
       SET_RFQ_SIGNER_IX_DISCRIMINATOR => set_rfq_signer::process(program_id, accounts),
 
       // event / market — 110–114

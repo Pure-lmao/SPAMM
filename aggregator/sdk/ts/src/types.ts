@@ -17,10 +17,10 @@ export const EVENT_ID_WIRE_SIZE = 11;
  * Scaled odds (`oddsScaled`, `minOddsScaled`, etc.) use `bigint` in TS for safe arithmetic;
  * on-wire encoding is always `u32` (see `getU32BigintEncoder` / `ODDS_SCALE`).
  */
-/** `MarketId` wire without `operator` (legacy pre-operator layout; used as a PDA seed). */
+/** `MarketId` wire without `operator` and `mint` (PDA seed body; max seed is 32 bytes). */
 export const MARKET_ID_BODY_WIRE_SIZE = EVENT_ID_WIRE_SIZE + U64_LEN + 2 + 1 + 1;
-/** `MarketId`: `EventId` + `player: u64` + `mkt: u16` + `period: u8` + `is_pregame: u8` + `operator: Address`. */
-export const MARKET_ID_WIRE_SIZE = MARKET_ID_BODY_WIRE_SIZE + ADDRESS_LEN;
+/** `MarketId`: body + `operator: Address` + `mint: Address`. */
+export const MARKET_ID_WIRE_SIZE = MARKET_ID_BODY_WIRE_SIZE + ADDRESS_LEN + ADDRESS_LEN;
 /** Packed `EventGameState` (`other.rs`): 4-byte phase + 4 scores. */
 export const EVENT_GAME_STATE_LEN = 8;
 /** `FillBetIxData` packed wire size (see `state/ix_fill_bet.rs`). */
@@ -36,7 +36,8 @@ export const FILL_PARLAY_IX_HEADER_LEN = U64_LEN + U64_LEN + U32_LEN + 1;
 export const FILL_PARLAY_IX_DATA_LEN = FILL_PARLAY_IX_HEADER_LEN + MAX_PARLAY_LEGS * PARLAY_LEG_SEL_LEN;
 export const fillParlayIxDataLen = (numLegs: number): number =>
    FILL_PARLAY_IX_HEADER_LEN + numLegs * PARLAY_LEG_SEL_LEN;
-export const ADD_LINE_TO_LIABILITY_NETTING_IX_LEN = EVENT_ID_WIRE_SIZE + 1 + 2;
+export const NETTING_SCOPE_IX_LEN = EVENT_ID_WIRE_SIZE + ADDRESS_LEN + ADDRESS_LEN;
+export const ADD_LINE_TO_LIABILITY_NETTING_IX_LEN = NETTING_SCOPE_IX_LEN + 1 + 2;
 export const REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN = ADD_LINE_TO_LIABILITY_NETTING_IX_LEN;
 /** Aggregator config PDA packed size (`disc` + `status` + `authority`). */
 export const CONFIG_PDA_LEN = 1 + 1 + ADDRESS_LEN;
@@ -68,7 +69,8 @@ export const BET_ACCOUNT_HEADER_LEN =
    U64_LEN +
    U64_LEN +
    U32_LEN +
-   U32_LEN +
+   1 +
+   ADDRESS_LEN +
    2 +
    EVENT_GAME_STATE_LEN +
    1 +
@@ -89,7 +91,8 @@ export const PARLAY_BET_HEADER_LEN =
    U64_LEN +
    U64_LEN +
    U32_LEN +
-   U32_LEN +
+   1 +
+   ADDRESS_LEN +
    ADDRESS_LEN +
    1 +
    1;
@@ -98,7 +101,7 @@ export const PARLAY_BET_ACCOUNT_MAX_LEN =
    PARLAY_BET_HEADER_LEN + MAX_RFQ_PARLAY_LEGS * PARLAY_LEG_WIRE_LEN;
 export const parlayBetAccountLen = (numLegs: number): number =>
    PARLAY_BET_HEADER_LEN + numLegs * PARLAY_LEG_WIRE_LEN;
-export const MM_ENCUMBRANCE_PDA_LEN = 10;
+export const MM_ENCUMBRANCE_PDA_LEN = 14;
 /** MM `["config"]` PDA header (`disc` + `bump` + `admin` + `rfq_signer`). Account may be longer. */
 export const MM_CONFIG_PDA_HEADER_LEN = 1 + 1 + ADDRESS_LEN + ADDRESS_LEN;
 export const MM_MARKET_DATA_PDA_MIN_LEN = 2;
@@ -172,6 +175,7 @@ export type MarketId = {
    period: number;
    isPregame: boolean;
    operator: Address;
+   mint: Address;
 };
 
 export type BetFiller = {
@@ -199,7 +203,8 @@ export type BetAccountData = {
    amount: bigint;
    payout: bigint;
    timestamp: number;
-   freebetId: number;
+   promoType: number;
+   promoAccount: Address;
    eventStateSequence: number;
    eventGameState: EventGameState;
    result: BetResult;
@@ -217,7 +222,8 @@ export type ParlayBetAccountData = {
    amount: bigint;
    payout: bigint;
    timestamp: number;
-   freebetId: number;
+   promoType: number;
+   promoAccount: Address;
    fillerAddress: Address;
    result: BetResult;
    numLegs: number;
@@ -371,6 +377,7 @@ export type MmEncumbranceAccountData = {
    discriminator: number;
    bump: number;
    encumbrance: bigint;
+   openCashoutTickets: number;
 };
 
 /** MM `["config"]` PDA under the SPAMM program (`MM_ACCOUNT_CONFIG_DISCRIMINATOR`). */
@@ -523,7 +530,7 @@ export const FREEBET_ACCOUNT_DISCRIMINATOR = 11;
 export const FREEBET_ISSUER_LEN = 1 + 1 + ADDRESS_LEN + U32_LEN;
 /** `FreebetAccountHeader` ZeroPod size. */
 export const FREEBET_ACCOUNT_HEADER_LEN =
-   1 + 1 + 1 + 1 + 1 + 1 + U32_LEN + U32_LEN + U32_LEN + U32_LEN + U64_LEN + ADDRESS_LEN + ADDRESS_LEN;
+   1 + 1 + 1 + 1 + 1 + 1 + U32_LEN + U32_LEN + U32_LEN + U32_LEN + U64_LEN + ADDRESS_LEN + ADDRESS_LEN + ADDRESS_LEN;
 export const ISSUE_FREEBET_IX_HEADER_LEN =
    U32_LEN + U32_LEN + U64_LEN + U32_LEN + U32_LEN + 1 + 1 + 1;
 export const freebetAccountLen = (numMms: number, numOperators: number): number =>
@@ -533,7 +540,18 @@ export const issueFreebetIxDataLen = (numMms: number, numOperators: number): num
 export const freebetAllowedOperatorsOffset = (numMms: number): number =>
    FREEBET_ACCOUNT_HEADER_LEN + numMms * ADDRESS_LEN;
 
-export enum FreebetState {
+export const BOOST_ACCOUNT_DISCRIMINATOR = 12;
+/** `BoostAccountHeader` ZeroPod size. `boost_bps` sits in front of `max_stake`. */
+export const BOOST_ACCOUNT_HEADER_LEN =
+   1 + 1 + 1 + 1 + 1 + 1 + U32_LEN + U32_LEN + U32_LEN + U32_LEN + U32_LEN + U64_LEN + ADDRESS_LEN + ADDRESS_LEN + ADDRESS_LEN;
+export const ISSUE_BOOST_IX_HEADER_LEN =
+   U32_LEN + U32_LEN + U64_LEN + U32_LEN + U32_LEN + U32_LEN + 1 + 1 + 1;
+export const boostAccountLen = (numMms: number, numOperators: number): number =>
+   BOOST_ACCOUNT_HEADER_LEN + numMms * ADDRESS_LEN + numOperators * ADDRESS_LEN;
+export const issueBoostIxDataLen = (numMms: number, numOperators: number): number =>
+   ISSUE_BOOST_IX_HEADER_LEN + numMms * ADDRESS_LEN + numOperators * ADDRESS_LEN;
+
+export enum PromoState {
    Available = 0,
    Used = 1,
 }
@@ -548,7 +566,7 @@ export type FreebetIssuerAccountData = {
 export type FreebetAccountData = {
    discriminator: number;
    bump: number;
-   state: FreebetState;
+   state: PromoState;
    numMms: number;
    minLegs: number;
    numOperators: number;
@@ -559,6 +577,40 @@ export type FreebetAccountData = {
    amount: bigint;
    issuerAuth: Address;
    user: Address;
+   mint: Address;
+   allowedMms: Address[];
+   allowedOperators: Address[];
+};
+
+export type BoostAccountData = {
+   discriminator: number;
+   bump: number;
+   state: PromoState;
+   numMms: number;
+   minLegs: number;
+   numOperators: number;
+   boostId: number;
+   expiry: number;
+   minOddsScaled: bigint;
+   maxOddsScaled: bigint;
+   boostBps: number;
+   maxStake: bigint;
+   issuerAuth: Address;
+   user: Address;
+   mint: Address;
+   allowedMms: Address[];
+   allowedOperators: Address[];
+};
+
+export type IssueBoostIxData = {
+   boostId: number;
+   expiry: number;
+   maxStake: bigint;
+   minOddsScaled: bigint;
+   maxOddsScaled: bigint;
+   /** `10_000` pays 100% of the profit the market maker actually paid. */
+   boostBps: number;
+   minLegs: number;
    allowedMms: Address[];
    allowedOperators: Address[];
 };
@@ -884,6 +936,8 @@ export type FillParlayIxData = {
 
 export type AddLineToNettingIxData = {
    eventId: EventId;
+   operator: Address;
+   mint: Address;
    period: number;
    mkt: number;
 };
@@ -1009,6 +1063,8 @@ export type DecodedAggregatorInstruction =
    | { kind: 'withdrawFreebetFunds'; amount: bigint }
    | { kind: 'issueFreebet'; data: IssueFreebetIxData }
    | { kind: 'revokeFreebet'; freebetId: number }
+   | { kind: 'issueBoost'; data: IssueBoostIxData }
+   | { kind: 'revokeBoost'; boostId: number }
    | { kind: 'fillBet'; data: FillBetIxData }
    | { kind: 'fillRfqBet'; data: FillRfqBetIxData }
    | { kind: 'fillParlay'; data: FillParlayIxData }
@@ -1017,6 +1073,10 @@ export type DecodedAggregatorInstruction =
    | { kind: 'freebetFillParlay'; freebetId: number; data: FillParlayIxData }
    | { kind: 'freebetFillRfqBet'; freebetId: number; data: FillRfqBetIxData }
    | { kind: 'freebetFillRfqParlay'; freebetId: number; data: FillRfqParlayIxData }
+   | { kind: 'boostedFillBet'; boostId: number; data: FillBetIxData }
+   | { kind: 'boostedFillParlay'; boostId: number; data: FillParlayIxData }
+   | { kind: 'boostedFillRfqBet'; boostId: number; data: FillRfqBetIxData }
+   | { kind: 'boostedFillRfqParlay'; boostId: number; data: FillRfqParlayIxData }
    | { kind: 'fillCashout'; data: FillCashoutIxData }
    | { kind: 'fillParlayCashout'; data: FillParlayCashoutIxData }
    | { kind: 'fillRfqCashout'; data: FillRfqCashoutIxData }
@@ -1034,10 +1094,12 @@ export type DecodedAggregatorInstruction =
    | { kind: 'settleParlay' }
    | { kind: 'settleFreebet' }
    | { kind: 'settleFreebetParlay' }
-   | { kind: 'createNettingAccount'; eventId: EventId }
+   | { kind: 'settleBoostedBet' }
+   | { kind: 'settleBoostedParlay' }
+   | { kind: 'createNettingAccount'; eventId: EventId; operator: Address; mint: Address }
    | { kind: 'addLineToNettingAccount'; data: AddLineToNettingIxData }
    | { kind: 'removeLineFromNettingAccount'; data: RemoveLineFromNettingIxData }
-   | { kind: 'closeNettingAccount'; eventId: EventId }
+   | { kind: 'closeNettingAccount'; eventId: EventId; operator: Address; mint: Address }
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint }
    | { kind: 'writeArbitraryData'; data: Uint8Array }
    | { kind: 'forceClosePda' };
@@ -1053,4 +1115,5 @@ export type DecodedAccountData =
    | { kind: 'cashoutAccount'; data: CashoutAccountData }
    | { kind: 'cashoutParlayAccount'; data: CashoutParlayAccountData }
    | { kind: 'freebetIssuerAccount'; data: FreebetIssuerAccountData }
-   | { kind: 'freebetAccount'; data: FreebetAccountData };
+   | { kind: 'freebetAccount'; data: FreebetAccountData }
+   | { kind: 'boostAccount'; data: BoostAccountData };

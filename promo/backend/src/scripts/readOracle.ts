@@ -13,7 +13,7 @@ import {
    printPromoOracleChainState,
    promoOracleChainStateToJson,
 } from '../readOracle';
-import { parseFlags, parseOperatorFlag } from './cliFlags';
+import { parseFlags, parseMintFlag, parseOperatorFlag } from './cliFlags';
 
 function requireMarketKey(flags: Record<string, string>): string {
    const key = flags['market-key'];
@@ -30,7 +30,7 @@ async function main(): Promise<void> {
    if (!parts) {
       throw new Error(`invalid market key: ${marketKey}`);
    }
-   const marketId = promoMarketIdFromParts(parts, parseOperatorFlag(flags));
+   const marketId = promoMarketIdFromParts(parts, parseOperatorFlag(flags), parseMintFlag(flags));
 
    const ctx = await createPromoAdminContext();
    const state = await fetchPromoOracleAccount(ctx, marketId);

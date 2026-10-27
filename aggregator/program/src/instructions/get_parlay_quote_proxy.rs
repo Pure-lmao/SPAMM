@@ -34,14 +34,14 @@ use crate::{
       reject_duplicate_mm_programs,
    },
    state::{
-      FillParlayIxData, ParlayLegSel,
+      FillParlayView,
       mm_quote::ProxyParlayQuoteData,
    },
 };
 
 const MM_PARLAY_PROXY_FIXED_ACCOUNTS: usize = 3;
 
-pub const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 31;
+pub const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR: u8 = 201;
 
 #[inline(always)]
 fn mm_accounts_per_mm(num_legs: usize) -> usize {
@@ -54,7 +54,7 @@ fn invoke_get_quote_parlay_proxy(
    num_legs: usize,
    amount: u64,
    min_odds_scaled: u32,
-   legs: &[ParlayLegSel],
+   leg_bytes: &[u8],
    user: &AccountView,
    clock_sysvar: &AccountView,
    mm_program_account: &AccountView,
@@ -66,7 +66,7 @@ fn invoke_get_quote_parlay_proxy(
       num_legs,
       amount,
       min_odds_scaled,
-      legs,
+      leg_bytes,
       user,
       clock_sysvar,
       mm_program_account,
@@ -82,7 +82,7 @@ fn cpi_get_quote_parlay_for_proxy(
    num_legs: usize,
    amount: u64,
    min_odds_scaled: u32,
-   legs: &[ParlayLegSel],
+   leg_bytes: &[u8],
    user: &AccountView,
    clock_sysvar: &AccountView,
    mm_program_account: &AccountView,
@@ -110,7 +110,7 @@ fn cpi_get_quote_parlay_for_proxy(
       num_legs,
       amount,
       min_odds_scaled,
-      legs,
+      leg_bytes,
       user,
       clock_sysvar,
       mm_program_account,
@@ -150,7 +150,7 @@ fn collect_and_set_parlay_proxy_quotes(
    amount: u64,
    min_odds_scaled: u32,
    num_legs: usize,
-   legs: &[ParlayLegSel],
+   leg_bytes: &[u8],
    user: &AccountView,
    clock_sysvar: &AccountView,
    mm_accounts: &[AccountView],
@@ -184,7 +184,7 @@ fn collect_and_set_parlay_proxy_quotes(
          num_legs,
          amount,
          min_odds_scaled,
-         legs,
+         leg_bytes,
          user,
          clock_sysvar,
          mm_program_account,
@@ -232,13 +232,13 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
 
    verify_clock_sysvar(clock_sysvar)?;
 
-   let FillParlayIxData {
+   let FillParlayView {
       bet_id: _,
       amount,
       min_odds_scaled,
       num_legs: num_legs_u8,
-      legs,
-   } = FillParlayIxData::decode(data)?;
+      leg_bytes,
+   } = FillParlayView::decode(data)?;
    let num_legs = num_legs_u8 as usize;
 
    if num_legs > MAX_PARLAY_LEGS {
@@ -250,7 +250,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       amount,
       min_odds_scaled,
       num_legs,
-      &legs[..num_legs],
+      leg_bytes,
       user,
       clock_sysvar,
       mm_accounts,

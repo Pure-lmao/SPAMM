@@ -47,6 +47,7 @@ import { ODDS_SCALE } from '../constants';
 import {
    parseAllowList,
    parseFlags,
+   parseMintFlag,
    parseOperatorFlag,
    parseSendOptions,
    positionalCommand,
@@ -66,16 +67,17 @@ Program:
                            [--time-period PG] [--home N] [--away N]
   init-market              --market-key (mkt must be 9)
                            [--operator pk] (default DEFAULT_MARKET_OPERATOR)
+                           [--mint pk] (default devnet USDC)
                            [--allow <pk>[,pk…]] (omit = anyone)
                            --start <unix_sec> --max-usdc --max-total-usdc
                            --odds0 <dec|scaled> [--odds1] [--odds2] [--outcomes 2|3]
                            (one tx: init-event → event-state seq 1 PG → init-market → set-odds)
-  set-max                  --market-key [--operator] --max-usdc <n>
-  set-max-total            --market-key [--operator] --max-total-usdc <n>
-  set-odds                 --market-key [--operator] --sequence N --odds0 <dec|scaled> [--odds1] [--odds2]
-  repair-oracle-header     --market-key [--operator] [--sequence 1] (ix 254: disc, bump, sequence)
-  close-market             --market-key [--operator] (closes market data + event PDAs)
-  withdraw                 [--dest <ata>]  (full MM collateral ATA → dest, default admin ATA)
+  set-max                  --market-key [--operator] [--mint] --max-usdc <n>
+  set-max-total            --market-key [--operator] [--mint] --max-total-usdc <n>
+  set-odds                 --market-key [--operator] [--mint] --sequence N --odds0 <dec|scaled> [--odds1] [--odds2]
+  repair-oracle-header     --market-key [--operator] [--mint] [--sequence 1] (ix 254: disc, bump, sequence)
+  close-market             --market-key [--operator] [--mint] (closes market data + event PDAs)
+  withdraw                 [--mint pk] [--dest <ata>]  (full MM collateral ATA → dest, default admin ATA)
   write-rfq-signer         grow config PDA and write admin pubkey as rfq_signer (ix 254)
   force-close-quote-buffers  close mm_quote_buffer + mm_parlay_quote_buffer (ix 255)
 
@@ -107,7 +109,7 @@ function requirePromoMarketId(flags: Record<string, string>): MarketId {
       throw new Error(`invalid market key: ${marketKey}`);
    }
    assertPromoMarketParts(parts);
-   return promoMarketIdFromParts(parts, parseOperatorFlag(flags));
+   return promoMarketIdFromParts(parts, parseOperatorFlag(flags), parseMintFlag(flags));
 }
 
 async function main(): Promise<void> {
@@ -169,6 +171,7 @@ async function main(): Promise<void> {
             );
          }
          const operator = parseOperatorFlag(flags);
+         const mint = parseMintFlag(flags);
          const allowedAccounts = parseAllowList(process.argv.slice(2));
          const outcomes = flags.outcomes === '3' ? 3 : 2;
          const payload = await buildPromoInitMarketFromParts(
@@ -179,6 +182,7 @@ async function main(): Promise<void> {
             outcomes,
             parseUsdc(maxUsdc),
             parseUsdc(maxTotalUsdc),
+            mint,
          );
          const o0 = parseOdds(odds0);
          const o1 = flags.odds1 ? parseOdds(flags.odds1) : o0;
@@ -245,7 +249,7 @@ async function main(): Promise<void> {
 
       case 'withdraw': {
          const dest = flags.dest ? address(flags.dest) : undefined;
-         await runPromoWithdraw(ctx, dest, sendOpts);
+         await runPromoWithdraw(ctx, dest, sendOpts, parseMintFlag(flags));
          break;
       }
 

@@ -429,7 +429,7 @@ pub fn revert_cashout_metas(
       AccountMeta::new(escrow_ata, false),
       AccountMeta::new_readonly(mm_program_id(), false),
       AccountMeta::new_readonly(mm_config_pda(), false),
-      AccountMeta::new_readonly(encumbrance_pda(), false),
+      AccountMeta::new(encumbrance_pda(), false),
       AccountMeta::new(liability_token_ata(), false),
       AccountMeta::new_readonly(config_pda(), false),
       AccountMeta::new_readonly(mint_pubkey(), false),

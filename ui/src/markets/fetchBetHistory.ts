@@ -1,6 +1,8 @@
 import { Address } from "@solana/connector";
 import { address, type Address as KitAddress, type Rpc, type SolanaRpcApi } from "@solana/kit";
 import {
+   PROMO_BOOST,
+   PROMO_FREEBET,
    getBetsData,
    getParlaysData,
    type BetAccountData,
@@ -8,9 +10,9 @@ import {
    type MarketId,
    type ParlayBetAccountData,
 } from "spamm-aggregator-sdk";
-import { mapFreebetIdToIssuerAuth } from "../betting/freebets";
+import { mapBoostAccountToIssuerAuth, mapFreebetAccountToIssuerAuth } from "../betting/freebets";
 import { type BetRecord, type Selection } from "../../../api/quickIndexer";
-import { parseOperatorAddress } from "../betting/chainIds";
+import { DEFAULT_MARKET_MINT, parseOperatorAddress } from "../betting/chainIds";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
@@ -43,12 +45,21 @@ export type WalletParlayRow = {
    /** Present when loaded from chain (open bets); used for settle. */
    account?: ParlayBetAccountData;
    issuerAuth?: KitAddress;
-   freebetId?: number;
+   promoType?: number;
+   promoId?: number;
    finalPayout?: bigint | null;
    historySig?: string;
 };
 
 export type WalletBetRow = WalletSingleRow | WalletParlayRow;
+
+function promoAccountOf(row: WalletBetRow, promoType: number): Address | null {
+   if (row.kind === "single") {
+      return row.data.promoType === promoType ? row.data.promoAccount : null;
+   }
+   const type = row.promoType ?? row.account?.promoType ?? 0;
+   return type === promoType ? row.account?.promoAccount ?? null : null;
+}
 
 export function walletBetRowBetId(row: WalletBetRow): bigint {
    return row.kind === "single" ? row.data.betId : row.betId;
@@ -195,6 +206,7 @@ export function normalizeBetRecordFromApi(raw: unknown): BetRecord | null {
       min_odds_requested,
       payout,
       freebet_id: Number(r.freebet_id ?? 0),
+      promo_type: Number(r.promo_type ?? (Number(r.freebet_id ?? 0) !== 0 ? PROMO_FREEBET : 0)),
       timestamp: Number(r.timestamp),
       result: result as BetResult,
       fillers: [],
@@ -222,6 +234,7 @@ export function selectionToMarketId(sel: Selection): MarketId {
       period: sel.period_id,
       isPregame: Boolean(sel.is_pregame),
       operator: parseOperatorAddress(sel.operator),
+      mint: DEFAULT_MARKET_MINT,
    };
 }
 
@@ -259,7 +272,8 @@ function closedBetRecordToSingleRow(rec: BetRecord): WalletSingleRow | null {
             awaySecondary: 0,
          },
          result: rec.result,
-         freebetId: rec.freebet_id,
+         promoType: rec.promo_type,
+         promoAccount: address("11111111111111111111111111111111"),
          numFillers: 0,
          fillers: [],
       },
@@ -278,7 +292,8 @@ function closedBetRecordToParlayRow(rec: BetRecord): WalletParlayRow | null {
       amount: toBigIntField(rec.amount_filled, "amount_filled"),
       payout: toBigIntField(rec.payout, "payout"),
       result: rec.result,
-      freebetId: rec.freebet_id,
+      promoType: rec.promo_type,
+      promoId: rec.freebet_id,
       finalPayout: rec.final_payout == null ? null : toBigIntField(rec.final_payout, "final_payout"),
       historySig: rec.claimed_sig || rec.created_sig || undefined,
       legs: rec.selections.map((sel) => ({
@@ -322,14 +337,24 @@ export async function fetchOpenWalletBets(
          account: r.data,
       })),
    ];
-   const ids = rows.map((row) =>
-      row.kind === "single" ? row.data.freebetId : row.account?.freebetId ?? 0,
-   );
-   const issuers = await mapFreebetIdToIssuerAuth(rpc, user, ids);
+   const freebetAccounts = rows.flatMap((row) => {
+      const acct = promoAccountOf(row, PROMO_FREEBET);
+      return acct == null ? [] : [acct];
+   });
+   const boostAccounts = rows.flatMap((row) => {
+      const acct = promoAccountOf(row, PROMO_BOOST);
+      return acct == null ? [] : [acct];
+   });
+   const [freebetIssuers, boostIssuers] = await Promise.all([
+      mapFreebetAccountToIssuerAuth(rpc, user, freebetAccounts),
+      mapBoostAccountToIssuerAuth(rpc, user, boostAccounts),
+   ]);
    return sortWalletBetRows(
       rows.map((row) => {
-         const id = row.kind === "single" ? row.data.freebetId : row.account?.freebetId ?? 0;
-         const issuerAuth = issuers.get(id);
+         const freebet = promoAccountOf(row, PROMO_FREEBET);
+         const boost = promoAccountOf(row, PROMO_BOOST);
+         const issuerAuth = (freebet != null ? freebetIssuers.get(String(freebet)) : undefined)
+            ?? (boost != null ? boostIssuers.get(String(boost)) : undefined);
          return issuerAuth == null ? row : { ...row, issuerAuth };
       }),
    );

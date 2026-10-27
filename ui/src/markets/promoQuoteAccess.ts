@@ -1,5 +1,4 @@
 import type { Address, Rpc, SolanaRpcApi } from "@solana/kit";
-import { MIN_BET_AMOUNT } from "spamm-aggregator-sdk";
 import { apiSportToSdk, buildMarketId } from "../betting/chainIds";
 import { runMmQuoteFlow } from "../betting/quoteAndFill";
 import type { UiPromotionalMarket } from "./types";
@@ -21,7 +20,7 @@ export async function promoIsOpenToUser(
       userAddress,
       marketId,
       side: 0,
-      amount: MIN_BET_AMOUNT,
+      amount: 100_000n,
    });
    return q.topMms.length > 0;
 }

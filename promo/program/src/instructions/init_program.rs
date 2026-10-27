@@ -23,12 +23,10 @@ use pinocchio::error::ProgramError;
 use pinocchio::hint::unlikely;
 use pinocchio::{AccountView, Address};
 use pinocchio_log::log;
-use pinocchio_associated_token_account::instructions::Create as CreateAssociatedTokenAccount;
 use pinocchio_system::instructions::CreateAccount;
 
-use spamm_aggregator::helpers::verify_associated_token_program;
 use spamm_aggregator::helpers::{
-   get_rent, verify_rent_sysvar, verify_signer, verify_system_program, verify_token_program,
+   get_rent, verify_rent_sysvar, verify_signer, verify_system_program,
 };
 use spamm_aggregator::state::{
    MM_ACCOUNT_CONFIG_SEED,
@@ -52,10 +50,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       config_pda,
       mm_quote_buffer_pda,
       mm_parlay_quote_buffer_pda,
-      token_account,
-      mint,
-      token_program,
-      associated_token_program,
       rent_sysvar,
       system_program,
    ] = accounts else {
@@ -66,8 +60,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
    verify_signer(feepayer)?;
    verify_rent_sysvar(rent_sysvar)?;
    verify_system_program(system_program)?;
-   verify_token_program(token_program)?;
-   verify_associated_token_program(associated_token_program)?;
 
    if unlikely(!address_eq(feepayer.address(), &parsed.admin)) {
       log!("init_program: feepayer must match admin");
@@ -188,15 +180,6 @@ pub fn process(program_id: &Address, accounts: &mut [AccountView], data: &[u8]) 
       }
    }
 
-   CreateAssociatedTokenAccount {
-      funding_account: feepayer,
-      account: token_account,
-      wallet: config_pda,
-      mint,
-      token_program,
-      system_program,
-   }
-   .invoke()?;
 
    Ok(())
 }

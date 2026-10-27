@@ -22,8 +22,9 @@ pub use settle_bet::SETTLE_BET_IX_DISCRIMINATOR;
 pub use settle_parlay::SETTLE_PARLAY_IX_DISCRIMINATOR;
 pub use settle_freebet::SETTLE_FREEBET_IX_DISCRIMINATOR;
 pub use settle_freebet_parlay::SETTLE_FREEBET_PARLAY_IX_DISCRIMINATOR;
-pub use freebet_issuer::{
-   INIT_FREEBET_ISSUER_IX_DISCRIMINATOR, REMOVE_FREEBET_ISSUER_IX_DISCRIMINATOR,
+pub use promo_issuer::{
+   CLOSE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR, CREATE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR,
+   INIT_PROMO_ISSUER_IX_DISCRIMINATOR, REMOVE_PROMO_ISSUER_IX_DISCRIMINATOR,
    WITHDRAW_FREEBET_FUNDS_IX_DISCRIMINATOR,
 };
 pub use issue_freebet::ISSUE_FREEBET_IX_DISCRIMINATOR;
@@ -32,13 +33,23 @@ pub use freebet_fill_bet::FREEBET_FILL_BET_IX_DISCRIMINATOR;
 pub use freebet_fill_parlay::FREEBET_FILL_PARLAY_IX_DISCRIMINATOR;
 pub use freebet_fill_rfq_bet::FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR;
 pub use freebet_fill_rfq_parlay::FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR;
+pub use boosted_fill_bet::BOOSTED_FILL_BET_IX_DISCRIMINATOR;
+pub use boosted_fill_parlay::BOOSTED_FILL_PARLAY_IX_DISCRIMINATOR;
+pub use boosted_fill_rfq_bet::BOOSTED_FILL_RFQ_BET_IX_DISCRIMINATOR;
+pub use boosted_fill_rfq_parlay::BOOSTED_FILL_RFQ_PARLAY_IX_DISCRIMINATOR;
+pub use settle_boosted_bet::SETTLE_BOOSTED_BET_IX_DISCRIMINATOR;
+pub use settle_boosted_parlay::SETTLE_BOOSTED_PARLAY_IX_DISCRIMINATOR;
+pub use issue_boost::ISSUE_BOOST_IX_DISCRIMINATOR;
+pub use revoke_boost::REVOKE_BOOST_IX_DISCRIMINATOR;
 
 use crate::instructions::{
    add_line_to_netting_account::ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    change_config_status::CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR,
    close_netting_account::CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
    create_netting_account::CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR,
+   close_mm_mint_vault::CLOSE_MM_MINT_VAULT_IX_DISCRIMINATOR,
    deregister_mm::DEREGISTER_MM_IX_DISCRIMINATOR,
+   init_mm_mint_vault::INIT_MM_MINT_VAULT_IX_DISCRIMINATOR,
    init_program::INIT_PROGRAM_IX_DISCRIMINATOR,
    register_mm::REGISTER_MM_IX_DISCRIMINATOR,
    remove_line_from_netting_account::REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR,
@@ -46,7 +57,7 @@ use crate::instructions::{
 };
 
 mod init_program;
-mod freebet_issuer;
+mod promo_issuer;
 mod issue_freebet;
 mod revoke_freebet;
 mod fill_bet;
@@ -57,6 +68,14 @@ mod freebet_fill_bet;
 mod freebet_fill_parlay;
 mod freebet_fill_rfq_bet;
 mod freebet_fill_rfq_parlay;
+mod boosted_fill_bet;
+mod boosted_fill_parlay;
+mod boosted_fill_rfq_bet;
+mod boosted_fill_rfq_parlay;
+mod settle_boosted_bet;
+mod settle_boosted_parlay;
+mod issue_boost;
+mod revoke_boost;
 mod cashout_bet;
 mod cashout_parlay;
 mod cashout_rfq_bet;
@@ -73,6 +92,8 @@ mod close_netting_account;
 mod remove_line_from_netting_account;
 mod add_line_to_netting_account;
 mod register_mm;
+mod init_mm_mint_vault;
+mod close_mm_mint_vault;
 mod deregister_mm;
 mod grade_bets;
 mod grade_parlay;
@@ -105,11 +126,13 @@ pub use crate::state::{
 #[inline(never)]
 pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResult {
    match d {
-      // set up - 0-3
+      // set up - 0-5
       INIT_PROGRAM_IX_DISCRIMINATOR => init_program::process(accounts, data),
       CHANGE_CONFIG_STATUS_IX_DISCRIMINATOR => change_config_status::process(accounts, data),
       REGISTER_MM_IX_DISCRIMINATOR => register_mm::process(accounts, data),
       DEREGISTER_MM_IX_DISCRIMINATOR => deregister_mm::process(accounts, data),
+      INIT_MM_MINT_VAULT_IX_DISCRIMINATOR => init_mm_mint_vault::process(accounts, data),
+      CLOSE_MM_MINT_VAULT_IX_DISCRIMINATOR => close_mm_mint_vault::process(accounts, data),
 
       // bets - 10-13
       FILL_BET_IX_DISCRIMINATOR => fill_bet::process(accounts, data),
@@ -117,32 +140,40 @@ pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResu
       FILL_RFQ_BET_IX_DISCRIMINATOR => fill_rfq_bet::process(accounts, data),
       FILL_RFQ_PARLAY_IX_DISCRIMINATOR => fill_rfq_parlay::process(accounts, data),
 
-      // freebet fill - 15-18
+      // freebet fill - 20-23
       FREEBET_FILL_BET_IX_DISCRIMINATOR => freebet_fill_bet::process(accounts, data),
       FREEBET_FILL_PARLAY_IX_DISCRIMINATOR => freebet_fill_parlay::process(accounts, data),
       FREEBET_FILL_RFQ_BET_IX_DISCRIMINATOR => freebet_fill_rfq_bet::process(accounts, data),
       FREEBET_FILL_RFQ_PARLAY_IX_DISCRIMINATOR => freebet_fill_rfq_parlay::process(accounts, data),
+      
+      // boosted fill - 30-33
+      BOOSTED_FILL_BET_IX_DISCRIMINATOR => boosted_fill_bet::process(accounts, data),
+      BOOSTED_FILL_PARLAY_IX_DISCRIMINATOR => boosted_fill_parlay::process(accounts, data),
+      BOOSTED_FILL_RFQ_BET_IX_DISCRIMINATOR => boosted_fill_rfq_bet::process(accounts, data),
+      BOOSTED_FILL_RFQ_PARLAY_IX_DISCRIMINATOR => boosted_fill_rfq_parlay::process(accounts, data),
 
-      // grading - 20-21
+      // cashout - 90-95
+      FILL_CASHOUT_IX_DISCRIMINATOR => cashout_bet::process(accounts, data),
+      FILL_PARLAY_CASHOUT_IX_DISCRIMINATOR => cashout_parlay::process(accounts, data),
+      FILL_RFQ_CASHOUT_IX_DISCRIMINATOR => cashout_rfq_bet::process(accounts, data),
+      FILL_RFQ_PARLAY_CASHOUT_IX_DISCRIMINATOR => cashout_rfq_parlay::process(accounts, data),
+      CLAIM_CASHOUT_ESCROW_IX_DISCRIMINATOR => claim_cashout_escrow::process(accounts),
+      REVERT_CASHOUT_IX_DISCRIMINATOR => revert_cashout::process(accounts),
+
+
+      // grading - 100-101
       GRADE_BETS_IX_DISCRIMINATOR => grade_bets::process(accounts, data),
       GRADE_PARLAY_IX_DISCRIMINATOR => grade_parlay::process(accounts, data),
 
-      // settle - 25-28
+      // settle - 110-115
       SETTLE_BET_IX_DISCRIMINATOR => settle_bet::process(accounts),
       SETTLE_PARLAY_IX_DISCRIMINATOR => settle_parlay::process(accounts),
       SETTLE_FREEBET_IX_DISCRIMINATOR => settle_freebet::process(accounts),
       SETTLE_FREEBET_PARLAY_IX_DISCRIMINATOR => settle_freebet_parlay::process(accounts),
+      SETTLE_BOOSTED_BET_IX_DISCRIMINATOR => settle_boosted_bet::process(accounts),
+      SETTLE_BOOSTED_PARLAY_IX_DISCRIMINATOR => settle_boosted_parlay::process(accounts),
 
-      // proxies - 30-34
-      GET_QUOTE_PROXY_IX_DISCRIMINATOR => get_quote_proxy::process(accounts, data),
-      GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR => get_parlay_quote_proxy::process(accounts, data),
-      GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR => get_market_quotes_proxy::process(accounts, data),
-      GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR => get_cashout_quote_proxy::process(accounts, data),
-      GET_PARLAY_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR => {
-         get_cashout_parlay_quote_proxy::process(accounts, data)
-      }
-
-      // netting PDA - 40-43
+      // netting PDA - 130-133
       CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR => create_netting_account::process(accounts, data),
       ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR => add_line_to_netting_account::process(accounts, data),
       REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR => {
@@ -150,25 +181,30 @@ pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResu
       }
       CLOSE_NETTING_ACCOUNT_IX_DISCRIMINATOR => close_netting_account::process(accounts, data),
 
-      // liability account - 50
+      // liability account - 150
       WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR => {
          withdraw_from_liability_account::process(accounts, data)
       }
 
-      // freebet issuer admin - 60-64
-      INIT_FREEBET_ISSUER_IX_DISCRIMINATOR => freebet_issuer::process_init(accounts, data),
-      REMOVE_FREEBET_ISSUER_IX_DISCRIMINATOR => freebet_issuer::process_remove(accounts, data),
-      WITHDRAW_FREEBET_FUNDS_IX_DISCRIMINATOR => freebet_issuer::process_withdraw(accounts, data),
+      // promo issuer admin - 160-168
+      INIT_PROMO_ISSUER_IX_DISCRIMINATOR => promo_issuer::process_init(accounts, data),
+      REMOVE_PROMO_ISSUER_IX_DISCRIMINATOR => promo_issuer::process_remove(accounts, data),
+      WITHDRAW_FREEBET_FUNDS_IX_DISCRIMINATOR => promo_issuer::process_withdraw(accounts, data),
+      CREATE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR => promo_issuer::process_create_ata(accounts, data),
+      CLOSE_PROMO_ISSUER_ATA_IX_DISCRIMINATOR => promo_issuer::process_close_ata(accounts, data),
       ISSUE_FREEBET_IX_DISCRIMINATOR => issue_freebet::process(accounts, data),
       REVOKE_FREEBET_IX_DISCRIMINATOR => revoke_freebet::process(accounts, data),
-
-      // cashout - 70-75
-      FILL_CASHOUT_IX_DISCRIMINATOR => cashout_bet::process(accounts, data),
-      FILL_PARLAY_CASHOUT_IX_DISCRIMINATOR => cashout_parlay::process(accounts, data),
-      FILL_RFQ_CASHOUT_IX_DISCRIMINATOR => cashout_rfq_bet::process(accounts, data),
-      FILL_RFQ_PARLAY_CASHOUT_IX_DISCRIMINATOR => cashout_rfq_parlay::process(accounts, data),
-      CLAIM_CASHOUT_ESCROW_IX_DISCRIMINATOR => claim_cashout_escrow::process(accounts),
-      REVERT_CASHOUT_IX_DISCRIMINATOR => revert_cashout::process(accounts),
+      ISSUE_BOOST_IX_DISCRIMINATOR => issue_boost::process(accounts, data),
+      REVOKE_BOOST_IX_DISCRIMINATOR => revoke_boost::process(accounts, data),
+      
+      // proxies - 200-204
+      GET_QUOTE_PROXY_IX_DISCRIMINATOR => get_quote_proxy::process(accounts, data),
+      GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR => get_parlay_quote_proxy::process(accounts, data),
+      GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR => get_market_quotes_proxy::process(accounts, data),
+      GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR => get_cashout_quote_proxy::process(accounts, data),
+      GET_PARLAY_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR => {
+         get_cashout_parlay_quote_proxy::process(accounts, data)
+      }
 
       // devnet-only admin tooling (254 / 255)
       #[cfg(feature = "devnet")]

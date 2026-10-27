@@ -10,7 +10,7 @@ use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
    constants::MAX_NUMBER_OF_MMS, readers::read_address_ref_unchecked, state::{
-      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, EventGameState, MarketId, account_bet::{BET_FILLER_LEN, BetFiller, BetResult}, ids::MARKET_ID_OPERATOR_OFFSET,
+      BET_ACCOUNT_DISCRIMINATOR, BetAccountHeader, EventGameState, MarketId, PromoType, account_bet::{BET_FILLER_LEN, BetFiller, BetResult}, ids::MARKET_ID_OPERATOR_OFFSET,
    },
 };
 
@@ -65,7 +65,8 @@ impl CashoutAccountHeader {
          amount: self.amount,
          payout: self.payout,
          timestamp: self.timestamp,
-         freebet_id: 0,
+         promo_type: PromoType::None,
+         promo_account: Address::default(),
          event_state_sequence: self.cashout_event_state_sequence,
          event_game_state: self.cashout_event_game_state,
          result: self.result,

@@ -27,11 +27,12 @@ fn placeholder_market_id() -> MarketId {
       period: 0,
       is_pregame: false,
       operator: Address::default(),
+      mint: Address::default(),
    }
 }
 
 /// Packed leg slot used on instruction / account wires.
-trait PackedLeg: Copy + Sized {
+pub(crate) trait PackedLeg: Copy + Sized {
    const LEN: usize;
    fn decode_slot(data: &[u8]) -> Option<Self>;
    fn encode_slot(&self, out: &mut [u8]);
@@ -456,20 +457,28 @@ impl GetQuoteParlayIxData {
    }
 }
 
+/// One packed leg. Callers walk the instruction or account bytes instead of copying the whole table.
+#[inline(always)]
+pub(crate) fn decode_packed_leg<T: PackedLeg>(data: &[u8], index: usize) -> Result<T, ProgramError> {
+   let off = index.checked_mul(T::LEN).ok_or(ProgramError::ArithmeticOverflow)?;
+   let end = off.checked_add(T::LEN).ok_or(ProgramError::ArithmeticOverflow)?;
+   if data.len() < end {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   T::decode_slot(&data[off..end]).ok_or(ProgramError::InvalidInstructionData)
+}
+
 #[inline(always)]
 fn decode_packed_legs_into<T: PackedLeg>(
    data: &[u8],
    num_legs: usize,
    out: &mut [T],
 ) -> Result<(), ProgramError> {
-   let need = num_legs
-      .checked_mul(T::LEN).ok_or(ProgramError::ArithmeticOverflow)?;
-   if data.len() < need || out.len() < num_legs {
+   if out.len() < num_legs {
       return Err(ProgramError::InvalidInstructionData);
    }
    for i in 0..num_legs {
-      let off = i * T::LEN;
-      out[i] = T::decode_slot(&data[off..off + T::LEN]).ok_or(ProgramError::InvalidInstructionData)?;
+      out[i] = decode_packed_leg(data, i)?;
    }
    Ok(())
 }

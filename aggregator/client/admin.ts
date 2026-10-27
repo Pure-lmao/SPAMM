@@ -1,12 +1,15 @@
-import { AGGREGATOR_PROGRAM_ID, BetResult, CONFIG_PDA, decodeAggregatorInstructionData, decodeMmAccountConfig, getBetPda, getBetsData, getCashoutData, getCashoutParlaysData, getCashoutsData, getChangeConfigStatusIx, getConfigPda, getDeregisterMmIx, getForceClosePdaIx, getFreebetFillBetIx, getGradeBetsIx, getGradeParlayIx, getInitFreebetIssuerIx, getInitProgramIx, getIssueFreebetIx, getMmAccountConfigDecoder, getMmConfigPda, getMmEncumbranceData, getMmListData, getMmListPda, getNettingPda, getParlayBetPda, getParlaysData, getSettleBetIx, getSettleParlayIx, getWriteArbitraryDataIx, ODDS_SCALE, readAccountDataRaw, type IssueFreebetIxData } from "spamm-aggregator-sdk";
+import { AGGREGATOR_PROGRAM_ID, BetResult, CONFIG_PDA, decodeAggregatorInstructionData, decodeMmAccountConfig, getBetPda, getBetsData, getCashoutData, getCashoutParlaysData, getCashoutsData, getChangeConfigStatusIx, getConfigPda, getDeregisterMmIx, getForceClosePdaIx, getFreebetFillBetIx, getGradeBetsIx, getGradeParlayIx, getCreatePromoIssuerAtaIx, getInitFreebetIssuerIx, getInitProgramIx, getIssueFreebetIx, getMmAccountConfigDecoder, getMmConfigPda, getMmEncumbranceData, getMmListData, getMmListPda, getNettingPda, getParlayBetPda, getParlaysData, getSettleBetIx, getSettleParlayIx, getWriteArbitraryDataIx, ODDS_SCALE, readAccountDataRaw, type IssueFreebetIxData } from "spamm-aggregator-sdk";
 import { loadKeypairSignerFromJsonFile } from "./utils.ts";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
-import type { Address, Instruction } from "@solana/kit";
+import { address, type Address, type Instruction } from "@solana/kit";
 import { USER_SIGNER } from "./user.ts";
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const clients = createRpcClients();
+
+/** Devnet USDC. Used only where an admin call has no market in scope. */
+const DEVNET_USDC_MINT = address('Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
@@ -103,7 +106,7 @@ async function deregisterMm(mm: Address) {
       throw new Error('MM config account not found');
    }
    const mmConfig = decodeMmAccountConfig(mmConfigRaw);
-   const ix = await getDeregisterMmIx(ADMIN_SIGNER.address, mmConfig.admin, mm);
+   const ix = await getDeregisterMmIx(ADMIN_SIGNER.address, mmConfig.admin, mm, DEVNET_USDC_MINT);
    // const simResult = await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
    // console.log(simResult);
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
@@ -172,15 +175,16 @@ async function getAllAccounts() {
 }
 
 async function initFreebetIssuer() {
-   const ix = await getInitFreebetIssuerIx(ADMIN_SIGNER.address);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   const initIx = await getInitFreebetIssuerIx(ADMIN_SIGNER.address);
+   const ataIx = await getCreatePromoIssuerAtaIx(ADMIN_SIGNER.address, DEVNET_USDC_MINT);
+   const txResult = await sendAndConfirmInstructions([initIx, ataIx], [ADMIN_SIGNER]);
    console.log(txResult);
 }
 // initFreebetIssuer().catch(console.error);
 
 async function issueFreebet(user: Address, freebet: IssueFreebetIxData) {
    const { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators } = freebet;
-   const ix = await getIssueFreebetIx(ADMIN_SIGNER.address, user, { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators });
+   const ix = await getIssueFreebetIx(ADMIN_SIGNER.address, user, { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators }, DEVNET_USDC_MINT);
    const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
    console.log(txResult);
 }

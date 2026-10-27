@@ -9,13 +9,14 @@ use pinocchio::{Address, error::ProgramError, hint::unlikely};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
-   constants::MAX_RFQ_PARLAY_LEGS, readers::{read_address_ref_unchecked, read_u8_unchecked, read_u32_le_unchecked}, state::ids::MARKET_ID_OPERATOR_OFFSET, writers::write_u8_unchecked,
+   constants::MAX_RFQ_PARLAY_LEGS, readers::{read_address_ref_unchecked, read_u8_unchecked, read_u32_le_unchecked}, state::ids::{MARKET_ID_MINT_OFFSET, MARKET_ID_OPERATOR_OFFSET}, writers::write_u8_unchecked,
 };
 
 use super::{
    account_bet::BetResult,
    ids::{EventId},
    mm_parlay_quote::{ParlayLegWire, ParlayLegWireZc, PARLAY_LEG_WIRE_LEN},
+   promo::PromoType,
 };
 
 pub const PARLAY_BET_ACCOUNT_SEED: &[u8] = b"parlay";
@@ -33,7 +34,9 @@ pub struct ParlayBetAccountHeader {
    pub amount: u64,
    pub payout: u64,
    pub timestamp: u32,
-   pub freebet_id: u32,
+   pub promo_type: PromoType,
+   /// Freebet or boost PDA. Default address when `promo_type` is `None`.
+   pub promo_account: Address,
    pub filler_address: Address,
    pub result: BetResult,
    pub num_legs: u8,
@@ -46,8 +49,8 @@ pub const PARLAY_BET_PAYOUT_OFFSET: usize =
    offset_of!(ParlayBetAccountHeaderZc, payout);
 pub const PARLAY_BET_RESULT_OFFSET: usize =
    offset_of!(ParlayBetAccountHeaderZc, result);
-pub const PARLAY_BET_FREEBET_ID_OFFSET: usize =
-   offset_of!(ParlayBetAccountHeaderZc, freebet_id);
+pub const PARLAY_BET_PROMO_TYPE_OFFSET: usize =
+   offset_of!(ParlayBetAccountHeaderZc, promo_type);
 
 /// Within each trailing [`ParlayLegWire`] slot.
 pub const PARLAY_LEG_RESULT_OFFSET: usize = offset_of!(ParlayLegWireZc, result);
@@ -85,7 +88,8 @@ pub struct ParlayBetAccountData {
    pub amount: u64,
    pub payout: u64,
    pub timestamp: u32,
-   pub freebet_id: u32,
+   pub promo_type: PromoType,
+   pub promo_account: Address,
    pub filler_address: Address,
    pub result: BetResult,
    pub num_legs: u8,
@@ -105,7 +109,8 @@ impl ParlayBetAccountData {
          amount: h.amount.into(),
          payout: h.payout.into(),
          timestamp: h.timestamp.into(),
-         freebet_id: h.freebet_id.into(),
+         promo_type: h.promo_type.into(),
+         promo_account: h.promo_account,
          filler_address: h.filler_address,
          result: h.result.into(),
          num_legs: h.num_legs,
@@ -131,7 +136,8 @@ impl ParlayBetAccountData {
          amount: zc.amount.get(),
          payout: zc.payout.get(),
          timestamp: zc.timestamp.get(),
-         freebet_id: zc.freebet_id.get(),
+         promo_type: PromoType::from_u8(zc.promo_type.get())?,
+         promo_account: zc.promo_account,
          filler_address: zc.filler_address,
          result: BetResult::from_u8(zc.result.get())?,
          num_legs: zc.num_legs,
@@ -195,6 +201,12 @@ impl ParlayBetAccountData {
    }
 
    #[inline(always)]
+   pub fn read_leg_mint<'a>(data: &'a [u8], leg_i: usize) -> Result<&'a Address, ProgramError> {
+      let market_id_offset = Self::ensure_leg_in_bounds(data, leg_i)?;
+      unsafe { Ok(read_address_ref_unchecked(data.as_ptr(), market_id_offset + MARKET_ID_MINT_OFFSET)) }
+   }
+
+   #[inline(always)]
    pub fn read_leg_settle_view(
       data: &[u8],
       leg_i: usize,
@@ -244,6 +256,37 @@ impl ParlayBetAccountData {
       }
       for i in 0..n {
          out[i].write(Self::decode_leg(data, i)?);
+      }
+      Ok(())
+   }
+
+   /// Write header + one decoded leg at a time.
+   #[inline(always)]
+   pub fn write_header_and_legs_with<F>(
+      out: &mut [u8],
+      header: &ParlayBetAccountHeader,
+      mut leg_at: F,
+   ) -> Result<(), ProgramError>
+   where
+      F: FnMut(usize) -> Result<ParlayLegWire, ProgramError>,
+   {
+      let n = header.num_legs as usize;
+      let expected = parlay_bet_account_len(n);
+      if unlikely(out.len() != expected || n < 2 || n > MAX_RFQ_PARLAY_LEGS) {
+         return Err(ProgramError::InvalidAccountData);
+      }
+      let hzc = Self::header_to_zc(header);
+      unsafe {
+         core::ptr::write(out.as_mut_ptr().cast(), hzc);
+      }
+      for i in 0..n {
+         let off = PARLAY_BET_HEADER_LEN + i * PARLAY_LEG_WIRE_LEN;
+         let mut leg = leg_at(i)?;
+         leg.result = BetResult::Pending;
+         let zc = leg.to_zc();
+         unsafe {
+            core::ptr::write(out.as_mut_ptr().add(off).cast(), zc);
+         }
       }
       Ok(())
    }

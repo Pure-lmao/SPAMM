@@ -37,7 +37,7 @@ use crate::{
    },
 };
 
-pub const CLAIM_CASHOUT_ESCROW_IX_DISCRIMINATOR: u8 = 74;
+pub const CLAIM_CASHOUT_ESCROW_IX_DISCRIMINATOR: u8 = 94;
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
@@ -66,9 +66,9 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    verify_token_program(token_program)?;
    verify_system_program(system_program)?;
    verify_clock_sysvar(clock_sysvar)?;
-   verify_mint(mint)?;
+   verify_mint(mint, mint.address())?;
    verify_config_pda(config_pda, true)?;
-   verify_token_account(true, user_ata, user, mint, token_program)?;
+   verify_token_account(true, user_ata, user, mint, token_program, false)?;
 
    if unlikely(!address_eq(escrow_pda.owner(), &ID)) {
       return Err(ProgramError::InvalidAccountData);
@@ -88,7 +88,7 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
    if unlikely(!address_eq(escrow_pda.address(), &expected_escrow)) {
       return Err(ProgramError::InvalidSeeds);
    }
-   verify_token_account(true, escrow_ata, escrow_pda, mint, token_program)?;
+   verify_token_account(true, escrow_ata, escrow_pda, mint, token_program, true)?;
 
    let now = clock_unix_timestamp_u32(clock_sysvar)?;
    let ready_at = escrow.timestamp
@@ -105,7 +105,7 @@ pub fn process(accounts: &mut [AccountView]) -> ProgramResult {
       return Err(SpammError::CashoutMustRevert.into());
    }
 
-   verify_token_account(true, original_bet_ata, original_bet_pda, mint, token_program)?;
+   verify_token_account(true, original_bet_ata, original_bet_pda, mint, token_program, true)?;
 
    let orig_id_bytes = escrow.orig_bet_id.to_le_bytes();
    let bump_bytes = [escrow.bump];

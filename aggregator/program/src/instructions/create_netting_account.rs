@@ -8,7 +8,7 @@
 //! 4. `rent_sysvar` (readonly)
 //! 5. `system_program` (readonly)
 //!
-//! Data: `{event_id: EventId}`
+//! Data: [`NettingScopeIxData`] — event id, operator, mint.
 
 use pinocchio::{
    AccountView, ProgramResult, address::address_eq, cpi::{Seed, Signer},
@@ -21,11 +21,12 @@ use crate::{
    ID,
    helpers::{find_netting_pda, get_rent, verify_mm_admin, verify_mm_program_executable, verify_rent_sysvar, verify_signer, verify_system_program},
    state::{
-      EventId, NETTING_ACCOUNT_ALLOC_LEN, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_SEED, account_netting::NettingPdaDataHeaderZc
+      NETTING_ACCOUNT_ALLOC_LEN, NETTING_PDA_DISCRIMINATOR, NETTING_PDA_SEED, NettingScopeIxData,
+      account_netting::NettingPdaDataHeaderZc,
    },
 };
 
-pub const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 40;
+pub const CREATE_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 130;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -46,13 +47,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_system_program(&system_program)?;
    verify_mm_program_executable(&mm_program_account)?;
 
-   let event_id = match EventId::decode(data) {
-      Some(v) => v,
-      None => {
-         log!("create_netting_account: data length is invalid");
-         return Err(ProgramError::InvalidInstructionData);
-      }
-   };
+   let scope = NettingScopeIxData::decode(data)?;
+   let event_id = scope.event_id;
 
    if unlikely(
       netting_pda.lamports() > 0 || netting_pda.data_len() != 0,
@@ -64,7 +60,12 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    }
 
    let event_id_wire = event_id.as_wire_bytes();
-   let (pda, bump) = find_netting_pda(mm_program_account.address(), &event_id_wire);
+   let (pda, bump) = find_netting_pda(
+      mm_program_account.address(),
+      &event_id_wire,
+      &scope.operator,
+      &scope.mint,
+   );
    if unlikely(!address_eq(netting_pda.address(), &pda)) {
       log!("create_netting_account: netting pda is invalid");
       return Err(ProgramError::InvalidSeeds);
@@ -75,6 +76,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       Seed::from(NETTING_PDA_SEED),
       Seed::from(mm_program_account.address().as_ref()),
       Seed::from(event_id_wire.as_slice()),
+      Seed::from(scope.operator.as_ref()),
+      Seed::from(scope.mint.as_ref()),
       Seed::from(&bump_seed),
    ];
    let signers = [Signer::from(&signer_seeds)];

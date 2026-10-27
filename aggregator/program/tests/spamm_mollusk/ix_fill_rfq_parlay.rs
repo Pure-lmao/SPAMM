@@ -90,7 +90,7 @@ fn fill_rfq_parlay_two_legs_success() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -124,7 +124,7 @@ fn fill_rfq_parlay_bad_signature_rejected() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -154,7 +154,7 @@ fn fill_rfq_parlay_odds_below_scale_rejected() {
       odds_scaled: bad_odds,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -186,7 +186,7 @@ fn fill_rfq_parlay_leg_odds_product_mismatch_rejected() {
       odds_scaled: wrong_combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -218,7 +218,7 @@ fn fill_rfq_parlay_expired_quote() {
       odds_scaled: combined,
       offer_expiry: 0,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -250,7 +250,7 @@ fn fill_rfq_parlay_amount_exceeds_max_stake() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -283,7 +283,7 @@ fn fill_rfq_parlay_replay_bet_id() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let r1 = env.run_ix(fill_rfq_parlay_instruction(&data, &sig, bet, bat));
    assert!(r1.program_result.is_ok(), "first fill {:?}", r1);
@@ -324,7 +324,7 @@ fn fill_rfq_parlay_wrong_user_in_signed_message() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -364,7 +364,7 @@ fn fill_rfq_parlay_paused() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -395,7 +395,7 @@ fn fill_rfq_parlay_bad_mm_config() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let mut metas = fill_rfq_parlay_metas(bet, bat);
    let bad_cfg = Pubkey::new_unique();
@@ -440,7 +440,7 @@ fn fill_rfq_parlay_max_legs_success() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: n,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -475,7 +475,7 @@ fn craft_rfq_parlay_wire_with_num_legs(
       odds_scaled,
       offer_expiry,
       num_legs: 2,
-      legs,
+      legs: Box::new(legs),
    };
    let mut w = vec![0u8; FillRfqParlayIxData::wire_len(2)];
    data
@@ -559,7 +559,7 @@ fn fill_rfq_parlay_event_rule_violation() {
       odds_scaled,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -591,7 +591,7 @@ fn fill_rfq_parlay_insufficient_liquidity() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let ix = fill_rfq_parlay_instruction(&data, &sig, bet, bat);
    let r = env.run_ix(ix);
@@ -626,7 +626,7 @@ fn fill_rfq_parlay_grade_settle_e2e() {
       odds_scaled: combined,
       offer_expiry: RFQ_OFFER_EXPIRY,
       num_legs: 2,
-      legs: table,
+      legs: Box::new(table),
    };
    let fill = env.run_ix(fill_rfq_parlay_instruction(&data, &sig, bet, bat));
    assert!(fill.program_result.is_ok(), "{:?}", fill);

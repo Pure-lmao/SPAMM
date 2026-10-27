@@ -76,12 +76,15 @@ fn fill_netting_m4_bet_and_grade(env: &mut Env, bet_id: u64, result: u8) {
       period: 1,
       is_pregame: true,
       operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
    };
    let body = oracle_body_two_outcome(20_000, 20_000);
    let _ = env.bootstrap_mm_with_markets(&[(mid, body.as_slice())]);
    env.create_netting_for_soccer_event();
    let add = AddLineToLiabilityNettingIxData {
       event_id: eid,
+      operator: crate::common::fixtures::market_operator(),
+      mint: crate::common::fixtures::mint_pubkey(),
       period: 1,
       mkt: 4,
    };

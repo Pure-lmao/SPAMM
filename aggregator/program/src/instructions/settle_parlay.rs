@@ -16,7 +16,7 @@
 //! 11. `mm_encumbrance_pda` (writable)
 //! 12. `mm_liability_token_account` (writable)
 //! 13. `cashout_escrow_pda` (readonly) — must be unused for this ticket
-//! 14. `dest_encumbrance` (readonly) — filling MM encumbrance when settling a cashout; ignored otherwise
+//! 14. `dest_encumbrance` (writable on cashout) — filling MM encumbrance when settling a cashout; ignored otherwise
 //!
 //! Data: None
 
@@ -36,19 +36,19 @@ use crate::{ID,
       verify_mm_encumbrance_pda, verify_signer, verify_token_account, verify_token_program,
       cashout_helpers::require_no_live_cashout_escrow,
       verify_cashout_parlay_pda, verify_parlay_pda,
-      freebet_helpers::{require_is_freebet, require_not_freebet},
+      freebet_helpers::{require_is_freebet, require_not_promo},
       parlay_helpers::{compute_modified_cashout_parlay_settlement_from_account, compute_modified_parlay_settlement_from_account},
    }, 
    state::{
-      PARLAY_BET_ACCOUNT_SEED, ParlayBetAccountData,
+      PARLAY_BET_ACCOUNT_SEED, ParlayBetAccountData, PromoType,
       CashoutParlayAccountData, CASHOUT_PARLAY_ACCOUNT_DISCRIMINATOR, CASHOUT_PARLAY_ACCOUNT_SEED,
       CASHOUT_PARLAY_ACCOUNT_MIN_LEN,
-      account_bet::BetResult, 
+      account_bet::BetResult,
       other::{MM_ENCUMBRANCE_PDA_ENCUMBRANCE_OFFSET, MM_ENCUMBRANCE_PDA_SEED},
    }, writers::write_u64_le_unchecked
 };
 
-pub const SETTLE_PARLAY_IX_DISCRIMINATOR: u8 = 26;
+pub const SETTLE_PARLAY_IX_DISCRIMINATOR: u8 = 111;
 
 pub(crate) struct SettleParlayTicket {
    pub(crate) bump: u8,
@@ -57,7 +57,8 @@ pub(crate) struct SettleParlayTicket {
    pub(crate) bet_id: u64,
    pub(crate) amount: u64,
    pub(crate) payout: u64,
-   pub(crate) freebet_id: u32,
+   pub(crate) promo_type: PromoType,
+   pub(crate) promo_account: Address,
    pub(crate) filler_address: Address,
    pub(crate) bet_result: BetResult,
    pub(crate) num_legs: u8,
@@ -98,7 +99,8 @@ pub(crate) fn decode_settle_parlay_ticket(
          bet_id: h.cashout_id,
          amount: h.amount,
          payout: h.payout,
-         freebet_id: 0,
+         promo_type: PromoType::None,
+         promo_account: Address::default(),
          filler_address: h.original_filler_address,
          bet_result: h.result,
          num_legs: h.num_legs,
@@ -119,7 +121,8 @@ pub(crate) fn decode_settle_parlay_ticket(
          bet_id: header.bet_id,
          amount: header.amount,
          payout: header.payout,
-         freebet_id: header.freebet_id,
+         promo_type: header.promo_type,
+         promo_account: header.promo_account,
          filler_address: header.filler_address,
          bet_result: header.result,
          num_legs: header.num_legs,
@@ -194,11 +197,10 @@ pub(crate) fn settle_parlay_core(
    dest_encumbrance: Option<&AccountView>,
    expect_freebet: bool,
    prechecked_ticket: Option<SettleParlayTicket>,
-) -> Result<(BetResult, u64, u32), ProgramError> {
+) -> Result<(BetResult, u64, u64), ProgramError> {
    verify_signer(&signer)?;
    verify_config_pda(&our_config_pda, true)?;
    verify_token_program(token_program)?;
-   verify_mint(&mint)?;
 
    let freebet_ticket_verified = prechecked_ticket.is_some();
    let (ticket, is_cashout) = match prechecked_ticket {
@@ -208,6 +210,15 @@ pub(crate) fn settle_parlay_core(
       }
       None => decode_settle_parlay_ticket(bet_account, expect_freebet)?,
    };
+   let bet_mint = {
+      let raw = bet_account.try_borrow()?;
+      if is_cashout {
+         *CashoutParlayAccountData::read_leg_mint(raw.as_ref(), 0)?
+      } else {
+         *ParlayBetAccountData::read_leg_mint(raw.as_ref(), 0)?
+      }
+   };
+   verify_mint(&mint, &bet_mint)?;
    let SettleParlayTicket {
       bump,
       owner,
@@ -215,7 +226,8 @@ pub(crate) fn settle_parlay_core(
       bet_id,
       amount,
       payout,
-      freebet_id,
+      promo_type,
+      promo_account: _promo_account,
       filler_address,
       bet_result,
       num_legs,
@@ -253,9 +265,9 @@ pub(crate) fn settle_parlay_core(
    }
    if !freebet_ticket_verified {
       if expect_freebet {
-         require_is_freebet(freebet_id)?;
+         require_is_freebet(promo_type)?;
       } else {
-         require_not_freebet(freebet_id)?;
+         require_not_promo(promo_type)?;
       }
    }
 
@@ -270,18 +282,19 @@ pub(crate) fn settle_parlay_core(
       let Some(dest) = dest_encumbrance else {
          return Err(ProgramError::NotEnoughAccountKeys);
       };
-      if verify_mm_encumbrance_pda(dest, user).is_none() {
+      if verify_mm_encumbrance_pda(dest, user, mint.address()).is_none() {
          log!("settle_parlay: cashout dest encumbrance invalid");
          return Err(ProgramError::InvalidInstructionData);
       }
-      verify_token_account(true, profit_dest_ata, dest, mint, token_program)?;
+      verify_token_account(true, profit_dest_ata, dest, mint, token_program, true)?;
    } else {
-      verify_token_account(true, profit_dest_ata, user, mint, token_program)?;
+      verify_token_account(true, profit_dest_ata, user, mint, token_program, false)?;
    }
 
    verify_token_account(true,
       &bet_ata, bet_account,
-      &mint, &token_program
+      &mint, &token_program,
+      true,
    )?;
 
    if unlikely(!address_eq(&filler_address, mm_address.address())) {
@@ -297,13 +310,15 @@ pub(crate) fn settle_parlay_core(
    let Some(valid_mm_encumbrance_pda_bump) = verify_mm_encumbrance_pda(
       mm_encumbrance_pda,
       mm_address,
+      mint.address(),
    ) else {
       return Err(ProgramError::InvalidInstructionData);
    };
 
    verify_token_account(true,
       &mm_liability_token_account, mm_encumbrance_pda,
-      &mint, &token_program
+      &mint, &token_program,
+      true,
    )?;
 
    let potential_profit = payout.checked_sub(amount).ok_or_else(|| ProgramError::ArithmeticOverflow)?;
@@ -344,6 +359,7 @@ pub(crate) fn settle_parlay_core(
    let encumbrance_pda_signer_seeds = [
       Seed::from(MM_ENCUMBRANCE_PDA_SEED),
       Seed::from(mm_address.address().as_ref()),
+      Seed::from(mint.address().as_ref()),
       Seed::from(&encumbrance_pda_bump_seed[..]),
    ];
 
@@ -425,10 +441,17 @@ pub(crate) fn settle_parlay_core(
       }
    }
 
+   if is_cashout {
+      let Some(dest) = dest_encumbrance else {
+         return Err(ProgramError::NotEnoughAccountKeys);
+      };
+      crate::helpers::bump_open_cashout_tickets(dest, -1)?;
+   }
+
    close_pda_return_rent(
       bet_account,
       bet_feepayer,
    )?;
 
-   Ok((bet_result, amount, freebet_id))
+   Ok((bet_result, amount, amount_to_user_from_filler_liability_token_account))
 }

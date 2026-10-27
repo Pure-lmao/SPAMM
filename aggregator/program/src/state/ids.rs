@@ -75,19 +75,24 @@ pub struct MarketId {
    pub is_pregame: bool,
    /// Address responsible for grading bets on this market.
    pub operator: Address,
+   /// SPL mint this market settles in.
+   pub mint: Address,
 }
 pub const MARKET_ID_LEN: usize = <MarketId as ZeroPodFixed>::SIZE;
 
-/// `MarketId` wire bytes before `operator`.
-pub const MARKET_ID_BODY_WIRE_LEN: usize = MARKET_ID_LEN - ADDRESS_LEN;
+/// `MarketId` wire bytes before `operator` and `mint`.
+pub const MARKET_ID_BODY_WIRE_LEN: usize = MARKET_ID_LEN - 2 * ADDRESS_LEN;
 pub const MARKET_ID_OPERATOR_OFFSET: usize = MARKET_ID_BODY_WIRE_LEN;
+pub const MARKET_ID_MINT_OFFSET: usize = MARKET_ID_OPERATOR_OFFSET + ADDRESS_LEN;
 pub const MARKET_ID_OPERATOR_WIRE_LEN: usize = ADDRESS_LEN;
 
 
-/// PDA seeds: `["market_data", market_id_body_wire, operator]` — body is the legacy `MarketId` wire without `operator`.
+/// PDA seeds: `["market_data", body, operator, mint]`. Body excludes the two trailing addresses.
 #[inline(always)]
-pub fn market_id_pda_seed_parts(wire: &[u8; MARKET_ID_LEN]) -> (&[u8], &[u8]) {
-   wire.split_at(MARKET_ID_BODY_WIRE_LEN)
+pub fn market_id_pda_seed_parts(wire: &[u8; MARKET_ID_LEN]) -> (&[u8], &[u8], &[u8]) {
+   let (body, tail) = wire.split_at(MARKET_ID_BODY_WIRE_LEN);
+   let (operator, mint) = tail.split_at(ADDRESS_LEN);
+   (body, operator, mint)
 }
 
 /// `EventId` is the leading packed field of `MarketId` wire — no extra encode.
@@ -141,6 +146,7 @@ impl MarketId {
       && self.period == other.period
       && self.is_pregame == other.is_pregame
       && self.operator == other.operator
+      && self.mint == other.mint
    }
 
    #[inline(always)]
@@ -152,6 +158,7 @@ impl MarketId {
          period: self.period,
          is_pregame: self.is_pregame.into(),
          operator: self.operator,
+         mint: self.mint,
       }
    }
 
@@ -164,6 +171,7 @@ impl MarketId {
          period: z.period,
          is_pregame: z.is_pregame.get(),
          operator: z.operator,
+         mint: z.mint,
       })
    }
 

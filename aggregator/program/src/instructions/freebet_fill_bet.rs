@@ -1,4 +1,4 @@
-//! Freebet auction fill for a single bet (disc 15). Stake from issuer ATA.
+//! Freebet auction fill for a single bet (disc 20). Stake from issuer ATA.
 //!
 //! Accounts: **14** then **9 × N** (`N` = number of market makers).
 //!
@@ -39,10 +39,10 @@ use crate::{
       decode_and_verify_freebet_for_ix, mark_freebet_used,
    },
    instructions::fill_bet::{FillBetStake, run_fill_bet},
-   state::FreebetFillBetIxData,
+   state::{FreebetFillBetIxData, PromoType},
 };
 
-pub const FREEBET_FILL_BET_IX_DISCRIMINATOR: u8 = 15;
+pub const FREEBET_FILL_BET_IX_DISCRIMINATOR: u8 = 20;
 
 #[inline(never)]
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
@@ -90,7 +90,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_account: issuer_ata,
          authority: issuer_pda,
          issuer_sign: Some((issuer_bump, auth)),
-         freebet_id,
+         promo_type: PromoType::Freebet,
+         promo_account: *freebet_pda.address(),
          freebet: Some(&fb),
       },
    )?;

@@ -29,8 +29,11 @@ pub fn mm_list_pda() -> Pubkey {
 }
 
 pub fn mint_pubkey() -> Pubkey {
-   // Must match `spamm_aggregator::constants::MINT` (cluster-specific USDC).
-   Pubkey::new_from_array(*spamm_aggregator::constants::MINT.as_array())
+   // Devnet USDC. Markets and vaults in this harness use this mint unless a test builds another.
+   Pubkey::new_from_array([
+      0xe9, 0x28, 0x39, 0x55, 0x09, 0x65, 0xff, 0xd4, 0xd6, 0x4a, 0xca, 0xaf, 0x46, 0xd4, 0x5d, 0xf7,
+      0x31, 0x8e, 0x5b, 0x4f, 0x57, 0xc9, 0x0c, 0x48, 0x7d, 0x60, 0x62, 0x5d, 0x82, 0x9b, 0x83, 0x7b,
+   ])
 }
 
 pub fn init_program_ix_data() -> Vec<u8> {
@@ -185,8 +188,8 @@ pub fn market_id_wire_bytes(m: &MarketId) -> [u8; MarketId::WIRE_SIZE] {
 
 pub fn market_data_pda(mid: &MarketId) -> Pubkey {
    let w = market_id_wire_bytes(mid);
-   let (body, operator) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
-   Pubkey::find_program_address(&[b"market_data", body, operator], &mm_program_id()).0
+   let (body, operator, mint) = spamm_aggregator::state::market_id_pda_seed_parts(&w);
+   Pubkey::find_program_address(&[b"market_data", body, operator, mint], &mm_program_id()).0
 }
 
 /// Pregame two-outcome moneyline (`period` 0, `mkt` 0) — nets via netting PDA header on non-soccer sports.
@@ -198,6 +201,7 @@ pub fn market_ml_pregame(eid: EventId) -> MarketId {
       period: 0,
       is_pregame: true,
       operator: market_operator(),
+      mint: mint_pubkey(),
    }
 }
 
@@ -218,6 +222,7 @@ pub fn market_spread_pregame(eid: EventId) -> MarketId {
       period: 1,
       is_pregame: true,
       operator: market_operator(),
+      mint: mint_pubkey(),
    }
 }
 
@@ -229,6 +234,7 @@ pub fn market_soccer_ft_pregame(eid: EventId) -> MarketId {
       period: 1,
       is_pregame: true,
       operator: market_operator(),
+      mint: mint_pubkey(),
    }
 }
 
@@ -272,7 +278,7 @@ pub fn user_collateral_ata() -> Pubkey {
 
 pub fn encumbrance_pda() -> Pubkey {
    Pubkey::find_program_address(
-      &[b"encumbrance", mm_program_id().as_ref()],
+      &[b"encumbrance", mm_program_id().as_ref(), mint_pubkey().as_ref()],
       &agg_program_id(),
    )
    .0
@@ -290,7 +296,13 @@ pub fn liability_token_ata() -> Pubkey {
 pub fn netting_pda_for_event(eid: &EventId) -> Pubkey {
    let e = eid.as_wire_bytes();
    Pubkey::find_program_address(
-      &[b"netting", mm_program_id().as_ref(), e.as_slice()],
+      &[
+         b"netting",
+         mm_program_id().as_ref(),
+         e.as_slice(),
+         market_operator().as_ref(),
+         mint_pubkey().as_ref(),
+      ],
       &agg_program_id(),
    )
    .0

@@ -3,6 +3,8 @@
 use pinocchio::{Address, error::ProgramError};
 use zeropod::{ZeroPod, ZeroPodFixed};
 
+use super::account_parlay_bet::ParlayBetAccountData;
+use super::ix_fill_parlay_cashout::CashoutSnapshot;
 use crate::{
    constants::MAX_RFQ_PARLAY_LEGS,
    readers::read_u64_le_unchecked,
@@ -279,4 +281,44 @@ pub fn write_get_cashout_quote_parlay_ix(
       &mut out[GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN..],
       &legs[..num_legs],
    )
+}
+
+/// Same wire as [`write_get_cashout_quote_parlay_ix`], reading one bet-account leg at a time.
+#[inline(never)]
+pub fn write_cashout_quote_parlay_from_bet(
+   out: &mut [u8],
+   amount: u64,
+   payout: u64,
+   min_payout: u64,
+   num_legs: usize,
+   bet: &[u8],
+   snapshots: &[CashoutSnapshot],
+) -> Result<(), ProgramError> {
+   let expected = get_cashout_quote_parlay_ix_wire_len(num_legs);
+   if out.len() != expected || num_legs < 2 || num_legs > MAX_RFQ_PARLAY_LEGS || snapshots.len() < num_legs {
+      return Err(ProgramError::InvalidInstructionData);
+   }
+   let hzc = GetCashoutQuoteParlayIxHeaderZc {
+      instruction_discriminator: GET_CASHOUT_QUOTE_PARLAY_IX_DISCRIMINATOR,
+      amount: amount.into(),
+      payout: payout.into(),
+      min_payout: min_payout.into(),
+      num_legs: num_legs as u8,
+   };
+   unsafe {
+      core::ptr::write(out.as_mut_ptr().cast(), hzc);
+   }
+   for i in 0..num_legs {
+      let leg = ParlayBetAccountData::decode_leg(bet, i)?;
+      let snap = &snapshots[i];
+      let sel = ParlayLegSel {
+         market_id: leg.market_id,
+         side: leg.side,
+         event_state_sequence: snap.event_state_sequence,
+         event_game_state: snap.event_game_state,
+      };
+      let off = GET_CASHOUT_QUOTE_PARLAY_IX_HEADER_LEN + i * PARLAY_LEG_SEL_LEN;
+      write_parlay_leg_sels(&mut out[off..off + PARLAY_LEG_SEL_LEN], &[sel])?;
+   }
+   Ok(())
 }

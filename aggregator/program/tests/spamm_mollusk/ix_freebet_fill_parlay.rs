@@ -53,7 +53,8 @@ fn freebet_fill_parlay_success() {
    ));
    assert_ok_record_cu("freebet_fill_parlay/success", &r);
    let pd = decode_parlay_bet(&env, &bet);
-   assert_eq!(pd.freebet_id, FREEBET_ID_BASIC);
+   assert_eq!(pd.promo_type, spamm_aggregator::state::PromoType::Freebet);
+   assert_eq!(pd.promo_account.as_ref(), crate::common::freebet_pda(FREEBET_ID_BASIC).as_ref());
    assert_eq!(pd.amount, STAKE);
 }
 

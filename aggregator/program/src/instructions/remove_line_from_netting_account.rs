@@ -18,7 +18,7 @@ use crate::{
 
 
 
-pub const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 42;
+pub const REMOVE_LINE_FROM_NETTING_ACCOUNT_IX_DISCRIMINATOR: u8 = 132;
 
 pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    let [
@@ -36,11 +36,16 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    verify_mm_admin(&admin, &mm_program, &mm_config_pda)?;
 
    let parsed_data = RemoveLineFromLiabilityNettingIxData::decode(data)?;
-   let event_id = parsed_data.event_id;
    let period = parsed_data.period;
    let mkt = parsed_data.mkt;
 
-   if !verify_netting_pda(netting_pda, mm_program, &event_id.as_wire_bytes()) {
+   if !verify_netting_pda(
+      netting_pda,
+      mm_program,
+      &parsed_data.event_id.as_wire_bytes(),
+      &parsed_data.operator,
+      &parsed_data.mint,
+   ) {
       log!("remove_line_from_netting_account: invalid netting pda");
       return Err(ProgramError::InvalidAccountData);
    }

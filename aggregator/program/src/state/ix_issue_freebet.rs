@@ -3,7 +3,7 @@ use pinocchio_log::log;
 use zeropod::{ZeroPod, ZeroPodFixed};
 
 use crate::{
-   constants::{ADDRESS_LEN, MAX_FREEBET_ALLOWED_MMS, MAX_FREEBET_ALLOWED_OPERATORS, MIN_BET_AMOUNT},
+   constants::{ADDRESS_LEN, MAX_PROMO_ALLOWED_MMS, MAX_PROMO_ALLOWED_OPERATORS},
    readers::read_address_ref_unchecked,
 };
 
@@ -32,8 +32,8 @@ pub struct IssueFreebetIxData {
    pub min_legs: u8,
    pub num_mms: u8,
    pub num_operators: u8,
-   pub allowed_mms: [Address; MAX_FREEBET_ALLOWED_MMS],
-   pub allowed_operators: [Address; MAX_FREEBET_ALLOWED_OPERATORS],
+   pub allowed_mms: [Address; MAX_PROMO_ALLOWED_MMS],
+   pub allowed_operators: [Address; MAX_PROMO_ALLOWED_OPERATORS],
 }
 
 impl IssueFreebetIxData {
@@ -46,7 +46,7 @@ impl IssueFreebetIxData {
          .map_err(|_| ProgramError::InvalidInstructionData)?;
       let num_mms = zc.num_mms as usize;
       let num_operators = zc.num_operators as usize;
-      if unlikely(num_mms > MAX_FREEBET_ALLOWED_MMS || num_operators > MAX_FREEBET_ALLOWED_OPERATORS)
+      if unlikely(num_mms > MAX_PROMO_ALLOWED_MMS || num_operators > MAX_PROMO_ALLOWED_OPERATORS)
       {
          return Err(ProgramError::InvalidInstructionData);
       }
@@ -58,21 +58,21 @@ impl IssueFreebetIxData {
       let min_odds_scaled = zc.min_odds_scaled.get();
       let max_odds_scaled = zc.max_odds_scaled.get();
       let freebet_id = zc.freebet_id.get();
-      if unlikely(amount == 0 || amount < MIN_BET_AMOUNT || max_odds_scaled < min_odds_scaled || min_odds_scaled == 0) {
+      if unlikely(amount == 0 || max_odds_scaled < min_odds_scaled || min_odds_scaled == 0) {
          return Err(ProgramError::InvalidInstructionData);
       }
       if unlikely(freebet_id == 0) {
          log!("issue_freebet: freebet_id 0 reserved");
          return Err(ProgramError::InvalidInstructionData);
       }
-      let mut allowed_mms = [Address::default(); MAX_FREEBET_ALLOWED_MMS];
+      let mut allowed_mms = [Address::default(); MAX_PROMO_ALLOWED_MMS];
       for i in 0..num_mms {
          allowed_mms[i] = *unsafe {
             read_address_ref_unchecked(data.as_ptr(), ISSUE_FREEBET_IX_HEADER_LEN + i * ADDRESS_LEN)
          };
       }
       let ops_off = ISSUE_FREEBET_IX_HEADER_LEN + num_mms * ADDRESS_LEN;
-      let mut allowed_operators = [Address::default(); MAX_FREEBET_ALLOWED_OPERATORS];
+      let mut allowed_operators = [Address::default(); MAX_PROMO_ALLOWED_OPERATORS];
       for i in 0..num_operators {
          allowed_operators[i] = *unsafe {
             read_address_ref_unchecked(data.as_ptr(), ops_off + i * ADDRESS_LEN)

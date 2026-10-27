@@ -20,6 +20,7 @@ export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
 const WCMarketMaker = "WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address;
 const operator = "BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW" as Address;
+const mint = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr" as Address;
 
 const betId = 100002n;
 const sport = 2 as Sport;
@@ -34,6 +35,7 @@ const marketId: MarketId = {
    isPregame: true,
    player: 0n,
    operator,
+   mint,
 };
 const marketId2: MarketId = {
    eventId: {
@@ -46,6 +48,7 @@ const marketId2: MarketId = {
    isPregame: true,
    player: 0n,
    operator,
+   mint,
 };
 const marketIdSame: MarketId = {
    eventId: {
@@ -58,6 +61,7 @@ const marketIdSame: MarketId = {
    isPregame: true,
    player: 0n,
    operator,
+   mint,
 }
 
 const side = 0;

@@ -7,6 +7,9 @@ export const SIM_FEE_PAYER_ADDRESS = address("BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBi
 /** Market operator embedded in `MarketId` (grading authority for dev). */
 export const DEFAULT_MARKET_OPERATOR = SIM_FEE_PAYER_ADDRESS;
 
+/** Devnet USDC. UI markets quote this mint until an operator picks another. */
+export const DEFAULT_MARKET_MINT = address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
+
 export const EVENT_GAME_STATE_PG = getEventGameState("PG", 0, 0, 0, 0);
 
 export const DEFAULT_EVENT_STATE_SEQUENCE = 1;
@@ -35,6 +38,7 @@ export function buildMarketId(
    period: number,
    player: bigint = 0n,
    operator: Address = DEFAULT_MARKET_OPERATOR,
+   mint: Address = DEFAULT_MARKET_MINT,
 ) {
    return {
       eventId: { event: BigInt(eventId), league: leagueId, sport },
@@ -43,5 +47,6 @@ export function buildMarketId(
       isPregame: true,
       player,
       operator,
+      mint,
    };
 }

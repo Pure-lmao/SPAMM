@@ -11,9 +11,9 @@ export const EVENT_GAME_STATE_LEN = 8;
 
 /** `update_event_state` payload length (after discriminator byte). `EventId::WIRE_SIZE` + `u16` + `EventGameState`. */
 export const UPDATE_EVENT_STATE_IX_PAYLOAD_LEN = EVENT_ID_WIRE_SIZE + 2 + EVENT_GAME_STATE_LEN;
-/** `MarketId` wire without `operator` (legacy pre-operator layout; used as a PDA seed). */
+/** `MarketId` wire without `operator` and `mint`. */
 export const MARKET_ID_BODY_WIRE_SIZE = EVENT_ID_WIRE_SIZE + U64_LEN + 2 + 1 + 1;
-export const MARKET_ID_WIRE_SIZE = MARKET_ID_BODY_WIRE_SIZE + ADDRESS_LEN;
+export const MARKET_ID_WIRE_SIZE = MARKET_ID_BODY_WIRE_SIZE + ADDRESS_LEN + ADDRESS_LEN;
 /** MM `["config"]` PDA header (`disc` + `bump` + `admin` + `rfq_signer`). Account may be longer. */
 export const MM_CONFIG_PDA_HEADER_LEN = 1 + 1 + ADDRESS_LEN + ADDRESS_LEN;
 
@@ -95,6 +95,7 @@ export type MarketId = {
    period: number;
    isPregame: boolean;
    operator: Address;
+   mint: Address;
 };
 
 /** Packed live snapshot (`aggregator/program` `other.rs`). */
