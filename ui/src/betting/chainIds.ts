@@ -15,18 +15,6 @@ export function apiSportToSdk(sportId: number): Sport {
    return sportId as Sport;
 }
 
-function parseAddressOr(raw: string | undefined | null, fallback: Address): Address {
-   const t = raw?.trim() ?? "";
-   if (t === "") {
-      return fallback;
-   }
-   try {
-      return address(t);
-   } catch {
-      return fallback;
-   }
-}
-
 export function buildMarketId(
    eventId: number,
    leagueId: number,

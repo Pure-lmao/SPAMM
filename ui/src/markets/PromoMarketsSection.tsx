@@ -132,6 +132,9 @@ export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSection
                   mkt_string: "PROMO",
                   period_id: promo.period_id,
                   line_value: null,
+                  operator: promo.operator,
+                  mint: promo.mint,
+                  sport_id: promo.sport_id,
                };
 
                const pickYes = () => {

@@ -29,7 +29,6 @@ import {
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { loadKeypairSignerFromJsonFile } from './utils.ts';
 import { USER_SIGNER } from './user.ts';
-import { ADMIN_SIGNER } from './admin.ts';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const clients = createRpcClients();
