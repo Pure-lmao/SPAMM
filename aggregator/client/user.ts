@@ -14,8 +14,8 @@ const clients = createRpcClients();
 export const USER_SIGNER = await loadKeypairSignerFromJsonFile(
    path.join(__dirname, "user_devnet_keypair.json"),
 );
-export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
-   path.join(__dirname, 'admin_devnet_keypair.json'),
+export const MARKET_OPERATOR_SIGNER = await loadKeypairSignerFromJsonFile(
+   path.join(__dirname, 'YLmo_admin_keypair.json'),
 );
 const DumbMarketMaker = "DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address;
 const WCMarketMaker = "WCMM5EzCxZAEC3JhMa7zt3mTJ6jUGJCf7BB26Tw87jr" as Address;
@@ -376,7 +376,7 @@ async function placeFreebet() {
       minOddsScaled: 11n*ODDS_SCALE/10n,
       eventStateSequence,
       eventGameState,
-   }, USER_SIGNER.address, USER_SIGNER.address, ADMIN_SIGNER.address, 1, [DumbMarketMaker], true);
+   }, USER_SIGNER.address, USER_SIGNER.address, MARKET_OPERATOR_SIGNER.address, 1, [DumbMarketMaker], true);
    const txResult = await sendAndConfirmInstructions([ix], [USER_SIGNER]);
    console.log(txResult);
 }

@@ -179,20 +179,20 @@ async function getAllAccounts() {
    }
 }
 
-// async function initFreebetIssuer() {
-//    const initIx = await getInitFreebetIssuerIx(.address);
-//    const ataIx = await getCreatePromoIssuerAtaIx(.address, DEVNET_USDC_MINT);
-//    const txResult = await sendAndConfirmInstructions([initIx, ataIx], []);
-//    console.log(txResult);
-// }
-// // initFreebetIssuer().catch(console.error);
+async function initFreebetIssuer() {
+   const initIx = await getInitFreebetIssuerIx(MARKET_OPERATOR_SIGNER.address);
+   const ataIx = await getCreatePromoIssuerAtaIx(MARKET_OPERATOR_SIGNER.address, DEVNET_USDC_MINT);
+   const txResult = await sendAndConfirmInstructions([initIx, ataIx], [MARKET_OPERATOR_SIGNER]);
+   console.log(txResult);
+}
+// initFreebetIssuer().catch(console.error);
 
-// async function issueFreebet(user: Address, freebet: IssueFreebetIxData) {
-//    const { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators } = freebet;
-//    const ix = await getIssueFreebetIx(=.address, user, { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators }, DEVNET_USDC_MINT);
-//    const txResult = await sendAndConfirmInstructions([ix], [=]);
-//    console.log(txResult);
-// }
+async function issueFreebet(user: Address, freebet: IssueFreebetIxData) {
+   const { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators } = freebet;
+   const ix = await getIssueFreebetIx(MARKET_OPERATOR_SIGNER.address, user, { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators }, DEVNET_USDC_MINT);
+   const txResult = await sendAndConfirmInstructions([ix], [MARKET_OPERATOR_SIGNER]);
+   console.log(txResult);
+}
 // issueFreebet("7WPLMihTFitMujMCiintKSnxBL51vQeTZPSvXpejnPCP" as Address, {
 //    freebetId: 10003,
 //    expiry: Math.floor(Date.now() / 1000) + 60*60*24*5,

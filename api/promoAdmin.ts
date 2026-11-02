@@ -15,7 +15,7 @@ import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } fro
 import { BetResult, getBetsData, getGradeBetsIx} from "spamm-aggregator-sdk";
 import { MAX_PROMO_ALLOWED } from "../promo/backend/src/codex.ts";
 import { ODDS_SCALE } from "../promo/backend/src/constants.ts";
-import { PROMO_ADMIN_SIGNER } from "./admin";
+import { MARKET_OPERATOR_SIGNER } from "./admin";
 import {
    buildPromoInitMarketFromParts,
    createPromoAdminContext,
@@ -322,12 +322,12 @@ export async function gradePromoBets(promoId: number): Promise<number> {
    for (let i = 0; i < resultAddresses.length; i += MAX_RESULTS_PER_TX) {
       const batch = resultAddresses.slice(i, i + MAX_RESULTS_PER_TX);
       const ix = await getGradeBetsIx(
-         PROMO_ADMIN_SIGNER.address,
+         MARKET_OPERATOR_SIGNER.address,
          new Uint8Array(batch.map(([r]) => r)),
          batch.map(([, addr]) => addr),
       );
-      // await simulateTransaction(clients.rpc, [ix], [PROMO_ADMIN_SIGNER]);
-      await sendAndConfirmInstructions([ix], [PROMO_ADMIN_SIGNER]);
+      // await simulateTransaction(clients.rpc, [ix], [MARKET_OPERATOR_SIGNER]);
+      await sendAndConfirmInstructions([ix], [MARKET_OPERATOR_SIGNER]);
    }
 
    return resultAddresses.length;

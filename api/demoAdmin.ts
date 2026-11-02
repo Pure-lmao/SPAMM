@@ -4,7 +4,7 @@ import {
    getIssueFreebetIx,
    ODDS_SCALE,
 } from "spamm-aggregator-sdk";
-import { ADMIN_SIGNER } from "../aggregator/client/admin";
+import { MARKET_OPERATOR_SIGNER } from "./admin";
 import {
    buildSignV0Transaction,
    createRpcClients,
@@ -40,10 +40,10 @@ export async function issueDemoFreebet(userRaw: string): Promise<{
    freebetId: number;
 }> {
    const user = address(userRaw);
-   await getFreebetIssuerData(clients.rpc, ADMIN_SIGNER.address);
+   await getFreebetIssuerData(clients.rpc, MARKET_OPERATOR_SIGNER.address);
    const nowSec = Math.floor(Date.now() / 1000);
    const freebetId = nowSec;
-   const ix = await getIssueFreebetIx(ADMIN_SIGNER.address, user, {
+   const ix = await getIssueFreebetIx(MARKET_OPERATOR_SIGNER.address, user, {
       freebetId,
       expiry: nowSec + DEMO_FREEBET_TTL_SECS,
       amount: DEMO_FREEBET_AMOUNT,
@@ -54,9 +54,9 @@ export async function issueDemoFreebet(userRaw: string): Promise<{
       allowedOperators: [],
    }, DEFAULT_MINT);
    const signed = await buildSignV0Transaction(clients.rpc, {
-      feePayer: ADMIN_SIGNER,
+      feePayer: MARKET_OPERATOR_SIGNER,
       instructions: [ix],
-      signers: [ADMIN_SIGNER],
+      signers: [MARKET_OPERATOR_SIGNER],
    });
    const signature = await sendAndConfirmSignedTransaction(clients, signed);
    return { success: true, signature: String(signature), freebetId };

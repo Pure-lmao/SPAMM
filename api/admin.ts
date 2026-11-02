@@ -17,7 +17,3 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 export const MARKET_OPERATOR_SIGNER = await loadKeypairSignerFromJsonFile(
    path.join(__dirname, 'YLmo_admin_keypair.json'),
 );
-
-export const PROMO_ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
-   path.join(__dirname, 'market_maker/client/admin_keypair.json'),
-);
