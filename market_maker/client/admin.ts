@@ -1,5 +1,5 @@
 import { getCloseEventIx, getCreateTokenAccountIx, getForceClosePdaIx, getInitEventIx, getInitMarketIx, getInitProgramIx, getMmConfigData, getMmMarketData, getMmReturnDataDecoder, getSetRfqSignerIx, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID, type EventId, type MarketId, type Sport, getWithdrawFromTokenAccountIx, ODDS_SCALE, getMmGetQuoteParlayIx } from 'spamm-market-maker-sdk';
-import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getInitMmMintVaultIx, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda, getEventGameState, decodeGetParlayQuoteReturnWire, getGetParlayQuoteReturnWireDecoder, type RfqBetMessageInput, signRfqBetQuote, signRfqParlayQuote, type RfqParlayMessageInput } from 'spamm-aggregator-sdk';
+import { getCloseNettingAccountIx, getCreateNettingAccountIx, getEventStateData, getInitMmMintVaultIx, getMmEncumbranceData, getRegisterMmIx, getNettingAccountData, getMmGetQuoteIx, getAddLineToNettingAccountIx, getRemoveLineFromNettingAccountIx, getMmLiabilityAtaBalance, getWithdrawFromLiabilityAccountIx, getMmTokenAtaBalance, getEventStatePda, getEventGameState, decodeGetParlayQuoteReturnWire, getGetParlayQuoteReturnWireDecoder, type RfqBetMessageInput, signRfqBetQuote, signRfqParlayQuote, type RfqParlayMessageInput, getMmConfigPda, getMmQuoteBufferPda, getMmParlayQuoteBufferPda } from 'spamm-aggregator-sdk';
 import { loadKeypairSignerFromJsonFile } from './utils';
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from './txSend.ts';
 import { getU32Encoder, getU64Encoder, type Address } from '@solana/kit';
@@ -12,7 +12,9 @@ export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
    path.join(__dirname, 'admin_keypair.json'),
 );
 const clients = createRpcClients();
-
+const operator = "YLmoSQiCt8UmM6f29DorWCx2CPqwij5XiFuWt38MnP8" as Address;
+// devnet usdc mint
+const mint = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr" as Address;
 
 async function initProgram() {
    const ix = await getInitProgramIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
@@ -20,6 +22,21 @@ async function initProgram() {
    console.log(txResult);
 }
 // initProgram().catch(console.error);
+
+// init_program requires config + both quote buffers to be empty; config must close last (force_close auths against it).
+async function resetProgramAccounts() {
+   const [configPda] = await getMmConfigPda(MARKET_MAKER_PROGRAM_ID);
+   const [quoteBuf] = await getMmQuoteBufferPda(MARKET_MAKER_PROGRAM_ID);
+   const [parlayQuoteBuf] = await getMmParlayQuoteBufferPda(MARKET_MAKER_PROGRAM_ID);
+   const closeTx = await sendAndConfirmInstructions([
+      await getForceClosePdaIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, quoteBuf),
+      await getForceClosePdaIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, parlayQuoteBuf),
+      await getForceClosePdaIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, configPda),
+   ], [ADMIN_SIGNER]);
+   console.log(closeTx);
+   await initProgram();
+}
+// resetProgramAccounts().catch(console.error);
 
 async function withdrawFromTokenAccount() {
    const ix = await getWithdrawFromTokenAccountIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, 
@@ -38,6 +55,14 @@ async function registerMM() {
 }
 // registerMM().catch(console.error);
 
+// MM config ATA for the mint must already exist (getCreateTokenAccountIx).
+async function initMintVault(vaultMint: Address = mint) {
+   const vaultIx = await getInitMmMintVaultIx(ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, vaultMint);
+   const txResult = await sendAndConfirmInstructions([vaultIx], [ADMIN_SIGNER]);
+   console.log(txResult);
+}
+// initMintVault().catch(console.error);
+
 // getMmEncumbranceData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 // getMmConfigData(clients.rpc, MARKET_MAKER_PROGRAM_ID).then(console.log).catch(console.error);
 
@@ -49,8 +74,7 @@ const eventId = {
    league,
    event,
 } as EventId;
-const operator = "3z6QBMEUjJubCwbKUsMKFnKnf1twyc5bZ9gaWHNAn1nP" as Address;
-const mint = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr" as Address;
+
 async function initEvent() {
    const eventStateIx = await getInitEventIx(ADMIN_SIGNER.address, eventId, MARKET_MAKER_PROGRAM_ID);
    const nettingPdaIx = await getCreateNettingAccountIx(eventId, operator, mint, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID);
@@ -138,12 +162,12 @@ async function closeEvent() {
 // closeEvent().catch(console.error);
 
 const period = 1;
-const mkt = 60;
+const mkt = 1;
 const player = 0n;
 const marketId = {
    eventId,
    player,
-   mkt: 1,
+   mkt,
    period,
    isPregame: true,
    operator,
@@ -182,7 +206,7 @@ async function updateOracle() {
    console.log(txResult);
 }
 // updateOracle().catch(console.error);
-// getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketIdSame).then(console.log).catch(console.error);
+// getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId).then(console.log).catch(console.error);
 
 const returnDataDecoder = getMmReturnDataDecoder();
 async function getQuote() {

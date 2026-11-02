@@ -24,6 +24,9 @@ report.[0-9]_.[0-9]_.[0-9]_.[0-9]_.json
 
 admin_keypair.json
 
+# market maker db
+mm.db*
+
 # caches
 .eslintcache
 .cache

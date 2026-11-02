@@ -1,9 +1,10 @@
-import { fetchEventsGrouped, fetchRecentlyStartedEventsWithMarkets } from "../../api/localDb";
-import { getCloseNettingAccountIx, getEventGameState, getEventStateData, getEventStatePda, getMmMarketDataPda, getNettingPda, ODDS_SCALE, type EventId, type MarketId } from "spamm-aggregator-sdk";
-import { getCloseEventIx, getCloseMarketIx, getInitEventIx, getInitMarketIx, getMmMarketData, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID } from "spamm-market-maker-sdk";
+import { fetchEventsGrouped } from "../../api/localDb";
+import { getCloseNettingAccountIx, getEventGameState, getEventStatePda, getMmMarketDataPda, getNettingPda, ODDS_SCALE, type EventId, type MarketId } from "spamm-aggregator-sdk";
+import { getCloseEventIx, getCloseMarketIx, getInitEventIx, getInitMarketIx, getUpdateEventStateIx, getUpdateOracleIx, MARKET_MAKER_PROGRAM_ID } from "spamm-market-maker-sdk";
+import { deleteEvent, fetchOnchainEventAccounts, fetchStartedEvents, initMmDb, markEventStateOnchain, markMarketsOnchain, resetEventOnchain, trackEvent, type TrackedEvent } from "./mmDb";
 import { createRpcClients, logSolanaError, sendAndConfirmInstructionGroups, sendAndConfirmInstructions, withRpcRetry, type RpcClients } from "../../aggregator/client/txSendV1";
 import { loadKeypairSignerFromJsonFile } from "../client/utils";
-import type { DbEvent, DbMarket, ESPNOdds } from "../../api/types";
+import type { ESPNOdds } from "../../api/types";
 import type { Instruction } from "@solana/instructions";
 import { address, type Address, type KeyPairSigner } from "@solana/kit";
 import { getProps } from "../../api/playerProps";
@@ -20,8 +21,6 @@ function sleep(ms: number): Promise<void> {
 }
 
 const CYCLE_MS = 1000 * 60 * 5;
-// Started events older than this are no longer checked; leftovers need closeAllPdas.ts.
-const CLEANUP_WINDOW_MS = 1000 * 60 * 60 * 24 * 3;
 const GET_MULTIPLE_ACCOUNTS_LIMIT = 100;
 const KEYPAIR_PATH = path.join(
    path.dirname(fileURLToPath(import.meta.url)),
@@ -99,80 +98,72 @@ async function runMarketMakerCycle() {
                league: event.league_id,
                event: BigInt(event.id),
             };
-            let oddsData;
+            const markets = event.markets ?? [];
+            const marketIds: MarketId[] = markets.map((market) => ({
+               eventId,
+               player: BigInt(market.player_id),
+               mkt: market.id,
+               period: market.period_id,
+               isPregame: true,
+               operator: address(market.operator),
+               mint: address(market.mint),
+            }));
+            const [eventStatePda] = await getEventStatePda(MARKET_MAKER_PROGRAM_ID, eventId);
+            const marketPdas = await Promise.all(
+               marketIds.map(async (marketId) => (await getMmMarketDataPda(MARKET_MAKER_PROGRAM_ID, marketId))[0]),
+            );
+            trackEvent(
+               eventId,
+               event.start_time,
+               marketIds.map((marketId, i) => ({ address: marketPdas[i]!, marketId })),
+            );
+            let onchain: OnchainAccounts;
             try {
-               let needToCheckEventState = false;
-               if(event.markets?.length == 0) {
-                  needToCheckEventState = true;
-               } else {
-                  const oddsStrings = event.markets?.map(market => market.last_odds) ?? [];
-                  const oddsArrays = oddsStrings.map(odds => JSON.parse(odds) as number[]);
-                  if (oddsArrays.every(odds => odds.every(odds => odds === 0))) {
-                     needToCheckEventState = true;
-                  }
-               }
-               if (needToCheckEventState) {
-                  // check for event state account
-                  const _eventStateData = await withRpcRetry(() =>
-                     getEventStateData(clients.rpc, MARKET_MAKER_PROGRAM_ID, eventId),
-                  );
-               }
-
-               oddsData = await getESPNOdds(sport.api_id, league.api_id, event.api_id);
-               // console.log(sport.api_id, league.api_id, event.api_id, oddsData);
+               onchain = await loadOnchainAccounts(clients, eventId, eventStatePda, marketPdas);
             } catch (error) {
-               if (error instanceof Error && error.message.includes('Event state account not found')) {
-                  // create the event onchain
-                  try {
-                     const initEventIx = await getInitEventIx(
-                        ADMIN_SIGNER.address, eventId, MARKET_MAKER_PROGRAM_ID
-                     );
-                     const setEventStateIx = await getUpdateEventStateIx(
-                        ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, eventId, 1, 
-                        getEventGameState("PG", 0, 0, 0, 0)
-                     )
-                     const txResult = await sendAndConfirmInstructions(
-                        [initEventIx, setEventStateIx],
-                        [ADMIN_SIGNER],
-                     );
-                     // console.log("Event created onchain", eventId, txResult);
-                  } catch (error) {
-                     logSolanaError(`Failed to create event ${event.id} onchain:`, error);
-                  }
-               } else {
-                  console.error(error);
+               logSolanaError(`Failed to load onchain accounts for event ${event.id}:`, error);
+               continue;
+            }
+
+            if (!onchain.eventState) {
+               try {
+                  const initEventIx = await getInitEventIx(
+                     ADMIN_SIGNER.address, eventId, MARKET_MAKER_PROGRAM_ID
+                  );
+                  const setEventStateIx = await getUpdateEventStateIx(
+                     ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, eventId, 1, 
+                     getEventGameState("PG", 0, 0, 0, 0)
+                  )
+                  await sendAndConfirmInstructions(
+                     [initEventIx, setEventStateIx],
+                     [ADMIN_SIGNER],
+                  );
+                  markEventStateOnchain(eventId);
+               } catch (error) {
+                  logSolanaError(`Failed to create event ${event.id} onchain:`, error);
                }
             }
+
+            let oddsData;
+            try {
+               oddsData = await getESPNOdds(sport.api_id, league.api_id, event.api_id);
+            } catch (error) {
+               console.error(error);
+            }
+
             const ixs: Instruction[][] = [];
+            const initializedMarketPdas: Address[] = [];
             let maxInstructionsPerTransaction = 64;
-            for (const market of event.markets ?? []) {
-               // check for market data account
-               const marketId: MarketId = {
-                  eventId,
-                  player: BigInt(market.player_id),
-                  mkt: market.id,
-                  period: market.period_id,
-                  isPregame: true,
-                  operator: address(market.operator),
-                  mint: address(market.mint),
-               };
-               try {
-                  const odds = JSON.parse(market.last_odds) as number[];
-                  if (odds.every(odds => odds === 0)) {
-                     const _marketData = await withRpcRetry(() =>
-                        getMmMarketData(clients.rpc, MARKET_MAKER_PROGRAM_ID, marketId),
-                     );
-                  }
-               } catch (error) {
-                  if (error instanceof Error && error.message.includes('MM market data account not found')) {
-                     // create the market onchain
-                     ixs.push([await getInitMarketIx(
-                        ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, new Uint8Array(3*4)
-                     )]);
-                     maxInstructionsPerTransaction--;
-                  } else {
-                     console.error(error);
-                  }
+            for (const [i, market] of markets.entries()) {
+               const marketId = marketIds[i]!;
+               // init_market and update_oracle share a group: groups run in parallel, so order is only kept within one.
+               const group: Instruction[] = [];
+               if (!onchain.markets.has(marketPdas[i]!)) {
+                  group.push(await getInitMarketIx(
+                     ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, new Uint8Array(3*4)
+                  ));
+                  initializedMarketPdas.push(marketPdas[i]!);
+                  maxInstructionsPerTransaction--;
                }
                const sequence = BigInt(Math.floor(Date.now() / 1000));
                // get the latest odds
@@ -183,11 +174,11 @@ async function runMarketMakerCycle() {
                      const odds1 = scaleOdds(winOdds[1]);
                      const odds2 = winOdds[2] ? scaleOdds(winOdds[2]) : undefined;
                      // console.log(market.id, odds0, odds1, odds2);
-                     ixs.push([await getUpdateOracleIx(
+                     group.push(await getUpdateOracleIx(
                         ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                         sequence, 
                         odds0, odds1, odds2
-                     )]);
+                     ));
                   }
                } else if ( // spread markets
                   (market.id > 100 && market.id < 299) ||
@@ -200,21 +191,21 @@ async function runMarketMakerCycle() {
                      apiMkt += spreadOdds.line * (sport.id === 1 ? 4 : 2);
                      if (apiMkt !== market.id) {
                         // set null odds onchain
-                        ixs.push([await getUpdateOracleIx(
+                        group.push(await getUpdateOracleIx(
                            ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                            sequence, 
                            0n, 0n, 0n
-                        )]);                        
+                        ));
                      } else {
                         // update the onchain odds
                         const odds0 = scaleOdds(spreadOdds.odds[0]);
                         const odds1 = scaleOdds(spreadOdds.odds[1]);
                         // console.log(market.id, odds0, odds1);
-                        ixs.push([await getUpdateOracleIx(
+                        group.push(await getUpdateOracleIx(
                            ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                            sequence, 
                            odds0, odds1, undefined
-                        )]);
+                        ));
                      }
                   }
                } else if ( // total markets
@@ -228,21 +219,21 @@ async function runMarketMakerCycle() {
                      apiMkt += totalOdds.line * (sport.id === 1 ? 4 : 2);
                      if (apiMkt !== market.id) {
                         // set null odds onchain
-                        ixs.push([await getUpdateOracleIx(
+                        group.push(await getUpdateOracleIx(
                            ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                            sequence, 
                            0n, 0n, 0n
-                        )]);
+                        ));
                      } else {
                         // update the onchain odds
                         const odds0 = scaleOdds(totalOdds.odds[0]);
                         const odds1 = scaleOdds(totalOdds.odds[1]);
                         // console.log(market.id, odds0, odds1);
-                        ixs.push([await getUpdateOracleIx(
+                        group.push(await getUpdateOracleIx(
                            ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                            sequence,
                            odds0, odds1, undefined
-                        )]);
+                        ));
                      }
                   }
                } else if (market.id > 11000) {
@@ -256,13 +247,16 @@ async function runMarketMakerCycle() {
                            if (thisProp.odds[1]) {
                               odds1 = scaleOdds(thisProp.odds[1]);
                            }
-                           ixs.push([await getUpdateOracleIx(
+                           group.push(await getUpdateOracleIx(
                               ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID, marketId, 
                               sequence, odds0, odds1, undefined
-                           )]);
+                           ));
                         }
                      }
                   }
+               }
+               if (group.length > 0) {
+                  ixs.push(group);
                }
             }
             // send the ixs
@@ -277,6 +271,16 @@ async function runMarketMakerCycle() {
                   console.log("Markets updated onchain", eventId, txResult);
                } catch (error) {
                   logSolanaError(`Failed to update markets for event ${event.id}:`, error);
+                  // Re-verify this event's accounts against chain next cycle.
+                  resetEventOnchain(eventId);
+               }
+               if (initializedMarketPdas.length > 0) {
+                  try {
+                     const created = await findExistingAccounts(clients, initializedMarketPdas);
+                     markMarketsOnchain([...created]);
+                  } catch (error) {
+                     logSolanaError(`Failed to verify new markets for event ${event.id}:`, error);
+                  }
                }
             }
             await sleep(200);
@@ -350,6 +354,37 @@ function revigOdds(odds: number[]): number[] {
    const vig = odds.reduce((acc, curr) => acc + 1/curr, 0);
    return odds.map(odds => odds * vig / 1.05);
 }
+type OnchainAccounts = { eventState: boolean; markets: Set<Address> };
+
+/** What the MM db knows exists onchain for this event, plus anything not yet known that is found onchain. */
+async function loadOnchainAccounts(
+   clients: RpcClients,
+   eventId: EventId,
+   eventStatePda: Address,
+   marketPdas: readonly Address[],
+): Promise<OnchainAccounts> {
+   const known = fetchOnchainEventAccounts(eventId);
+   const onchain: OnchainAccounts = { eventState: known.eventState, markets: new Set(known.markets) };
+   const unknown = [
+      ...(onchain.eventState ? [] : [eventStatePda]),
+      ...marketPdas.filter((pda) => !onchain.markets.has(pda)),
+   ];
+   if (unknown.length === 0) {
+      return onchain;
+   }
+   const existing = await findExistingAccounts(clients, unknown);
+   if (existing.has(eventStatePda)) {
+      onchain.eventState = true;
+      markEventStateOnchain(eventId);
+   }
+   const foundMarkets = marketPdas.filter((pda) => existing.has(pda));
+   markMarketsOnchain(foundMarkets);
+   for (const pda of foundMarkets) {
+      onchain.markets.add(pda);
+   }
+   return onchain;
+}
+
 async function findExistingAccounts(clients: RpcClients, addresses: Address[]): Promise<Set<Address>> {
    const existing = new Set<Address>();
    for (let i = 0; i < addresses.length; i += GET_MULTIPLE_ACCOUNTS_LIMIT) {
@@ -370,32 +405,19 @@ async function findExistingAccounts(clients: RpcClients, addresses: Address[]): 
 }
 
 async function closeStartedEvents(clients: RpcClients) {
-   const events = fetchRecentlyStartedEventsWithMarkets(CLEANUP_WINDOW_MS);
+   const events = fetchStartedEvents(Date.now());
    console.log(`Checking ${events.length} started events for open accounts`);
    for (const event of events) {
       try {
          await closeEventAndMarkets(event, clients);
       } catch (error) {
-         logSolanaError(`Failed to close event ${event.id} onchain:`, error);
+         logSolanaError(`Failed to close event ${event.eventId.event} onchain:`, error);
       }
    }
 }
 
-async function closeEventAndMarkets(event: DbEvent & { markets: DbMarket[] }, clients: RpcClients) {
-   const eventId: EventId = {
-      sport: event.sport_id,
-      league: event.league_id,
-      event: BigInt(event.id),
-   };
-   const marketIds: MarketId[] = event.markets.map((market) => ({
-      eventId,
-      player: BigInt(market.player_id),
-      mkt: market.id,
-      period: market.period_id,
-      isPregame: true,
-      operator: address(market.operator),
-      mint: address(market.mint),
-   }));
+/** Close every account for a started event; its MM db rows are deleted once none remain onchain. */
+async function closeEventAndMarkets({ eventId, marketIds }: TrackedEvent, clients: RpcClients) {
    const nettingScopes = new Map<string, { operator: Address; mint: Address }>();
    for (const { operator, mint } of marketIds) {
       nettingScopes.set(`${operator}:${mint}`, { operator, mint });
@@ -409,8 +431,10 @@ async function closeEventAndMarkets(event: DbEvent & { markets: DbMarket[] }, cl
    const nettingPdas = await Promise.all(
       scopes.map(async ({ operator, mint }) => (await getNettingPda(MARKET_MAKER_PROGRAM_ID, eventId, operator, mint))[0]),
    );
-   const existing = await findExistingAccounts(clients, [eventStatePda, ...marketPdas, ...nettingPdas]);
+   const allPdas = [eventStatePda, ...marketPdas, ...nettingPdas];
+   const existing = await findExistingAccounts(clients, allPdas);
    if (existing.size === 0) {
+      deleteEvent(eventId);
       return;
    }
 
@@ -425,7 +449,7 @@ async function closeEventAndMarkets(event: DbEvent & { markets: DbMarket[] }, cl
    }
    if (ixs.length > 0) {
       const txResult = await sendAndConfirmInstructionGroups(clients, ixs, [ADMIN_SIGNER]);
-      console.log(`Event ${event.id}: closed ${ixs.length} accounts onchain`, txResult);
+      console.log(`Event ${eventId.event}: closed ${ixs.length} accounts onchain`, txResult);
    }
 
    // Netting closes fail while open profit remains, so they must not block the closes above.
@@ -438,15 +462,21 @@ async function closeEventAndMarkets(event: DbEvent & { markets: DbMarket[] }, cl
             eventId, operator, mint, ADMIN_SIGNER.address, MARKET_MAKER_PROGRAM_ID,
          );
          const txResult = await sendAndConfirmInstructions([closeNettingIx], [ADMIN_SIGNER]);
-         console.log(`Event ${event.id}: closed netting account for ${operator} / ${mint}`, txResult);
+         console.log(`Event ${eventId.event}: closed netting account for ${operator} / ${mint}`, txResult);
       } catch (error) {
-         logSolanaError(`Event ${event.id}: netting account for ${operator} / ${mint} not closed:`, error);
+         logSolanaError(`Event ${eventId.event}: netting account for ${operator} / ${mint} not closed:`, error);
       }
+   }
+
+   // Rows stay (and closing is retried next cycle) until nothing for the event is left onchain.
+   if ((await findExistingAccounts(clients, allPdas)).size === 0) {
+      deleteEvent(eventId);
    }
 }
 
 function main() {
    console.log("MM backend starting (5 min cycle)");
+   initMmDb();
    pinEventLoop();
    void tick();
 }

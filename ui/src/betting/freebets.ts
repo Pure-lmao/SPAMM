@@ -8,7 +8,6 @@ import {
    type FreebetAccountData,
 } from "spamm-aggregator-sdk";
 import type { BetSlipSelection } from "./types";
-import { parseOperatorAddress } from "./chainIds";
 import { formatSlipOddsFromScaled, type OddsFormat } from "../settings/convertOdds";
 import { formatUsdcBaseUnitsForUi } from "./usdc";
 
@@ -166,7 +165,7 @@ export function assessFreebetForSlip(
    }
    if (voucher.allowedOperators.length > 0) {
       for (const sel of selections) {
-         const op = parseOperatorAddress(sel.operator);
+         const op = address(sel.operator);
          if (!addressInList(voucher.allowedOperators, op)) {
             return { eligible: false, reason: "Operator not allowed" };
          }

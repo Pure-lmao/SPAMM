@@ -1,4 +1,4 @@
-import type { Address, Rpc, SolanaRpcApi } from "@solana/kit";
+import { address, type Address, type Rpc, type SolanaRpcApi } from "@solana/kit";
 import {
    decodeMarketQuotesProxyReturnData,
    getGetMarketQuotesProxyIx,
@@ -14,8 +14,6 @@ import {
    buildMarketId,
    DEFAULT_EVENT_STATE_SEQUENCE,
    EVENT_GAME_STATE_PG,
-   parseMintAddress,
-   parseOperatorAddress,
    SIM_FEE_PAYER_ADDRESS,
 } from "./chainIds";
 import { getMmListCached } from "./mmCache";
@@ -72,8 +70,8 @@ async function fetchLiveOddsForMarket(
       market.id,
       market.period_id,
       BigInt(market.player_id ?? 0),
-      parseOperatorAddress(market.operator),
-      parseMintAddress(market.mint),
+      address(market.operator),
+      address(market.mint),
    );
 
    try {

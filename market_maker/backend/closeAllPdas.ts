@@ -6,6 +6,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRpcClients, logSolanaError, sendAndConfirmInstructionGroups, withRpcRetry } from "../../aggregator/client/txSendV1";
 import { loadKeypairSignerFromJsonFile } from "../client/utils";
+import { initMmDb, resetAllOnchain } from "./mmDb";
 
 // Force-closes every account owned by the MM program (event state + market data PDAs),
 // returning rent to the admin. The config PDA and quote buffers are always kept.
@@ -67,6 +68,7 @@ async function main() {
       return;
    }
 
+   initMmDb();
    let closed = 0;
    let failed = 0;
    for (let i = 0; i < toClose.length; i += CHUNK_SIZE) {
@@ -86,6 +88,7 @@ async function main() {
          logSolanaError(`Failed to close chunk starting at ${i}:`, error);
       }
    }
+   resetAllOnchain();
    console.log(`Done. Closed ${closed}, failed ${failed}. Re-run to retry anything left open.`);
 }
 

@@ -12,7 +12,6 @@ import {
 } from "spamm-aggregator-sdk";
 import { mapBoostAccountToIssuerAuth, mapFreebetAccountToIssuerAuth } from "../betting/freebets";
 import { type BetRecord, type Selection } from "../../../api/quickIndexer";
-import { parseMintAddress, parseOperatorAddress } from "../betting/chainIds";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
@@ -234,8 +233,8 @@ export function selectionToMarketId(sel: Selection): MarketId {
       mkt: sel.mkt_id,
       period: sel.period_id,
       isPregame: Boolean(sel.is_pregame),
-      operator: parseOperatorAddress(sel.operator),
-      mint: parseMintAddress(sel.mint),
+      operator: address(sel.operator),
+      mint: address(sel.mint),
    };
 }
 

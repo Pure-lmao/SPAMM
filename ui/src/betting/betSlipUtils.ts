@@ -1,8 +1,9 @@
 import { ODDS_SCALE, type MarketId, type ParlayLegSel } from "spamm-aggregator-sdk";
 import { formatDecimalOdds, parseUserOddsToDecimal, type OddsFormat } from "../settings/convertOdds";
-import { apiSportToSdk, buildMarketId, DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG, parseMintAddress, parseOperatorAddress } from "./chainIds";
+import { apiSportToSdk, buildMarketId, DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG } from "./chainIds";
 import { pickBetSide } from "./outcomeSide";
 import type { BetSlipSelection } from "./types";
+import { address } from "@solana/kit";
 
 export function marketKey(
    sel: Pick<BetSlipSelection, "eventId" | "marketWireId" | "periodId" | "playerId">,
@@ -83,8 +84,8 @@ export function buildMarketIdForSelection(sel: BetSlipSelection): MarketId {
       sel.marketWireId,
       sel.periodId,
       BigInt(sel.playerId ?? 0),
-      parseOperatorAddress(sel.operator),
-      parseMintAddress(sel.mint),
+      address(sel.operator),
+      address(sel.mint),
    );
 }
 
