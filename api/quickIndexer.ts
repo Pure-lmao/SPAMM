@@ -43,10 +43,10 @@ const CASHOUT_IX_MINT_INDEX = 11;
 import { createRpcClients } from "../aggregator/client/txSend";
 import { withRpcRetry } from "../market_maker/client/txSend";
 import { foldParlayResult, safeJSONStringify } from "./utils";
-const client = createRpcClients()
+const client = createRpcClients({httpUrl: process.env.HELIUS_RPC_URL})
 
 // Slot of the last program upgrade — the indexer ignores any program activity before it.
-const LAST_PROGRAM_UPDATE_SLOT = 495152945n;
+const LAST_PROGRAM_UPDATE_SLOT = 517875938n;
 
 /** RPC blockTime is nullable; Number(null) would silently coerce to 0, so make that explicit. */
 function blockTimeSeconds(blockTime: UnixTimestamp | null): number {
