@@ -12,7 +12,7 @@ import {
 } from "spamm-aggregator-sdk";
 import { mapBoostAccountToIssuerAuth, mapFreebetAccountToIssuerAuth } from "../betting/freebets";
 import { type BetRecord, type Selection } from "../../../api/quickIndexer";
-import { DEFAULT_MARKET_MINT, parseOperatorAddress } from "../betting/chainIds";
+import { parseMintAddress, parseOperatorAddress } from "../betting/chainIds";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
@@ -155,6 +155,7 @@ export function parseSelectionsField(raw: unknown): Selection[] {
          player_id,
          is_pregame: isRaw === 1 || isRaw === true ? 1 : 0,
          operator: String(r.operator ?? ""),
+         mint: String(r.mint ?? ""),
          side,
          event_state_sequence: Number(r.event_state_sequence ?? r.eventStateSequence ?? 0) || 0,
          event_game_state: { gamePhase: "", homePrimary: 0, awayPrimary: 0, homeSecondary: 0, awaySecondary: 0 },
@@ -234,7 +235,7 @@ export function selectionToMarketId(sel: Selection): MarketId {
       period: sel.period_id,
       isPregame: Boolean(sel.is_pregame),
       operator: parseOperatorAddress(sel.operator),
-      mint: DEFAULT_MARKET_MINT,
+      mint: parseMintAddress(sel.mint),
    };
 }
 

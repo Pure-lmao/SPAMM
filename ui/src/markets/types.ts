@@ -12,6 +12,7 @@ export type UiMarket = {
    last_update: number;
    mkt_string: string;
    operator: string;
+   mint: string;
 };
 
 export type UiGroupedEvent = {
@@ -67,6 +68,8 @@ export type UiPromotionalMarket = {
    event_id: number;
    mkt_id: number;
    period_id: number;
+   operator: string;
+   mint: string;
    yes_label: string;
    last_odds: string;
    status: "open" | "settled";

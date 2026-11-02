@@ -12,7 +12,7 @@ import { loadKeypairSignerFromJsonFile } from "../aggregator/client/utils";
 import { fetchGradedStartedEvents } from "./localDb";
 import { BetResult, GRADE_PARLAY_LEG_SKIP, getBetsData, getGradeBetsIx, getGradeParlayIx, getParlaysData, type BetAccountData } from "spamm-aggregator-sdk";
 import { round } from "./utils";
-import { ADMIN_SIGNER } from "../aggregator/client/admin";
+import { MARKET_OPERATOR_SIGNER } from "./admin.ts";
 
 const SYSTEM_PROGRAM_ID: Address = address("11111111111111111111111111111111");
 const clients = createRpcClients({ });
@@ -94,9 +94,9 @@ export async function gradeBets() {
          const results = resultAddresses.slice(i, i + MAX_RESULTS_PER_TX);
          const u8Results = results.map(result => result[0] as number);
          const addresses = results.map(result => result[1] as Address);
-         const ix = await getGradeBetsIx(ADMIN_SIGNER.address, new Uint8Array(u8Results), addresses);
+         const ix = await getGradeBetsIx(MARKET_OPERATOR_SIGNER.address, new Uint8Array(u8Results), addresses);
          // await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
-         const sig = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+         const sig = await sendAndConfirmInstructions([ix], [MARKET_OPERATOR_SIGNER]);
          console.log(`Grade bets tx: ${sig}`);
       }
    }
@@ -163,10 +163,10 @@ export async function gradeParlays() {
          const batch = gradeJobs.slice(i, i + MAX_PARLAYS_PER_TX);
          const instructions = await Promise.all(
             batch.map((job) =>
-               getGradeParlayIx(ADMIN_SIGNER.address, job.mask, job.address),
+               getGradeParlayIx(MARKET_OPERATOR_SIGNER.address, job.mask, job.address),
             ),
          );
-         const sig = await sendAndConfirmInstructions(instructions, [ADMIN_SIGNER]);
+         const sig = await sendAndConfirmInstructions(instructions, [MARKET_OPERATOR_SIGNER]);
          console.log(`Grade parlay tx: ${sig}`);
       }
    }

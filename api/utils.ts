@@ -110,4 +110,5 @@ export function foldParlayResult(selections: Selection[]): BetResult {
    return BetResult.Pending;
 }
 
-export const DEFAULT_MARKET_OPERATOR = "BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW" as Address;
+export const DEFAULT_MARKET_OPERATOR = "YLmoSQiCt8UmM6f29DorWCx2CPqwij5XiFuWt38MnP8" as Address;
+export const DEFAULT_MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr" as Address;

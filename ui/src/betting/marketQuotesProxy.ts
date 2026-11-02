@@ -14,6 +14,7 @@ import {
    buildMarketId,
    DEFAULT_EVENT_STATE_SEQUENCE,
    EVENT_GAME_STATE_PG,
+   parseMintAddress,
    parseOperatorAddress,
    SIM_FEE_PAYER_ADDRESS,
 } from "./chainIds";
@@ -72,6 +73,7 @@ async function fetchLiveOddsForMarket(
       market.period_id,
       BigInt(market.player_id ?? 0),
       parseOperatorAddress(market.operator),
+      parseMintAddress(market.mint),
    );
 
    try {

@@ -44,6 +44,7 @@ export type DbMarket = {
    last_update: number;
    mkt_string: string;
    operator: string;
+   mint: string;
 };
 
 /** Event names for a bet card. Market id, period, and side come from the bet. */
@@ -74,6 +75,8 @@ export type PromotionalMarket = {
    league_id: number;
    event_id: number;
    period_id: number;
+   operator: string;
+   mint: string;
    yes_label: string;
    last_odds: string;
    last_update: number;

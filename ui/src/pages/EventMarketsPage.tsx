@@ -10,7 +10,6 @@ import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import type { MarketRow } from "../betting/types";
 import { useBetSlip } from "../betting/BetSlipContext";
-import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 import { displayEventTitle } from "../markets/eventDisplay";
 import { fetchOneEvent } from "../markets/fetchEvent";
 import { fetchPromosForEvent } from "../markets/fetchPromos";
@@ -46,6 +45,7 @@ function toMarketRow(m: UiMarket): MarketRow {
       player_id: m.player_id,
       player_name: m.player_name,
       operator: m.operator,
+      mint: m.mint,
       sport_id: m.sport_id,
    };
 }
@@ -157,7 +157,8 @@ export function EventMarketsPage(): ReactElement {
          periodId: m.period_id,
          playerId: m.player_id ?? 0,
          playerName: m.player_name ?? "",
-         operator: m.operator || DEFAULT_MARKET_OPERATOR,
+         operator: m.operator,
+         mint: m.mint,
          column,
          outcomeIndex,
          mktString: m.mkt_string,

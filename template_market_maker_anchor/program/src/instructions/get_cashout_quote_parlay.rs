@@ -67,7 +67,7 @@ pub fn handler(ctx: Context<GetCashoutQuoteParlay>, rest: WireRest) -> Result<u6
       legs[i] = leg.with_odds(0);
    }
 
-   let max_payment = price::cashout_payment();
+   let max_payment = price::cashout_parlay::payment();
    let mut buf = match ctx.accounts.parlay_buffer.try_borrow_mut_data() {
       Ok(b) if b.len() == MM_PARLAY_QUOTE_BUFFER_LEN => b,
       _ => {

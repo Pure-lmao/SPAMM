@@ -29,7 +29,7 @@ pub fn handler(ctx: Context<GetCashoutQuote>, rest: WireRest) -> Result<u64> {
       return Ok(0);
    }
 
-   let max_payment = price::cashout_payment();
+   let max_payment = price::cashout_single::payment();
    let quote = QuoteBuffer {
       is_used: 0,
       user: *ctx.accounts.user.key,

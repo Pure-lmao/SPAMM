@@ -1,7 +1,7 @@
 import { address, type Address } from '@solana/kit';
 
 export const AGGREGATOR_PROGRAM_ID: Address = address(
-   '5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H',
+   'yanoV1SiWVpRFErBBGZiYp6LeRPM1X4CrfFKQZ1DU7k',
 );
 
 export const SYSTEM_PROGRAM_ID: Address = address(
@@ -122,14 +122,14 @@ export const FREEBET_REINSTATE_SECS = 3 * 86400;
 
 export const CONFIG_PDA_SEED = 'config' as const;
 /** Baked config PDA for devnet build (`constants::CONFIG_PDA`). */
-export const CONFIG_PDA: Address = address('ZcXq4zwiRPUwHXm1mLtnDDyo2R1QbFzDYQS6BUD97FQ');
+export const CONFIG_PDA: Address = address('DSTzgVRod95quSPxa7PL89GSdBFT9K8FcXxbT2eUbL1A');
 /** Baked config PDA bump (`constants::CONFIG_PDA_BUMP`). */
-export const CONFIG_PDA_BUMP = 255;
+export const CONFIG_PDA_BUMP = 253;
 export const MM_LIST_PDA_SEED = 'mm_list' as const;
 /** Baked MM list PDA for devnet build (`constants::MM_LIST_PDA`). */
-export const MM_LIST_PDA: Address = address('Ey53b5ueZCFpS2bcrdk6Aa1epWQqP6B6ra1Xp2qr77NK');
+export const MM_LIST_PDA: Address = address('4AtCJG3qPku2ZH74c7qwm1sH5ryUHJV2bW8jbUeEiv1V');
 /** Baked MM list PDA bump (`constants::MM_LIST_BUMP`). */
-export const MM_LIST_BUMP = 253;
+export const MM_LIST_BUMP = 255;
 export const BET_ACCOUNT_SEED = 'bet' as const;
 /** Parlay bet PDA first seed (`aggregator::state::account_parlay_bet::PARLAY_BET_ACCOUNT_SEED`). */
 export const PARLAY_BET_ACCOUNT_SEED = 'parlay' as const;

@@ -60,7 +60,7 @@ pub const MAX_PROMO_ALLOWED_MMS: usize = 10;
 /// Max market operators on a freebet whitelist (`num_operators == 0` means any operator).
 pub const MAX_PROMO_ALLOWED_OPERATORS: usize = 5;
 
-/// Push / Cancelled / RolledBack / half-grade freebet reinstatement window.
+/// Push / Cancelled / RolledBack / half-grade freebet reinstatement window: 3 days
 pub const FREEBET_REINSTATE_SECS: u32 = 3 * 24 * 60 * 60;
 
 /// RFQ signed-message network domain values (first byte of canonical quote messages; kind is second).
@@ -68,11 +68,11 @@ pub const RFQ_NETWORK_MAINNET: u8 = 1;
 pub const RFQ_NETWORK_DEVNET: u8 = 2;
 pub const RFQ_NETWORK_LOCAL: u8 = 3;
 
-pub const ID: Address = Address::from_str_const("5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H");
+pub const ID: Address = Address::from_str_const("yanoV1SiWVpRFErBBGZiYp6LeRPM1X4CrfFKQZ1DU7k");
 
 pub const CONFIG_PDA_SEED: &[u8] = b"config";
-pub const CONFIG_PDA_BUMP: u8 = 255;
-// ZcXq4zwiRPUwHXm1mLtnDDyo2R1QbFzDYQS6BUD97FQ
+pub const CONFIG_PDA_BUMP: u8 = 253;
+// DSTzgVRod95quSPxa7PL89GSdBFT9K8FcXxbT2eUbL1A
 pub const CONFIG_PDA: Address = Address::derive_address_const(
    &[CONFIG_PDA_SEED], 
    Some(CONFIG_PDA_BUMP),
@@ -80,8 +80,8 @@ pub const CONFIG_PDA: Address = Address::derive_address_const(
 );
 
 pub const MM_LIST_PDA_SEED: &[u8] = b"mm_list";
-pub const MM_LIST_BUMP: u8 = 253;
-// Ey53b5ueZCFpS2bcrdk6Aa1epWQqP6B6ra1Xp2qr77NK
+pub const MM_LIST_BUMP: u8 = 255;
+// 4AtCJG3qPku2ZH74c7qwm1sH5ryUHJV2bW8jbUeEiv1V
 pub const MM_LIST_PDA: Address = Address::derive_address_const(
    &[MM_LIST_PDA_SEED], 
    Some(MM_LIST_BUMP),

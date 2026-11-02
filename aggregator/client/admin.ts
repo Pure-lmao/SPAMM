@@ -12,27 +12,32 @@ const clients = createRpcClients();
 const DEVNET_USDC_MINT = address('Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr');
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
-export const ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
-   path.join(__dirname, 'admin_devnet_keypair.json'),
+export const MARKET_OPERATOR_SIGNER = await loadKeypairSignerFromJsonFile(
+   path.join(__dirname, 'YLmo_admin_keypair.json'),
 );
 
+export const ROUTER_ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
+   path.join(__dirname, 'YRauth_admin_keypair.json'),
+);
+
+
 async function initProgram() {
-   const ix = await getInitProgramIx(ADMIN_SIGNER.address);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   const ix = await getInitProgramIx(ROUTER_ADMIN_SIGNER.address);
+   const txResult = await sendAndConfirmInstructions([ix], [ROUTER_ADMIN_SIGNER]);
    console.log(txResult);
 }
 // initProgram().catch(console.error);
 
-async function changeConfigStatus() {
-   const ix = await getChangeConfigStatusIx(ADMIN_SIGNER.address, 1);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+async function changeConfigStatus(status: 0 | 1) {
+   const ix = await getChangeConfigStatusIx(ROUTER_ADMIN_SIGNER.address, status);
+   const txResult = await sendAndConfirmInstructions([ix], [ROUTER_ADMIN_SIGNER]);
    console.log(txResult);
 }
-// changeConfigStatus().catch(console.error);
+// changeConfigStatus(1).catch(console.error);
 
 async function gradeBets(bets: Address[], results: Uint8Array) {
-   const ix = await getGradeBetsIx(ADMIN_SIGNER.address, results, bets);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   const ix = await getGradeBetsIx(MARKET_OPERATOR_SIGNER.address, results, bets);
+   const txResult = await sendAndConfirmInstructions([ix], [MARKET_OPERATOR_SIGNER]);
    console.log(txResult);
 }
 // gradeBets([
@@ -40,8 +45,8 @@ async function gradeBets(bets: Address[], results: Uint8Array) {
 // ], new Uint8Array([BetResult.Lost])).catch(console.error);
 
 async function gradeParlay(parlayPda: Address, legGradeMask: Uint8Array) {
-   const ix = await getGradeParlayIx(ADMIN_SIGNER.address, legGradeMask, parlayPda);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   const ix = await getGradeParlayIx(MARKET_OPERATOR_SIGNER.address, legGradeMask, parlayPda);
+   const txResult = await sendAndConfirmInstructions([ix], [MARKET_OPERATOR_SIGNER]);
    console.log(txResult);
 }
 // gradeParlay(
@@ -60,7 +65,7 @@ async function deregisterMm(mm: Address) {
    }
    const instructions = [];
    for (const bet of openBets) {
-      const ix = await getSettleBetIx(ADMIN_SIGNER.address, bet.address, bet.data);
+      const ix = await getSettleBetIx(MARKET_OPERATOR_SIGNER.address, bet.address, bet.data);
       instructions.push(ix);
    }
 
@@ -69,7 +74,7 @@ async function deregisterMm(mm: Address) {
       const txInstructions = instructions.slice(i, i + IXS_PER_TX);
       // const simResult = await simulateTransaction(clients.rpc, txInstructions, [ADMIN_SIGNER], true);
       // console.log(simResult);
-      const txResult = await sendAndConfirmInstructions(txInstructions, [ADMIN_SIGNER]);
+      const txResult = await sendAndConfirmInstructions(txInstructions, [MARKET_OPERATOR_SIGNER]);
       console.log(txResult);
    }
 
@@ -85,7 +90,7 @@ async function deregisterMm(mm: Address) {
    const instructions2 = [];
    let liabilityAmount = 0n;
    for (const parlay of openParlays) {
-      const ix = await getSettleParlayIx(ADMIN_SIGNER.address, parlay.address, parlay.data);
+      const ix = await getSettleParlayIx(MARKET_OPERATOR_SIGNER.address, parlay.address, parlay.data);
       instructions2.push(ix);
       liabilityAmount += (parlay.data.payout - parlay.data.amount);
    }
@@ -95,7 +100,7 @@ async function deregisterMm(mm: Address) {
       const txInstructions = instructions2.slice(i, i + IXS_PER_TX2);
       // const simResult = await simulateTransaction(clients.rpc, txInstructions, [ADMIN_SIGNER], true);
       // console.log(simResult);
-      const txResult = await sendAndConfirmInstructions(txInstructions, [ADMIN_SIGNER]);
+      const txResult = await sendAndConfirmInstructions(txInstructions, [MARKET_OPERATOR_SIGNER]);
       console.log(txResult);
    }
 
@@ -106,17 +111,17 @@ async function deregisterMm(mm: Address) {
       throw new Error('MM config account not found');
    }
    const mmConfig = decodeMmAccountConfig(mmConfigRaw);
-   const ix = await getDeregisterMmIx(ADMIN_SIGNER.address, mmConfig.admin, mm, DEVNET_USDC_MINT);
+   const ix = await getDeregisterMmIx(ROUTER_ADMIN_SIGNER.address, mmConfig.admin, mm, DEVNET_USDC_MINT);
    // const simResult = await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
    // console.log(simResult);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   const txResult = await sendAndConfirmInstructions([ix], [ROUTER_ADMIN_SIGNER]);
    console.log(txResult);
 }
 // deregisterMm("DUMBu4faqgx9KJWKAp8xRzKMiHEcBUvuH7pMkvMneMTt" as Address).catch(console.error);
 
 async function forceClosePda(pda: Address) {
-   const ix = await getForceClosePdaIx(ADMIN_SIGNER.address, pda);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   const ix = await getForceClosePdaIx(ROUTER_ADMIN_SIGNER.address, pda);
+   const txResult = await sendAndConfirmInstructions([ix], [ROUTER_ADMIN_SIGNER]);
    console.log(txResult);
 }
 // const [pda] = await getConfigPda();
@@ -126,8 +131,8 @@ async function writeArbitraryData(
    account: Address,
    data: Uint8Array,
 ) {
-   const ix = await getWriteArbitraryDataIx(ADMIN_SIGNER.address, account, data);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+   const ix = await getWriteArbitraryDataIx(ROUTER_ADMIN_SIGNER.address, account, data);
+   const txResult = await sendAndConfirmInstructions([ix], [ROUTER_ADMIN_SIGNER]);
    console.log(txResult);
 }
 // writeArbitraryData("CpmHPq7wwEpFibQ6LcFmuwhgNayonyDbne8jRwMGumP7" as Address, 
@@ -163,31 +168,31 @@ async function getAllAccounts() {
    console.log(allAccounts.length);
    const ixs: Instruction[] = [];
    for(const account of allAccounts) {
-      const ix = await getForceClosePdaIx(ADMIN_SIGNER.address, account.pubkey);
+      const ix = await getForceClosePdaIx(ROUTER_ADMIN_SIGNER.address, account.pubkey);
       ixs.push(ix);
    }
    const ixsPerTx = 20;
    for(let i = 0; i < ixs.length; i += ixsPerTx) {
       const txIxs = ixs.slice(i, i + ixsPerTx);
-      const txResult = await sendAndConfirmInstructions(txIxs, [ADMIN_SIGNER]);
+      const txResult = await sendAndConfirmInstructions(txIxs, [ROUTER_ADMIN_SIGNER]);
       console.log(txResult);
    }
 }
 
-async function initFreebetIssuer() {
-   const initIx = await getInitFreebetIssuerIx(ADMIN_SIGNER.address);
-   const ataIx = await getCreatePromoIssuerAtaIx(ADMIN_SIGNER.address, DEVNET_USDC_MINT);
-   const txResult = await sendAndConfirmInstructions([initIx, ataIx], [ADMIN_SIGNER]);
-   console.log(txResult);
-}
-// initFreebetIssuer().catch(console.error);
+// async function initFreebetIssuer() {
+//    const initIx = await getInitFreebetIssuerIx(.address);
+//    const ataIx = await getCreatePromoIssuerAtaIx(.address, DEVNET_USDC_MINT);
+//    const txResult = await sendAndConfirmInstructions([initIx, ataIx], []);
+//    console.log(txResult);
+// }
+// // initFreebetIssuer().catch(console.error);
 
-async function issueFreebet(user: Address, freebet: IssueFreebetIxData) {
-   const { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators } = freebet;
-   const ix = await getIssueFreebetIx(ADMIN_SIGNER.address, user, { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators }, DEVNET_USDC_MINT);
-   const txResult = await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
-   console.log(txResult);
-}
+// async function issueFreebet(user: Address, freebet: IssueFreebetIxData) {
+//    const { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators } = freebet;
+//    const ix = await getIssueFreebetIx(=.address, user, { freebetId, expiry, amount, minOddsScaled, maxOddsScaled, minLegs, allowedMms, allowedOperators }, DEVNET_USDC_MINT);
+//    const txResult = await sendAndConfirmInstructions([ix], [=]);
+//    console.log(txResult);
+// }
 // issueFreebet("7WPLMihTFitMujMCiintKSnxBL51vQeTZPSvXpejnPCP" as Address, {
 //    freebetId: 10003,
 //    expiry: Math.floor(Date.now() / 1000) + 60*60*24*5,

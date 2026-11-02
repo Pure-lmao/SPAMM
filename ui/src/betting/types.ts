@@ -8,8 +8,9 @@ export type MarketRow = {
    line_value: number | null;
    player_id?: number;
    player_name?: string;
-   operator?: string;
-   sport_id?: number;
+   operator: string;
+   mint: string;
+   sport_id: number;
 };
 
 /** Input when toggling a selection from an odds cell. */
@@ -25,6 +26,7 @@ export type BetSlipSelectionInput = {
    playerId: number;
    playerName: string;
    operator: string;
+   mint: string;
    column: BetColumn;
    outcomeIndex: number;
    mktString: string;

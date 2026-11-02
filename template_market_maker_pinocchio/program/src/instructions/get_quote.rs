@@ -51,7 +51,7 @@ pub fn process(
       return set_single(0, 0);
    }
 
-   let (max_amount, odds_scaled) = price::single_offer();
+   let (max_amount, odds_scaled) = price::single::offer();
    let quote = MMQuoteBuffer {
       discriminator: MM_QUOTE_BUFFER_DISCRIMINATOR,
       is_used: 0,

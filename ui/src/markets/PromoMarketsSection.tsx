@@ -4,7 +4,6 @@ import { useCluster, useWallet } from "@solana/connector/react";
 import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import { useBetSlip } from "../betting/BetSlipContext";
-import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 import { resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { useFormatDbOdd } from "../settings/SettingsContext";
 import { decimalOddsFromDb, parseOdds } from "./oddsFormat";
@@ -150,7 +149,8 @@ export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSection
                      periodId: promo.period_id,
                      playerId: 0,
                      playerName: "",
-                     operator: DEFAULT_MARKET_OPERATOR,
+                     operator: promo.operator,
+                     mint: promo.mint,
                      column: "main",
                      outcomeIndex: 0,
                      mktString: "PROMO",

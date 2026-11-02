@@ -29,7 +29,7 @@ pub fn handler(ctx: Context<GetQuote>, rest: WireRest) -> Result<SingleQuote> {
       return Ok(SingleQuote::ZERO);
    }
 
-   let (max_amount, odds_scaled) = price::single_offer();
+   let (max_amount, odds_scaled) = price::single::offer();
    let quote = QuoteBuffer {
       is_used: 0,
       user: *ctx.accounts.user.key,

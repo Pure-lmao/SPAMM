@@ -372,8 +372,8 @@ export async function getTokenAccountBalance(rpc: Rpc<SolanaRpcApi>, account: Ad
 /**
  * User wallet token balance for `mint`. Returns `0n` if the ATA is missing or RPC errors.
  */
-export async function getWalletUsdcTokenBalance(rpc: Rpc<SolanaRpcApi>, owner: Address, mint: Address): Promise<bigint> {
-   const ata = await getAta(owner, mint);
+export async function getWalletUsdcTokenBalance(rpc: Rpc<SolanaRpcApi>, owner: Address): Promise<bigint> {
+   const ata = await getAta(owner, "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr" as Address);
    try {
       return await getTokenAccountBalance(rpc, ata);
    } catch {

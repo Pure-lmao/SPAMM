@@ -249,7 +249,7 @@ function dbMarketToWireId(market: DbMarket): MarketId {
       },
       isPregame: true,
       operator: address(market.operator),
-      mint: address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"),
+      mint: address(market.mint),
    };
 }
 

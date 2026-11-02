@@ -629,6 +629,7 @@ export function promoMarketIdFromIds(
    eventId: number,
    periodId: number,
    operator: Address = DEFAULT_MARKET_OPERATOR,
+   mint: Address = DEFAULT_PROMO_MINT,
 ): MarketId {
    return {
       eventId: { sport: sportId, league: leagueId, event: BigInt(eventId) },
@@ -637,7 +638,7 @@ export function promoMarketIdFromIds(
       isPregame: true,
       player: 0n,
       operator,
-      mint: DEFAULT_PROMO_MINT,
+      mint,
    };
 }
 

@@ -103,6 +103,7 @@ function initMarketTable(): void {
          last_update INTEGER NOT NULL,
          mkt_string TEXT NOT NULL,
          operator TEXT NOT NULL,
+         mint TEXT NOT NULL,
          FOREIGN KEY (event_id) REFERENCES events (event_id),
          FOREIGN KEY (league_id) REFERENCES leagues (id),
          FOREIGN KEY (sport_id) REFERENCES sports (id),
@@ -186,7 +187,8 @@ const MARKETS_AGG_JOIN = `
                'last_odds', last_odds,
                'last_update', last_update,
                'mkt_string', mkt_string,
-               'operator', operator
+               'operator', operator,
+               'mint', mint
             )
          ) AS markets_json
       FROM markets
@@ -257,6 +259,16 @@ export function fetchUngradedStartedEvents(): Map<string, DbEvent> {
       map.set(`${r.sport_id}:${r.league_id}:${r.id}`, r);
    }
    return map;
+}
+
+/** Events that started within the last `windowMs`, with their markets. */
+export function fetchRecentlyStartedEventsWithMarkets(windowMs: number): (DbEvent & { markets: DbMarket[] })[] {
+   const database = getDb();
+   const now = Date.now();
+   const rows = database.query<EventMarketsRow, string[]>(
+      `SELECT e.*, COALESCE(m.markets_json, '[]') AS markets_json FROM events e ${MARKETS_AGG_JOIN} WHERE e.start_time <= ? AND e.start_time > ?`
+   ).all(now.toString(), (now - windowMs).toString());
+   return [...rowsToEventsWithMarketsMap(rows).values()];
 }
 
 export function fetchGradedStartedEvents(): Map<string, DbEvent> {
@@ -524,7 +536,7 @@ export function updateEventScore(eventId: number, leagueId: number, sportId: num
 export function addMarket(meta: DbMarket): void {
    const database = getDb();
    database.query(
-      "INSERT OR REPLACE INTO markets (id, event_id, league_id, sport_id, period_id, player_id, player_name, line_value, last_odds, last_update, mkt_string, operator) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+      "INSERT OR REPLACE INTO markets (id, event_id, league_id, sport_id, period_id, player_id, player_name, line_value, last_odds, last_update, mkt_string, operator, mint) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
    ).run(
       meta.id,
       meta.event_id,
@@ -537,7 +549,8 @@ export function addMarket(meta: DbMarket): void {
       meta.last_odds,
       meta.last_update,
       meta.mkt_string,
-      meta.operator
+      meta.operator,
+      meta.mint
    );
 }
 // addMarket({
@@ -948,6 +961,8 @@ type PromotionalMarketRow = {
    league_id: number;
    event_id: number;
    period_id: number;
+   operator: string;
+   mint: string;
    yes_label: string;
    last_odds: string;
    last_update: number;
@@ -973,6 +988,8 @@ export function initPromotionalMarketsTable(): void {
          league_id INTEGER NOT NULL,
          event_id INTEGER NOT NULL,
          period_id INTEGER NOT NULL,
+         operator TEXT NOT NULL,
+         mint TEXT NOT NULL,
          yes_label TEXT NOT NULL DEFAULT 'Yes',
          last_odds TEXT NOT NULL,
          last_update INTEGER NOT NULL,
@@ -1004,6 +1021,8 @@ function rowToPromotionalMarket(row: PromotionalMarketRow): PromotionalMarket {
       league_id: row.league_id,
       event_id: row.event_id,
       period_id: row.period_id,
+      operator: row.operator,
+      mint: row.mint,
       yes_label: row.yes_label,
       last_odds: row.last_odds,
       last_update: row.last_update,
@@ -1028,9 +1047,9 @@ export function addPromotionalMarket(input: AddPromotionalMarketInput): Promotio
    database
       .query(
          `INSERT INTO promotional_markets (
-            title, description, sport_id, league_id, event_id, period_id,
+            title, description, sport_id, league_id, event_id, period_id, operator, mint,
             yes_label, last_odds, last_update, status, related_events, closes_at, created_at
-         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
+         ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)`,
       )
       .run(
          input.title,
@@ -1039,6 +1058,8 @@ export function addPromotionalMarket(input: AddPromotionalMarketInput): Promotio
          input.league_id,
          input.event_id,
          input.period_id,
+         input.operator,
+         input.mint,
          input.yes_label,
          input.last_odds,
          now,

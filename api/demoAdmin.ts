@@ -16,6 +16,7 @@ import {
    parseAllowAddresses,
 } from "./promoAdmin";
 import { fetchEventsByEventId, fetchPromotionalMarketsForEvent, promotionalMarketToJson } from "./localDb";
+import { DEFAULT_MINT } from "./utils";
 
 const httpUrl = process.env.HELIUS_RPC_URL ?? process.env.CHAINSTACK_RPC_URL;
 const clients = createRpcClients(httpUrl != null ? { httpUrl } : undefined);
@@ -51,7 +52,7 @@ export async function issueDemoFreebet(userRaw: string): Promise<{
       minLegs: 1,
       allowedMms: [],
       allowedOperators: [],
-   }, address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"));
+   }, DEFAULT_MINT);
    const signed = await buildSignV0Transaction(clients.rpc, {
       feePayer: ADMIN_SIGNER,
       instructions: [ix],

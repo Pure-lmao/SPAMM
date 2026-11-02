@@ -53,6 +53,7 @@ pub fn handler(ctx: Context<GetQuoteParlay>, rest: WireRest) -> Result<()> {
       return Ok(());
    }
 
+   let offer = price::parlay::offer(n);
    let mut legs = [ParlayLegQuoted::placeholder(); MAX_PARLAY_LEGS];
    for i in 0..n {
       let off = GET_QUOTE_PARLAY_IX_HEADER_LEN + i * PARLAY_LEG_SEL_LEN;
@@ -80,10 +81,9 @@ pub fn handler(ctx: Context<GetQuoteParlay>, rest: WireRest) -> Result<()> {
          set_parlay(0, 0, 0, &[]);
          return Ok(());
       }
-      legs[i] = leg.with_odds(0);
+      legs[i] = leg.with_odds(offer.leg_odds[i]);
    }
 
-   let (max_amount, odds_scaled) = price::parlay_offer();
    let mut buf = match ctx.accounts.parlay_buffer.try_borrow_mut_data() {
       Ok(b) if b.len() == MM_PARLAY_QUOTE_BUFFER_LEN => b,
       _ => {
@@ -95,8 +95,8 @@ pub fn handler(ctx: Context<GetQuoteParlay>, rest: WireRest) -> Result<()> {
       &mut buf,
       to_pinocchio(ctx.accounts.user.key),
       num_legs,
-      max_amount,
-      odds_scaled,
+      offer.max_amount,
+      offer.odds_scaled,
       &legs[..n],
    )
    .is_err()
@@ -105,6 +105,6 @@ pub fn handler(ctx: Context<GetQuoteParlay>, rest: WireRest) -> Result<()> {
       return Ok(());
    }
    drop(buf);
-   set_parlay(max_amount, odds_scaled, num_legs, &[0u32; MAX_PARLAY_LEGS]);
+   set_parlay(offer.max_amount, offer.odds_scaled, num_legs, &offer.leg_odds);
    Ok(())
 }

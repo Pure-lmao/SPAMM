@@ -1,6 +1,6 @@
 import { addMarket, fetchEventsByEventId, fetchMarket, fetchUpcomingEvents } from "./localDb";
 import type { DbEvent, DbMarket } from "./types";
-import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
+import { DEFAULT_MARKET_OPERATOR, DEFAULT_MINT, safeJSONStringify } from "./utils";
 
 export type MarketLineKind = "spread" | "total";
 
@@ -89,6 +89,7 @@ export function addEventLineMarket(eventId: number, kind: MarketLineKind, line: 
       last_update: Date.now(),
       mkt_string,
       operator: DEFAULT_MARKET_OPERATOR,
+      mint: DEFAULT_MINT,
    };
    addMarket(market);
    return market;

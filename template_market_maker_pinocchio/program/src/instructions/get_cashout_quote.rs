@@ -51,7 +51,7 @@ pub fn process(
       return set_cashout(0);
    }
 
-   let max_payment = price::cashout_payment();
+   let max_payment = price::cashout_single::payment();
    let quote = MMQuoteBuffer {
       discriminator: MM_QUOTE_BUFFER_DISCRIMINATOR,
       is_used: 0,

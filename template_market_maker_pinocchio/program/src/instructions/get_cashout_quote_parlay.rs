@@ -87,7 +87,7 @@ pub fn process(
       legs[i] = leg.with_odds(0);
    }
 
-   let max_payment = price::cashout_payment();
+   let max_payment = price::cashout_parlay::payment();
    let mut buf = match parlay_buffer.try_borrow_mut() {
       Ok(b) if b.len() == MM_PARLAY_QUOTE_BUFFER_LEN => b,
       _ => return set_cashout(0),

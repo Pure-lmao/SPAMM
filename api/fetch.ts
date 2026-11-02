@@ -1,7 +1,7 @@
 import { fetch } from "bun";
 import type { ESPNEvent, ESPNOdds, DbEvent } from "./types";
 import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, updateEventScore, updateMarket, PROMO_MKT_ID } from "./localDb";
-import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
+import { DEFAULT_MARKET_OPERATOR, DEFAULT_MINT, safeJSONStringify } from "./utils";
 import {
    decodeMarketQuotesProxyReturnData,
    getEventGameState,
@@ -17,10 +17,10 @@ import {
 } from "spamm-aggregator-sdk";
 import { address, type Base64EncodedDataResponse } from "@solana/kit";
 import { createRpcClients, simulateTransaction, withRpcRetry, type RpcClients } from "../aggregator/client/txSendV1.ts";
-import { ADMIN_SIGNER } from "../aggregator/client/admin.ts";
 import { gradeBets, gradeParlays } from "./solana.ts";
 import { getAthleteName, getProps } from "./playerProps.ts";
 import { runOddsIndexer } from "./oddsIndexer.ts";
+import { MARKET_OPERATOR_SIGNER } from "./admin.ts";
 
 /** Unused by on-chain quote proxy; must be > 0 for SDK validation. */
 const QUOTE_PROBE_BET_ID = 1n;
@@ -179,6 +179,7 @@ async function setUpcomingEvents() {
                         period_id: 1,
                         line_value: null,
                         operator: DEFAULT_MARKET_OPERATOR,
+                        mint: DEFAULT_MINT,
                      });
                   }
                   if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-4-0`)) {
@@ -195,6 +196,7 @@ async function setUpcomingEvents() {
                         period_id: 1,
                         line_value: null,
                         operator: DEFAULT_MARKET_OPERATOR,
+                        mint: DEFAULT_MINT,
                      });
                   }
                } else {
@@ -212,6 +214,7 @@ async function setUpcomingEvents() {
                         period_id: 0,
                         line_value: null,
                         operator: DEFAULT_MARKET_OPERATOR,
+                        mint: DEFAULT_MINT,
                      });
                   }
                }  
@@ -235,6 +238,7 @@ async function setUpcomingEvents() {
                         period_id: sport.id === 1 ? 1 : 0,
                         line_value: lines.total,
                         operator: DEFAULT_MARKET_OPERATOR,
+                        mint: DEFAULT_MINT,
                      });
                   }
                };
@@ -257,11 +261,12 @@ async function setUpcomingEvents() {
                         period_id: sport.id === 1 ? 1 : 0,
                         line_value: lines.spread,
                         operator: DEFAULT_MARKET_OPERATOR,
+                        mint: DEFAULT_MINT,
                      });
                   }
                }
 
-               const props = await getProps(sport.api_id, league.api_id, event.id);
+               const props = [] as any[];// await getProps(sport.api_id, league.api_id, event.id);
 
                for (const prop of props) {
                   if (!marketIdSet.has(`${sport.id}-${league.id}-${dbEvent.id}-${prop.mktId}-${prop.athleteId}`)) {
@@ -283,6 +288,7 @@ async function setUpcomingEvents() {
                            period_id: sport.id === 1 ? 1 : 0,
                            line_value: prop.line,
                            operator: DEFAULT_MARKET_OPERATOR,
+                           mint: DEFAULT_MINT
                         });
                      }
                   }
@@ -345,7 +351,7 @@ async function cacheOdds() {
    ] as [RpcClients, RpcClients];
    const marketMakers = await withRpcRetry(() => getMmListData(clients[0]!.rpc));
    const mmPrograms = marketMakers.mmProgramAddresses.slice(0, MAX_NUMBER_OF_MMS_PROXY);
-   const fakeSigner = ADMIN_SIGNER;
+   const fakeSigner = MARKET_OPERATOR_SIGNER;
 
    if (mmPrograms.length === 0) {
       console.log("No market makers registered; skipping odds cache");
@@ -377,7 +383,7 @@ async function cacheOdds() {
          },
          isPregame: true,
          operator: address(market.operator),
-         mint: address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"),
+         mint: address(market.mint),
       };
 
       const mmProgramsForMarket = mmPrograms.slice(

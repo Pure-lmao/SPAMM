@@ -7,9 +7,6 @@ export const SIM_FEE_PAYER_ADDRESS = address("BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBi
 /** Market operator embedded in `MarketId` (grading authority for dev). */
 export const DEFAULT_MARKET_OPERATOR = SIM_FEE_PAYER_ADDRESS;
 
-/** Devnet USDC. UI markets quote this mint until an operator picks another. */
-export const DEFAULT_MARKET_MINT = address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
-
 export const EVENT_GAME_STATE_PG = getEventGameState("PG", 0, 0, 0, 0);
 
 export const DEFAULT_EVENT_STATE_SEQUENCE = 1;
@@ -18,15 +15,15 @@ export function apiSportToSdk(sportId: number): Sport {
    return sportId as Sport;
 }
 
-export function parseOperatorAddress(raw: string | undefined | null): Address {
+function parseAddressOr(raw: string | undefined | null, fallback: Address): Address {
    const t = raw?.trim() ?? "";
    if (t === "") {
-      return DEFAULT_MARKET_OPERATOR;
+      return fallback;
    }
    try {
       return address(t);
    } catch {
-      return DEFAULT_MARKET_OPERATOR;
+      return fallback;
    }
 }
 
@@ -37,8 +34,8 @@ export function buildMarketId(
    mktWireId: number,
    period: number,
    player: bigint = 0n,
-   operator: Address = DEFAULT_MARKET_OPERATOR,
-   mint: Address = DEFAULT_MARKET_MINT,
+   operator: Address,
+   mint: Address,
 ) {
    return {
       eventId: { event: BigInt(eventId), league: leagueId, sport },

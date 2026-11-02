@@ -193,7 +193,6 @@ fn finish_fill_parlay_cashout_after_ticket(
 ) -> ProgramResult {
    let (fixed, mm_accounts) = accounts.split_at_mut(17);
    // Exact fixed layout (17). `config_pda` / `associated_token_program` already checked in preamble.
-   #[allow(unused_variables)]
    let [
       feepayer,
       ticket_feepayer,
@@ -208,7 +207,7 @@ fn finish_fill_parlay_cashout_after_ticket(
       config_pda,
       mint,
       token_program,
-      associated_token_program,
+      _associated_token_program,
       rent_sysvar,
       system_program,
       clock_sysvar,

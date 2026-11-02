@@ -10,12 +10,12 @@ import {
 import type { Address } from "@solana/kit";
 import { address } from "@solana/kit";
 import type { DbEvent, PromoRelatedEvent, PromotionalMarket } from "./types";
-import { DEFAULT_MARKET_OPERATOR, safeJSONStringify } from "./utils";
+import { DEFAULT_MARKET_OPERATOR, DEFAULT_MINT, safeJSONStringify } from "./utils";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "../aggregator/client/txSend";
-import { ADMIN_SIGNER } from "../aggregator/client/admin";
 import { BetResult, getBetsData, getGradeBetsIx} from "spamm-aggregator-sdk";
 import { MAX_PROMO_ALLOWED } from "../promo/backend/src/codex.ts";
 import { ODDS_SCALE } from "../promo/backend/src/constants.ts";
+import { PROMO_ADMIN_SIGNER } from "./admin";
 import {
    buildPromoInitMarketFromParts,
    createPromoAdminContext,
@@ -110,7 +110,14 @@ export function parseAllowAddresses(raw: string): Address[] {
 }
 
 export function marketIdForPromo(promo: PromotionalMarket): MarketId {
-   return promoMarketIdFromIds(promo.sport_id, promo.league_id, promo.event_id, promo.period_id);
+   return promoMarketIdFromIds(
+      promo.sport_id,
+      promo.league_id,
+      promo.event_id,
+      promo.period_id,
+      address(promo.operator),
+      address(promo.mint),
+   );
 }
 
 export type CreatePromotionalMarketInput = {
@@ -198,6 +205,7 @@ export async function createPromotionalMarket(input: CreatePromotionalMarketInpu
       2,
       usdcToMicro(input.maxUsdc),
       usdcToMicro(input.maxTotalUsdc),
+      DEFAULT_MINT,
    );
    await runPromoBootstrapMarket(ctx, {
       payload,
@@ -213,6 +221,8 @@ export async function createPromotionalMarket(input: CreatePromotionalMarketInpu
       league_id,
       event_id,
       period_id,
+      operator: DEFAULT_MARKET_OPERATOR,
+      mint: DEFAULT_MINT,
       yes_label: input.yesLabel?.trim() || "Yes",
       last_odds: lastOdds,
       related_events,
@@ -299,19 +309,7 @@ export async function gradePromoBets(promoId: number): Promise<number> {
 
    const bets = await getBetsData(clients.rpc, { 
       result: BetResult.Pending, 
-      marketId: {
-         eventId: { 
-            event: BigInt(promo.event_id), 
-            league: promo.league_id, 
-            sport: promo.sport_id 
-         }, 
-         player: BigInt(0),
-         mkt: PROMO_MKT_ID,
-         period: promo.period_id,
-         isPregame: true,
-         operator: DEFAULT_MARKET_OPERATOR,
-         mint: address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr"),
-      },
+      marketId: marketIdForPromo(promo),
    });
    const resultAddresses: [BetResult, Address][] = [];
 
@@ -324,12 +322,12 @@ export async function gradePromoBets(promoId: number): Promise<number> {
    for (let i = 0; i < resultAddresses.length; i += MAX_RESULTS_PER_TX) {
       const batch = resultAddresses.slice(i, i + MAX_RESULTS_PER_TX);
       const ix = await getGradeBetsIx(
-         ADMIN_SIGNER.address,
+         PROMO_ADMIN_SIGNER.address,
          new Uint8Array(batch.map(([r]) => r)),
          batch.map(([, addr]) => addr),
       );
-      await simulateTransaction(clients.rpc, [ix], [ADMIN_SIGNER]);
-      await sendAndConfirmInstructions([ix], [ADMIN_SIGNER]);
+      // await simulateTransaction(clients.rpc, [ix], [PROMO_ADMIN_SIGNER]);
+      await sendAndConfirmInstructions([ix], [PROMO_ADMIN_SIGNER]);
    }
 
    return resultAddresses.length;

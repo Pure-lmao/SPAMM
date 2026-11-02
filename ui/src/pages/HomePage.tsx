@@ -4,7 +4,6 @@ import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import type { BetColumn, MarketRow } from "../betting/types";
 import { useBetSlip } from "../betting/BetSlipContext";
-import { DEFAULT_MARKET_OPERATOR } from "../betting/chainIds";
 import { displayEventTitle } from "../markets/eventDisplay";
 import { LineWithOddsCell, MainOddsCell, EmptyTotalOddsPlaceholder } from "../markets/MarketOddsCells";
 import {
@@ -44,8 +43,9 @@ function toMarketRow(m: {
    line_value: number | null;
    player_id?: number;
    player_name?: string;
-   operator?: string;
-   sport_id?: number;
+   operator: string;
+   mint: string;
+   sport_id: number;
 }): MarketRow {
    return {
       id: m.id,
@@ -55,6 +55,7 @@ function toMarketRow(m: {
       player_id: m.player_id,
       player_name: m.player_name,
       operator: m.operator,
+      mint: m.mint,
       sport_id: m.sport_id,
    };
 }
@@ -325,7 +326,8 @@ export function HomePage(): ReactElement {
                                                    periodId: row.period_id,
                                                    playerId: row.player_id ?? 0,
                                                    playerName: row.player_name ?? "",
-                                                   operator: row.operator || DEFAULT_MARKET_OPERATOR,
+                                                   operator: row.operator,
+                                                   mint: row.mint,
                                                    column,
                                                    outcomeIndex,
                                                    mktString: row.mkt_string,

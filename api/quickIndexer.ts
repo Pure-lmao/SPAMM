@@ -38,7 +38,8 @@ import { AGGREGATOR_PROGRAM_ID,
    type AggregatorInstructionData, 
 } from "spamm-aggregator-sdk";
 
-const DEVNET_USDC_MINT = "Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr";
+/** `mint` account index shared by all four cashout fill instruction layouts. */
+const CASHOUT_IX_MINT_INDEX = 11;
 import { createRpcClients } from "../aggregator/client/txSend";
 import { withRpcRetry } from "../market_maker/client/txSend";
 import { foldParlayResult, safeJSONStringify } from "./utils";
@@ -79,6 +80,7 @@ export type Selection = {
    player_id: number;
    is_pregame: number;
    operator: string;
+   mint: string;
    side: number;
    event_state_sequence: number;
    event_game_state: EventGameState;
@@ -202,6 +204,7 @@ function selectionFromMarketId(marketId: MarketId, side: number, eventStateSeque
       player_id: Number(marketId.player),
       is_pregame: marketId.isPregame ? 1 : 0,
       operator: marketId.operator,
+      mint: marketId.mint,
       side,
       event_state_sequence: eventStateSequence,
       event_game_state: eventGameState,
@@ -322,7 +325,7 @@ function parseUiTokenAmount(raw: unknown): bigint {
    return 0n;
 }
 
-function tokenIncreaseForOwner(meta: unknown, owner: string): number | null {
+function tokenIncreaseForOwner(meta: unknown, owner: string, mint: string): number | null {
    if (meta == null || typeof meta !== "object") {
       return null;
    }
@@ -336,7 +339,7 @@ function tokenIncreaseForOwner(meta: unknown, owner: string): number | null {
          continue;
       }
       const row = item as { owner?: string; mint?: string; uiTokenAmount?: unknown };
-      if (row.owner !== owner || row.mint !== DEVNET_USDC_MINT) {
+      if (row.owner !== owner || row.mint !== mint) {
          continue;
       }
       preAmt += parseUiTokenAmount(row.uiTokenAmount);
@@ -346,7 +349,7 @@ function tokenIncreaseForOwner(meta: unknown, owner: string): number | null {
          continue;
       }
       const row = item as { owner?: string; mint?: string; uiTokenAmount?: unknown };
-      if (row.owner !== owner || row.mint !== DEVNET_USDC_MINT) {
+      if (row.owner !== owner || row.mint !== mint) {
          continue;
       }
       postAmt += parseUiTokenAmount(row.uiTokenAmount);
@@ -1168,6 +1171,7 @@ async function indexAggregatorInstruction(
 
    else if (decodedTransaction.kind === "fillCashout" || decodedTransaction.kind === "fillRfqCashout") {
       const data = decodedTransaction.data;
+      const mint = ix.accounts[CASHOUT_IX_MINT_INDEX]!;
       let cashoutAccount: CashoutAccountData;
       let fetchedFromChain = true;
       try {
@@ -1193,7 +1197,7 @@ async function indexAggregatorInstruction(
                player: 0n,
                isPregame: true,
                operator: SYSTEM_PROGRAM_ID,
-               mint: SYSTEM_PROGRAM_ID,
+               mint,
             },
             side: 255,
             amount: data.amount,
@@ -1225,7 +1229,7 @@ async function indexAggregatorInstruction(
       const escrow = await recordCashoutEscrowIfLive(ix.accounts[8]!, meta);
       const payment = escrow != null
          ? Number(escrow.payment)
-         : tokenIncreaseForOwner(transactionMeta.rpcMeta, userOwner);
+         : tokenIncreaseForOwner(transactionMeta.rpcMeta, userOwner, mint);
       applyOrigBetCashoutFill(
          ix.accounts[4]!,
          cashoutAccount.amount,
@@ -1238,6 +1242,7 @@ async function indexAggregatorInstruction(
 
    else if (decodedTransaction.kind === "fillParlayCashout" || decodedTransaction.kind === "fillRfqParlayCashout") {
       const data = decodedTransaction.data;
+      const mint = ix.accounts[CASHOUT_IX_MINT_INDEX]!;
       let cashoutParlayAccount: CashoutParlayAccountData;
       let cashoutParlaySelections: Selection[];
       let fetchedFromChain = true;
@@ -1272,7 +1277,7 @@ async function indexAggregatorInstruction(
                   player: 0n,
                   isPregame: true,
                   operator: SYSTEM_PROGRAM_ID,
-                  mint: SYSTEM_PROGRAM_ID,
+                  mint,
                },
                255,
                snapshot.eventStateSequence,
@@ -1296,7 +1301,7 @@ async function indexAggregatorInstruction(
       const escrow = await recordCashoutEscrowIfLive(ix.accounts[8]!, meta);
       const payment = escrow != null
          ? Number(escrow.payment)
-         : tokenIncreaseForOwner(transactionMeta.rpcMeta, userOwner);
+         : tokenIncreaseForOwner(transactionMeta.rpcMeta, userOwner, mint);
       applyOrigBetCashoutFill(
          ix.accounts[4]!,
          cashoutParlayAccount.amount,
