@@ -348,6 +348,9 @@ function getMatchStartTime(match: PandaScoreMatch): number | null {
    if (match.status === "running" || match.status === "finished") {
       return match.begin_at ? new Date(match.begin_at).getTime() : null;
    }
+   if (match.status === "canceled") {
+      return 0;
+   }
    return null;
 }
 
