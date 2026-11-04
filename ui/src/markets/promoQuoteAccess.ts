@@ -14,6 +14,9 @@ export async function promoIsOpenToUser(
       apiSportToSdk(promo.sport_id),
       promo.mkt_id,
       promo.period_id,
+      0n,
+      promo.operator as Address,
+      promo.mint as Address,
    );
    const q = await runMmQuoteFlow({
       rpc,

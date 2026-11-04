@@ -210,7 +210,7 @@ export async function createPromotionalMarket(input: CreatePromotionalMarketInpu
    await runPromoBootstrapMarket(ctx, {
       payload,
       odds0: oddsScaled,
-      odds1: oddsScaled,
+      odds1: 0n,
       odds2: 0n,
    });
 

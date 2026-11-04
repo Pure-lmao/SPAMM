@@ -172,6 +172,21 @@ export async function runPromoForceCloseQuoteBuffers(
    );
 }
 
+export async function runPromoForceCloseConfig(
+   ctx: PromoAdminContext,
+   options?: SendAdminOptions,
+) {
+   await assertPromoConfigAdminSigner(ctx);
+   const [configPda] = await getMmConfigPda(ctx.programId);
+   console.log(`[promo-force-close-config] config ${configPda}`);
+   return sendAdminInstructions(ctx, options?.groupId ?? 'promo-force-close-config', async () => [
+      {
+         id: 'promo-force-close-config',
+         instruction: await getPromoForceClosePdaIx(ctx.signer.address, ctx.programId, configPda),
+      },
+   ], options);
+}
+
 /** Grow config PDA to header+status and write `rfq_signer` = this admin key. */
 export async function runPromoWriteConfigRfqSigner(
    ctx: PromoAdminContext,

@@ -42,6 +42,7 @@ import {
    runPromoWriteConfigRfqSigner,
    runSetMarketMaxAmount,
    runSetMarketMaxTotalAmount,
+   runPromoForceCloseConfig,
 } from '../adminRun';
 import { ODDS_SCALE } from '../constants';
 import {
@@ -260,6 +261,10 @@ async function main(): Promise<void> {
       case 'force-close-quote-buffers':
          await runPromoForceCloseQuoteBuffers(ctx, sendOpts);
          break;
+
+      case 'force-close-config':
+        await runPromoForceCloseConfig(ctx, sendOpts);
+        break;
 
       default:
          throw new Error(`unknown command: ${cmd}`);
