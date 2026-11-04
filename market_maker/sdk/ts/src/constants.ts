@@ -13,11 +13,11 @@ export const MARKET_MAKER_PROGRAM_ID: Address = address(
 );
 
 export const AGGREGATOR_PROGRAM_ID: Address = address(
-   '5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H',
+   'yanoV1SiWVpRFErBBGZiYp6LeRPM1X4CrfFKQZ1DU7k',
 );
 
 export const AGGREGATOR_CONFIG_PDA: Address = address(
-   'ZcXq4zwiRPUwHXm1mLtnDDyo2R1QbFzDYQS6BUD97FQ',
+   'DSTzgVRod95quSPxa7PL89GSdBFT9K8FcXxbT2eUbL1A',
 );
 
 export const SYSTEM_PROGRAM_ID: Address = address(

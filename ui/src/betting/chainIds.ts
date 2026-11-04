@@ -5,7 +5,7 @@ import { Sport, getEventGameState } from "spamm-aggregator-sdk";
 export const SIM_FEE_PAYER_ADDRESS = address("BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW");
 
 /** Market operator embedded in `MarketId` (grading authority for dev). */
-export const DEFAULT_MARKET_OPERATOR = SIM_FEE_PAYER_ADDRESS;
+export const DEFAULT_MARKET_OPERATOR = address("YLmoSQiCt8UmM6f29DorWCx2CPqwij5XiFuWt38MnP8");
 
 export const EVENT_GAME_STATE_PG = getEventGameState("PG", 0, 0, 0, 0);
 

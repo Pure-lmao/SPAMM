@@ -201,6 +201,9 @@ export function HomePage(): ReactElement {
                         sport.leagues.map((league) => {
                            const lk = leagueCollapseKey(sport.id, league.id);
                            const leagueCollapsed = collapsedLeagues.has(lk);
+                           const mainThreeWay =
+                              sport.id === 1 ||
+                              league.events.some((ev) => getMainOddsDetail(ev.markets, sport.id)?.values.length === 3);
                            return (
                               <div key={lk} className="league-block">
                                  <button
@@ -237,7 +240,7 @@ export function HomePage(): ReactElement {
                                        <thead>
                                           <tr className="thead-row-primary">
                                              <th rowSpan={2} className="th-match" aria-label={oddsTableLabels.teamsAndStart} />
-                                             <th>{sport.id === 1 ? oddsTableLabels.main1x2 : oddsTableLabels.mainMl}</th>
+                                             <th>{mainThreeWay ? oddsTableLabels.main1x2 : oddsTableLabels.mainMl}</th>
                                              <th>{oddsTableLabels.spread}</th>
                                              <th>
                                                 <div
@@ -256,9 +259,9 @@ export function HomePage(): ReactElement {
                                           <tr className="thead-row-sub">
                                              <th>
                                                 <div
-                                                   className={`th-sub-inner th-sub-inner--grid-${sport.id === 1 ? "3" : "2"}`}
+                                                   className={`th-sub-inner th-sub-inner--grid-${mainThreeWay ? "3" : "2"}`}
                                                 >
-                                                   {sport.id === 1 ? (
+                                                   {mainThreeWay ? (
                                                       <>
                                                          <span>{oddsTableLabels.home}</span>
                                                          <span>{oddsTableLabels.draw}</span>
@@ -298,7 +301,14 @@ export function HomePage(): ReactElement {
                                              const mkts = ev.markets;
                                              const sp = getSpreadOdds(mkts, sport.id);
                                              const tot = getTotalOdds(mkts, sport.id);
-                                             const mainDetail = getMainOddsDetail(mkts, sport.id);
+                                             const rawMainDetail = getMainOddsDetail(mkts, sport.id);
+                                             const padMainToThreeWay = mainThreeWay && rawMainDetail?.values.length === 2;
+                                             const mainDetail =
+                                                rawMainDetail != null && padMainToThreeWay
+                                                   ? { ...rawMainDetail, values: [rawMainDetail.values[0]!, 0, rawMainDetail.values[1]!] }
+                                                   : rawMainDetail;
+                                             const mainOutcome = (displayIndex: number) =>
+                                                padMainToThreeWay && displayIndex === 2 ? 1 : displayIndex;
                                              const moreN = extraMarketsCount(mkts, sport.id);
 
                                              const toggleSheet = (
@@ -365,18 +375,18 @@ export function HomePage(): ReactElement {
                                                       <MainOddsCell
                                                          detail={mainDetail}
                                                          sportId={sport.id}
-                                                         isIndexSelected={(outcomeIndex) =>
+                                                         isIndexSelected={(displayIndex) =>
                                                             mainDetail != null &&
-                                                            legSelected("main", toMarketRow(mainDetail.market), outcomeIndex)
+                                                            legSelected("main", toMarketRow(mainDetail.market), mainOutcome(displayIndex))
                                                          }
-                                                         onPick={(outcomeIndex, decimalOdds) => {
+                                                         onPick={(displayIndex, decimalOdds) => {
                                                             if (mainDetail == null) {
                                                                return;
                                                             }
                                                             toggleSheet(
                                                                "main",
                                                                toMarketRow(mainDetail.market),
-                                                               outcomeIndex,
+                                                               mainOutcome(displayIndex),
                                                                decimalOdds,
                                                             );
                                                          }}

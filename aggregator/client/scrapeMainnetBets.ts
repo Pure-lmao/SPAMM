@@ -19,7 +19,7 @@ import { getBase58Encoder } from "@solana/kit";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 
-const PROGRAM_ID = "5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H";
+const PROGRAM_ID = "yanoV1SiWVpRFErBBGZiYp6LeRPM1X4CrfFKQZ1DU7k";
 const USDC_MINT = "EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v";
 const ODDS_SCALE = 10_000n;
 const SINGLE_DISC = 3;

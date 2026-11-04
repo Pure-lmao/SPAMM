@@ -7,9 +7,9 @@ export const PROMO_PROGRAM_ID: Address = address(
 
 export const ODDS_SCALE = 10_000;
 
-/** Same pubkey as `api/utils.ts` / UI `DEFAULT_MARKET_OPERATOR`. */
+/** Same pubkey as `api/utils.ts` `DEFAULT_MARKET_OPERATOR`. */
 export const DEFAULT_MARKET_OPERATOR: Address = address(
-   'BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW',
+   'YLmoSQiCt8UmM6f29DorWCx2CPqwij5XiFuWt38MnP8',
 );
 
 /** Devnet USDC. Promo CLI markets use this unless `--mint` is set. */

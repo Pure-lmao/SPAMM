@@ -1,6 +1,6 @@
 import { betSlipLabel, type MarketDisplayCtx } from "spamm-aggregator-sdk";
 import type { MarketRow } from "./types";
-import { uiMarketDisplayCtx } from "../markets/eventMarketsDisplay";
+import { isEsportsMapPeriod, periodCaption, uiMarketDisplayCtx } from "../markets/eventMarketsDisplay";
 
 export type MarketLabelTeams = {
    homeName: string;
@@ -31,5 +31,10 @@ export function buildMarketLabel(
    side: number,
    teams?: MarketLabelTeams,
 ): string {
-   return betSlipLabel(market.id, side, ctxFromRow(market, teams));
+   const label = betSlipLabel(market.id, side, ctxFromRow(market, teams));
+   const sportId = market.sport_id ?? 0;
+   if (isEsportsMapPeriod(sportId, market.period_id)) {
+      return `${periodCaption(sportId, market.period_id)} · ${label}`;
+   }
+   return label;
 }

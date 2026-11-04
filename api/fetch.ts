@@ -1,6 +1,6 @@
 import { fetch } from "bun";
 import type { ESPNEvent, ESPNOdds, DbEvent } from "./types";
-import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, updateEventScore, updateMarket, PROMO_MKT_ID } from "./localDb";
+import { addEvent, addMarket, fetchEvents, fetchLeagues, fetchSports, fetchUngradedStartedEvents, fetchUpcomingMarkets, initEventPeriodResultTable, updateEventScore, updateMarket, PROMO_MKT_ID } from "./localDb";
 import { DEFAULT_MARKET_OPERATOR, DEFAULT_MINT, safeJSONStringify } from "./utils";
 import {
    decodeMarketQuotesProxyReturnData,
@@ -21,6 +21,7 @@ import { gradeBets, gradeParlays } from "./solana.ts";
 import { getAthleteName, getProps } from "./playerProps.ts";
 import { runOddsIndexer } from "./oddsIndexer.ts";
 import { MARKET_OPERATOR_SIGNER } from "./admin.ts";
+import { isPandaScoreSport, setFinishedEsportsEvents, setUpcomingEsportsEvents, updateEsportsStartTimes } from "./pandascore";
 
 /** Unused by on-chain quote proxy; must be > 0 for SDK validation. */
 const QUOTE_PROBE_BET_ID = 1n;
@@ -152,6 +153,9 @@ async function setUpcomingEvents() {
 
    for (const [id, league] of leagues) {
       const sport = sports.get(league.sport_id)!;
+      if (isPandaScoreSport(sport.id)) {
+         continue;
+      }
       if(sport.id < 100) {
          const scoreboard = await getEvents(sport.api_id, league.api_id, 5);
          for (const event of scoreboard) {
@@ -320,6 +324,9 @@ async function setFinishedEvents() {
 
    for (const [id, league] of leagues) {
       const sport = sports.get(league.sport_id)!;
+      if (isPandaScoreSport(sport.id)) {
+         continue;
+      }
       const scoreboard = await getEvents(sport.api_id, league.api_id, 2, true);
       for (const event of scoreboard) {
          // console.log("scoreboard event:", event.id);
@@ -460,14 +467,20 @@ function runRepeatedly(fn: () => Promise<void>, intervalMs: number, label: strin
 }
 
 function main() {
-   runRepeatedly(async () => await setUpcomingEvents(), 1000 * 60 * 60, "setUpcomingEvents");
+   initEventPeriodResultTable();
+   runRepeatedly(async () => {
+      await setUpcomingEvents();
+      await setUpcomingEsportsEvents();
+   }, 1000 * 60 * 60, "setUpcomingEvents");
    runRepeatedly(async () => {
       await setFinishedEvents();
+      await setFinishedEsportsEvents();
       await gradeBets();
       await gradeParlays();
    }, 1000 * 60 * 30, "setFinishedEvents/grade");
    // runRepeatedly(() => cacheOdds(), 1000 * 60 * 5, "cacheOdds");
    runRepeatedly(async () => await runOddsIndexer(), 1000 * 60 * 5, "runOddsIndexer");
+   runRepeatedly(async () => await updateEsportsStartTimes(), 1000 * 60 * 5, "updateEsportsStartTimes");
 }
 
 if (import.meta.main) {

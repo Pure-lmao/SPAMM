@@ -4,6 +4,7 @@ import type {
    DbSport,
    DbLeague,
    DbEvent,
+   DbEventPeriodResult,
    DbMarket,
    BetCardEvent,
    GroupedSport,
@@ -112,6 +113,24 @@ function initMarketTable(): void {
    `);
 }
 
+export function initEventPeriodResultTable(): void {
+   const database = getDb();
+   database.run(`
+      CREATE TABLE IF NOT EXISTS event_period_results (
+         event_id INTEGER NOT NULL,
+         league_id INTEGER NOT NULL,
+         sport_id INTEGER NOT NULL,
+         period_id INTEGER NOT NULL,
+         home_score INTEGER,
+         away_score INTEGER,
+         is_void INTEGER NOT NULL DEFAULT 0,
+         FOREIGN KEY (sport_id) REFERENCES sports (id),
+         FOREIGN KEY (league_id) REFERENCES leagues (id),
+         PRIMARY KEY (event_id, league_id, sport_id, period_id)
+      );
+   `);
+}
+
 function dropTables(): void {
    const database = getDb();
    database.run(`
@@ -119,6 +138,7 @@ function dropTables(): void {
       DROP TABLE IF EXISTS leagues;
       DROP TABLE IF EXISTS events;
       DROP TABLE IF EXISTS markets;
+      DROP TABLE IF EXISTS event_period_results;
    `);
 }
 
@@ -128,6 +148,7 @@ export function initTables(): void {
    initLeagueTable();
    initEventTable();
    initMarketTable();
+   initEventPeriodResultTable();
 }
 // initTables()
 
@@ -165,7 +186,7 @@ export function fetchLeaguesBySport(sportId: number): Map<number, DbLeague> {
    ).all(sportId.toString());
    const map = new Map<number, DbLeague>();
    for (const r of rows) {
-      map.set(r.sport_id, r);
+      map.set(r.id, r);
    }
    return map;
 }
@@ -269,6 +290,13 @@ export function fetchRecentlyStartedEventsWithMarkets(windowMs: number): (DbEven
       `SELECT e.*, COALESCE(m.markets_json, '[]') AS markets_json FROM events e ${MARKETS_AGG_JOIN} WHERE e.start_time <= ? AND e.start_time > ?`
    ).all(now.toString(), (now - windowMs).toString());
    return [...rowsToEventsWithMarketsMap(rows).values()];
+}
+
+export function fetchUngradedEventsSince(sportIds: number[], sinceMs: number): DbEvent[] {
+   const database = getDb();
+   return database.query<DbEvent, string[]>(
+      `SELECT * FROM events WHERE sport_id IN (${sportIds.map(() => "?").join(",")}) AND start_time >= ? AND home_score IS NULL AND away_score IS NULL`
+   ).all(...sportIds.map((id) => id.toString()), sinceMs.toString());
 }
 
 export function fetchGradedStartedEvents(): Map<string, DbEvent> {
@@ -531,6 +559,44 @@ export function updateEventScore(eventId: number, leagueId: number, sportId: num
    database.query(
       "UPDATE events SET home_score = ?, away_score = ? WHERE id = ? AND league_id = ? AND sport_id = ?"
    ).run(home_score, away_score, eventId, leagueId, sportId);
+}
+
+export function updateEventStartTime(eventId: number, leagueId: number, sportId: number, start_time: number): void {
+   const database = getDb();
+   database.query(
+      "UPDATE events SET start_time = ? WHERE id = ? AND league_id = ? AND sport_id = ?"
+   ).run(start_time, eventId, leagueId, sportId);
+}
+
+/** Period rows are written before the event score, since a non-null event score makes the event gradeable. */
+export function setEventResults(
+   eventId: number,
+   leagueId: number,
+   sportId: number,
+   home_score: number,
+   away_score: number,
+   periodResults: DbEventPeriodResult[],
+): void {
+   const database = getDb();
+   const insertPeriod = database.query(
+      "INSERT OR REPLACE INTO event_period_results (event_id, league_id, sport_id, period_id, home_score, away_score, is_void) VALUES (?, ?, ?, ?, ?, ?, ?)"
+   );
+   database.transaction(() => {
+      for (const r of periodResults) {
+         insertPeriod.run(r.event_id, r.league_id, r.sport_id, r.period_id, r.home_score, r.away_score, r.is_void);
+      }
+      updateEventScore(eventId, leagueId, sportId, home_score, away_score);
+   })();
+}
+
+export function fetchEventPeriodResults(): Map<string, DbEventPeriodResult> {
+   const database = getDb();
+   const rows = database.query<DbEventPeriodResult, []>("SELECT * FROM event_period_results").all();
+   const map = new Map<string, DbEventPeriodResult>();
+   for (const r of rows) {
+      map.set(`${r.sport_id}:${r.league_id}:${r.event_id}:${r.period_id}`, r);
+   }
+   return map;
 }
 
 export function addMarket(meta: DbMarket): void {

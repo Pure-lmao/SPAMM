@@ -47,15 +47,24 @@ export function formatTranslatedDecimal(decimal: number): string {
    return `${sign}${rounded.toFixed(decimals)}`;
 }
 
-/** Decimal string used on market buttons (2 dp) or bet-slip labels (3 dp under 10). */
+/**
+ * `decimal` rounded down to `places`, so a shown price is never above the real one (1.7376 → "1.73").
+ * The epsilon keeps exact values like 1.73 (172.999… after scaling) from dropping a step.
+ */
+export function floorToFixed(decimal: number, places: number): string {
+   const factor = 10 ** places;
+   return (Math.floor(decimal * factor + 1e-9) / factor).toFixed(places);
+}
+
+/** Decimal string used on market buttons (2 dp) or bet-slip labels (3 dp under 10). Always rounded down. */
 export function formatDecimalOdds(decimal: number, places: DecimalPlaces = 2): string {
    if (!Number.isFinite(decimal)) {
       return "—";
    }
    if (places === "slip") {
-      return decimal >= 10 ? decimal.toFixed(2) : decimal.toFixed(3);
+      return decimal >= 10 ? floorToFixed(decimal, 2) : floorToFixed(decimal, 3);
    }
-   return decimal.toFixed(places);
+   return floorToFixed(decimal, places);
 }
 
 function nearestAmerican(decimal: number): number | null {
@@ -82,7 +91,7 @@ export function americanToDecimal(american: number): number | null {
 
 /**
  * Display a decimal price in the selected format.
- * American is a whole number (for example -150). Percent is implied probability, nearest whole number.
+ * American is a whole number (for example -150). Percent is implied probability, nearest 1 dp.
  */
 export function convertOdds(decimal: number, format: OddsFormat, places: DecimalPlaces = 2): string {
    if (!Number.isFinite(decimal) || decimal <= 0) {
@@ -98,11 +107,11 @@ export function convertOdds(decimal: number, format: OddsFormat, places: Decimal
       }
       return american > 0 ? `+${american}` : String(american);
    }
-   const pct = Math.round(100 / decimal);
+   const pct = Math.round((100 / decimal) * 10) / 10;
    if (!Number.isFinite(pct)) {
       return "—";
    }
-   return `${pct}%`;
+   return `${pct.toFixed(1)}%`;
 }
 
 /** Bet slip price. Decimal is shown alone; other formats include the on-chain decimal in brackets. */
@@ -196,23 +205,24 @@ export function formatOddsInputFromDecimal(decimal: number, format: OddsFormat):
       }
       return american > 0 ? `+${american}` : String(american);
    }
-   let pct = Math.round(100 / decimal);
-   if (!Number.isFinite(pct)) {
+   // Tenths of a percent, so stepping by 0.1 stays exact.
+   let tenths = Math.round(1000 / decimal);
+   if (!Number.isFinite(tenths)) {
       return "";
    }
-   if (pct < 1) {
-      pct = 1;
+   if (tenths < 1) {
+      tenths = 1;
    }
-   if (pct > 99) {
-      pct = 99;
+   if (tenths > 1000) {
+      tenths = 1000;
    }
-   for (let i = 0; i < 5 && pct < 99; i++) {
-      if (100 / pct <= decimal + 1e-8) {
+   for (let i = 0; i < 5 && tenths < 1000; i++) {
+      if (1000 / tenths <= decimal + 1e-8) {
          break;
       }
-      pct += 1;
+      tenths += 1;
    }
-   return String(pct);
+   return (tenths / 10).toFixed(1);
 }
 
 export function oddsFormatInputLabel(base: string, format: OddsFormat): string {

@@ -54,7 +54,7 @@ function PeriodMeta({ sportId, m }: { sportId: number; m: UiMarket }): ReactElem
    if (!shouldShowPeriodBadge(sportId, m)) {
       return null;
    }
-   return <span className="event-market-period">{periodCaption(m.period_id)}</span>;
+   return <span className="event-market-period">{periodCaption(sportId, m.period_id)}</span>;
 }
 
 export function EventMarketsPage(): ReactElement {

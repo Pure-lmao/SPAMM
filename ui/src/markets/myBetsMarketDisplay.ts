@@ -1,8 +1,8 @@
-import { betSlipLabel, groupTitle, periodCaption, type MarketId } from "spamm-aggregator-sdk";
+import { betSlipLabel, groupTitle, type MarketId } from "spamm-aggregator-sdk";
 import { useMemo } from "react";
 import { useI18n } from "../i18n/useI18n";
 import { displayEventTitle } from "./eventDisplay";
-import { shouldShowPeriodBadge } from "./eventMarketsDisplay";
+import { periodCaption, shouldShowPeriodBadge } from "./eventMarketsDisplay";
 import type { BetCardEvent, UiMarket, UiPromotionalMarket } from "./types";
 
 export function eventLookupKey(chain: MarketId): string {
@@ -94,7 +94,7 @@ export function betMarketDisplayLines(
       const pick = promoPickLabel(side, promo, copy.no);
       const sportId = ev?.sport_id ?? promo.sport_id;
       const periodMarket = shouldShowPeriodBadge(sportId, { period_id: promo.period_id } as UiMarket)
-         ? `${periodCaption(promo.period_id)} · ${promo.title}`
+         ? `${periodCaption(sportId, promo.period_id)} · ${promo.title}`
          : promo.title;
       return {
          eventTitle,
@@ -136,7 +136,7 @@ export function betMarketDisplayLines(
    const category = isPromoMarketChain(chain) ? copy.promo : groupTitle(mkt, ctx);
    const periodId = chain.period;
    const periodMarket = shouldShowPeriodBadge(ev.sport_id, { period_id: periodId } as UiMarket)
-      ? `${periodCaption(periodId)} · ${category}`
+      ? `${periodCaption(ev.sport_id, periodId)} · ${category}`
       : category;
    const detailLine = `${periodMarket} · ${pick}`;
    return {

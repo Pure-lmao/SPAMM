@@ -434,7 +434,7 @@ fn fill_bet_with_netting_line_m4() {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let ix = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       add_line_account_metas(crate::common::netting_pda_for_event(&eid)),
    );
@@ -517,7 +517,7 @@ fn fill_bet_netting_m4_offset_opposing_sides() {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let ix = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       add_line_account_metas(crate::common::netting_pda_for_event(&eid)),
    );

@@ -31,6 +31,17 @@ export type DbEvent = {
    away_score: number | null;
 };
 
+/** Per-period result (e.g. esports map N = period 10 + N). `is_void` = 1 voids markets on that period. */
+export type DbEventPeriodResult = {
+   event_id: number;
+   league_id: number;
+   sport_id: number;
+   period_id: number;
+   home_score: number | null;
+   away_score: number | null;
+   is_void: number;
+};
+
 export type DbMarket = {
    id: number;
    event_id: number;
@@ -348,6 +359,51 @@ export type ESPNPropsWithCurrentLine = ESPNPropsBase & {
       }
    }
 }
+
+export type PandaScoreTier = "s" | "a" | "b" | "c" | "d" | "unranked";
+
+export type PandaScoreMatchStatus = "canceled" | "finished" | "not_started" | "postponed" | "running";
+
+export type PandaScoreMatchType = "all_games_played" | "best_of" | "custom" | "first_to" | "ow_best_of" | "red_bull_home_ground";
+
+export type PandaScoreOpponent = {
+   id: number;
+   name: string;
+   acronym: string | null;
+   slug: string;
+   image_url: string | null;
+};
+
+export type PandaScoreGame = {
+   id: number;
+   position: number;
+   status: "finished" | "not_played" | "not_started" | "running";
+   finished: boolean;
+   forfeit: boolean;
+   winner: { id: number | null; type: string };
+};
+
+export type PandaScoreMatch = {
+   id: number;
+   name: string;
+   status: PandaScoreMatchStatus;
+   match_type: PandaScoreMatchType;
+   number_of_games: number;
+   scheduled_at: string | null;
+   begin_at: string | null;
+   draw: boolean;
+   forfeit: boolean;
+   /** Opponent id that starts with a one-map lead. Not listed in `games`, but counted in `results`. */
+   game_advantage: number | null;
+   games: PandaScoreGame[];
+   opponents: { type: "Team" | "Player"; opponent: PandaScoreOpponent }[];
+   results: { team_id?: number; player_id?: number; score: number }[];
+   winner_id: number | null;
+   league_id: number;
+   league: { id: number; name: string; slug: string; image_url: string | null };
+   serie: { id: number; full_name: string; name: string | null };
+   tournament: { id: number; name: string; tier: PandaScoreTier | null };
+};
 
 type ESPNTeamOdds = {
    favorite: boolean;

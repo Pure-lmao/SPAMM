@@ -9,10 +9,12 @@ import {
    simulateTransaction,
 } from "../aggregator/client/txSendV1";
 import { loadKeypairSignerFromJsonFile } from "../aggregator/client/utils";
-import { fetchGradedStartedEvents } from "./localDb";
+import { fetchEventPeriodResults, fetchGradedStartedEvents } from "./localDb";
 import { BetResult, GRADE_PARLAY_LEG_SKIP, getBetsData, getGradeBetsIx, getGradeParlayIx, getParlaysData, type BetAccountData } from "spamm-aggregator-sdk";
 import { round } from "./utils";
 import { MARKET_OPERATOR_SIGNER } from "./admin.ts";
+import { isPandaScoreSport, MAP_PERIOD_BASE, MAX_MAP_PERIOD } from "./pandascore";
+import type { DbEvent, DbEventPeriodResult } from "./types";
 
 const SYSTEM_PROGRAM_ID: Address = address("11111111111111111111111111111111");
 const clients = createRpcClients({ });
@@ -63,6 +65,7 @@ export async function gradeBets() {
    });
    console.log("Bets fetched", bets.length);
    const allEvents = fetchGradedStartedEvents();
+   const periodResults = fetchEventPeriodResults();
    console.log("Events fetched", allEvents.size);
 
    const resultAddresses = [];
@@ -74,15 +77,24 @@ export async function gradeBets() {
       if (bet.data.marketId.mkt === 9) {
          continue;
       }
-      const result = getBetResult(
-         bet.data.marketId.eventId.sport,
-         bet.data.marketId.period,
-         bet.data.marketId.mkt,
-         bet.data.marketId.player,
-         bet.data.side,
-         event.home_score!,
-         event.away_score!,
-      );
+      const result = isPandaScoreSport(event.sport_id)
+         ? getEsportsBetResult(
+            bet.data.marketId.period,
+            bet.data.marketId.mkt,
+            bet.data.marketId.player,
+            bet.data.side,
+            event,
+            periodResults,
+         )
+         : getBetResult(
+            bet.data.marketId.eventId.sport,
+            bet.data.marketId.period,
+            bet.data.marketId.mkt,
+            bet.data.marketId.player,
+            bet.data.side,
+            event.home_score!,
+            event.away_score!,
+         );
       if (result) {
          resultAddresses.push([result, bet.address]);
       }
@@ -111,6 +123,7 @@ export async function gradeParlays() {
    });
    console.log("Parlay bets fetched", parlayBets.length);
    const allEvents = fetchGradedStartedEvents();
+   const periodResults = fetchEventPeriodResults();
    console.log("Events fetched", allEvents.size);
 
    const gradeJobs: { mask: Uint8Array; address: Address }[] = [];
@@ -138,15 +151,24 @@ export async function gradeParlays() {
          if (!event) {
             continue;
          }
-         const legResult = getBetResult(
-            leg.marketId.eventId.sport,
-            leg.marketId.period,
-            leg.marketId.mkt,
-            leg.marketId.player,
-            leg.side,
-            event.home_score!,
-            event.away_score!,
-         );
+         const legResult = isPandaScoreSport(event.sport_id)
+            ? getEsportsBetResult(
+               leg.marketId.period,
+               leg.marketId.mkt,
+               leg.marketId.player,
+               leg.side,
+               event,
+               periodResults,
+            )
+            : getBetResult(
+               leg.marketId.eventId.sport,
+               leg.marketId.period,
+               leg.marketId.mkt,
+               leg.marketId.player,
+               leg.side,
+               event.home_score!,
+               event.away_score!,
+            );
          if (legResult != null) {
             mask[i] = legResult;
             anyGrade = true;
@@ -171,6 +193,53 @@ export async function gradeParlays() {
       }
    }
    console.log("Parlays graded");
+}
+
+/** Period 0 is the series (ML / bo2 1X2); periods 11+ are map winners. Missing map rows mean the map wasn't played. */
+function getEsportsBetResult(
+   period: number,
+   mkt: number,
+   player: bigint,
+   side: number,
+   event: DbEvent,
+   periodResults: Map<string, DbEventPeriodResult>,
+): BetResult | null {
+   if (player !== 0n || event.home_score === null || event.away_score === null) {
+      return null;
+   }
+   const eventKey = `${event.sport_id}:${event.league_id}:${event.id}`;
+
+   if (period === 0) {
+      if (periodResults.get(`${eventKey}:0`)?.is_void) {
+         return BetResult.Cancelled;
+      }
+      if (mkt === 1) { //1X2 (bo2)
+         const home = event.home_score;
+         const away = event.away_score;
+         if (side === 0) {
+            return home > away ? BetResult.Won : BetResult.Lost;
+         } else if (side === 1) {
+            return away > home ? BetResult.Won : BetResult.Lost;
+         } else if (side === 2) {
+            return home === away ? BetResult.Won : BetResult.Lost;
+         }
+         return null;
+      }
+      return getBetResult(event.sport_id, 0, mkt, player, side, event.home_score, event.away_score);
+   }
+
+   if (period > MAP_PERIOD_BASE && period <= MAX_MAP_PERIOD) {
+      if (mkt !== 0) {
+         return null;
+      }
+      const map = periodResults.get(`${eventKey}:${period}`);
+      if (!map || map.is_void || map.home_score === null || map.away_score === null) {
+         return BetResult.Cancelled;
+      }
+      return getBetResult(event.sport_id, 0, mkt, player, side, map.home_score, map.away_score);
+   }
+
+   return null;
 }
 
 function getBetResult(sport: number, period: number, mkt: number, player: bigint, side: number, home: number, away: number): BetResult | null {

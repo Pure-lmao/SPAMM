@@ -191,7 +191,7 @@ impl Env {
              MM (after sync from {:?}):\n  {:?}\n\
              Adversarial MM:\n  {:?}\n\
              From repo root, run:\n\
-               cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet\n\
+               cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet,fast-sha512\n\
                cargo build-sbf --arch v3 --manifest-path market_maker/program/Cargo.toml\n\
                cargo build-sbf --arch v3 --manifest-path aggregator/program/tests/adversarial_mm/Cargo.toml\n\
              Then: cd aggregator/program && cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --test-threads=1\n\
@@ -595,7 +595,7 @@ impl Env {
       data.extend_from_slice(market_operator().as_ref());
       data.extend_from_slice(mint_pubkey().as_ref());
       let ix = self.agg_ix(
-         40,
+         130,
          data,
          vec![
             AccountMeta::new(mm_admin(), true),

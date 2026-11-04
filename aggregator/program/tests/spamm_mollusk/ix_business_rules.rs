@@ -695,7 +695,7 @@ fn pause_blocks_fill_cashout_withdraw_grade_and_settle() {
    let mut wd = Vec::new();
    wd.extend_from_slice(&1u64.to_le_bytes());
    let wix = env.agg_ix(
-      50,
+      150,
       wd,
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -804,7 +804,7 @@ fn two_user_netting_lifecycle_close() {
    };
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
-   assert!(env.run_ix(env.agg_ix(41, w.to_vec(), add_line_account_metas(np))).program_result.is_ok());
+   assert!(env.run_ix(env.agg_ix(131, w.to_vec(), add_line_account_metas(np))).program_result.is_ok());
    let mid = market_spread_pregame(event_id_soccer());
    let def = MmKeys::default_mm();
    let a_bet = bet_pda_for(&user(), 8080);
@@ -860,7 +860,7 @@ fn two_user_netting_lifecycle_close() {
    let mut wd = Vec::new();
    wd.extend_from_slice(&1u64.to_le_bytes());
    let wix = env.agg_ix(
-      50,
+      150,
       wd,
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -903,7 +903,7 @@ fn two_user_netting_lifecycle_close() {
    rem.write_wire(&mut rw).unwrap();
    assert!(env
       .run_ix(env.agg_ix(
-         42,
+         132,
          rw.to_vec(),
          vec![
             AccountMeta::new(mm_admin(), true),
@@ -914,9 +914,12 @@ fn two_user_netting_lifecycle_close() {
       ))
       .program_result
       .is_ok());
+   let mut close_data = event_id_soccer().as_wire_bytes().to_vec();
+   close_data.extend_from_slice(crate::common::fixtures::market_operator().as_ref());
+   close_data.extend_from_slice(crate::common::fixtures::mint_pubkey().as_ref());
    let close = env.agg_ix(
-      43,
-      event_id_soccer().as_wire_bytes().to_vec(),
+      133,
+      close_data,
       vec![
          AccountMeta::new(mm_admin(), true),
          AccountMeta::new_readonly(mm_program_id(), false),

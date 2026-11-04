@@ -64,7 +64,7 @@ fn withdraw_free_after_fill() {
    let mut wd = Vec::new();
    wd.extend_from_slice(&free.to_le_bytes());
    let ix = env.agg_ix(
-      50,
+      150,
       wd,
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -129,7 +129,7 @@ fn withdraw_rejected_while_agg_paused() {
    let mut wd = Vec::new();
    wd.extend_from_slice(&free.to_le_bytes());
    let ix = env.agg_ix(
-      50,
+      150,
       wd,
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -187,7 +187,7 @@ fn withdraw_amount_exceeds_free_rejected() {
    let enc_pda = encumbrance_pda();
    let bust = free.saturating_add(1);
    let ix = env.agg_ix(
-      50,
+      150,
       bust.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -211,7 +211,7 @@ fn withdraw_wrong_mm_admin_rejected() {
    let liab = liability_token_ata();
    let enc_pda = encumbrance_pda();
    let ix = env.agg_ix(
-      50,
+      150,
       free.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(wrong_signer(), true),
@@ -236,7 +236,7 @@ fn withdraw_bad_encumbrance_pda_rejected() {
    let fake_enc = solana_pubkey::Pubkey::new_from_array([0xE1; 32]);
    env.upsert(fake_enc, system_owned_empty());
    let ix = env.agg_ix(
-      50,
+      150,
       free.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -260,7 +260,7 @@ fn withdraw_wrong_ix_data_len_rejected() {
    let liab = liability_token_ata();
    let enc_pda = encumbrance_pda();
    let ix = env.agg_ix(
-      50,
+      150,
       vec![1, 2, 3, 4, 5, 6, 7],
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -284,7 +284,7 @@ fn withdraw_mm_token_wrong_owner_rejected() {
    let liab = liability_token_ata();
    let enc_pda = encumbrance_pda();
    let ix = env.agg_ix(
-      50,
+      150,
       free.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),

@@ -33,7 +33,7 @@ fn create_netting_success() {
    env.upsert(np, system_owned_empty());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      40,
+      130,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -57,7 +57,7 @@ fn create_netting_twice_fails() {
    let np = netting_pda_for_event(&event_id_soccer());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      40,
+      130,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -88,7 +88,7 @@ fn add_line_success_sorted() {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let ix = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -127,7 +127,7 @@ fn add_line_rejects_header_soccer_ft() {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let ix = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -161,7 +161,7 @@ fn remove_line_success() {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let ix_add = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -187,7 +187,7 @@ fn remove_line_success() {
    let mut wr = [0u8; REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN];
    rem.write_wire(&mut wr).unwrap();
    let ix_rem = env.agg_ix(
-      42,
+      132,
       wr.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -212,7 +212,7 @@ fn close_netting_success() {
    let np = netting_pda_for_event(&event_id_soccer());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      43,
+      133,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -249,7 +249,7 @@ fn add_line_second_line_records_cu() {
    add1.write_wire(&mut w1).unwrap();
    assert!(env
       .run_ix(env.agg_ix(
-         41,
+         131,
          w1.to_vec(),
          vec![
             AccountMeta::new(mm_admin(), true),
@@ -276,7 +276,7 @@ fn add_line_second_line_records_cu() {
    let mut w2 = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add2.write_wire(&mut w2).unwrap();
    let r2 = env.run_ix(env.agg_ix(
-      41,
+      131,
       w2.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -315,7 +315,7 @@ fn remove_line_second_line_records_cu() {
       add.write_wire(&mut w).unwrap();
       assert!(env
          .run_ix(env.agg_ix(
-            41,
+            131,
             w.to_vec(),
             vec![
                AccountMeta::new(mm_admin(), true),
@@ -342,7 +342,7 @@ fn remove_line_second_line_records_cu() {
    let mut wr = [0u8; REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN];
    rem.write_wire(&mut wr).unwrap();
    let r = env.run_ix(env.agg_ix(
-      42,
+      132,
       wr.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -379,7 +379,7 @@ fn create_netting_after_force_close_records_cu() {
    assert!(env.run_ix(close_ix).program_result.is_ok());
    env.upsert(np, system_owned_empty());
    let create_ix = env.agg_ix(
-      40,
+      130,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -403,7 +403,7 @@ fn create_netting_wrong_mm_admin_rejected() {
    env.upsert(np, system_owned_empty());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      40,
+      130,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(wrong_signer(), true),
@@ -426,7 +426,7 @@ fn create_netting_non_executable_mm_program_rejected() {
    env.upsert(np, system_owned_empty());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      40,
+      130,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -449,7 +449,7 @@ fn create_netting_bad_event_id_len_rejected() {
    env.upsert(np, system_owned_empty());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      40,
+      130,
       vec![1, 2],
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -472,7 +472,7 @@ fn create_netting_wrong_netting_pda_address_rejected() {
    env.upsert(bad, system_owned_empty());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      40,
+      130,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -513,8 +513,8 @@ fn add_line_duplicate_rejected() {
          false,
       ),
    ];
-   assert!(env.run_ix(env.agg_ix(41, w.to_vec(), metas.clone())).program_result.is_ok());
-   let r = env.run_ix(env.agg_ix(41, w.to_vec(), metas));
+   assert!(env.run_ix(env.agg_ix(131, w.to_vec(), metas.clone())).program_result.is_ok());
+   let r = env.run_ix(env.agg_ix(131, w.to_vec(), metas));
    assert_program_err(&r, ProgramError::InvalidAccountData);
 }
 
@@ -544,7 +544,7 @@ fn add_line_first_half_period_ok() {
          false,
       ),
    ];
-   let r = env.run_ix(env.agg_ix(41, w.to_vec(), metas));
+   let r = env.run_ix(env.agg_ix(131, w.to_vec(), metas));
    assert!(r.program_result.is_ok(), "{:?}", r.program_result);
    let (_, lines) = read_netting_soccer_header_and_lines(&env, &np);
    assert_eq!(lines.len(), 1);
@@ -568,7 +568,7 @@ fn add_line_netting_missing_rejected() {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let ix = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -602,7 +602,7 @@ fn add_line_wrong_admin_rejected() {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let ix = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       vec![
          AccountMeta::new(wrong_signer(), true),
@@ -627,7 +627,7 @@ fn add_line_bad_ix_len_rejected() {
    env.create_netting_for_soccer_event();
    let np = netting_pda_for_event(&event_id_soccer());
    let ix = env.agg_ix(
-      41,
+      131,
       vec![1, 2, 3],
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -662,7 +662,7 @@ fn remove_line_never_added_rejected() {
    add.write_wire(&mut w).unwrap();
    assert!(env
       .run_ix(env.agg_ix(
-         41,
+         131,
          w.to_vec(),
          vec![
             AccountMeta::new(mm_admin(), true),
@@ -688,7 +688,7 @@ fn remove_line_never_added_rejected() {
    let mut wr = [0u8; REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN];
    rem.write_wire(&mut wr).unwrap();
    let ix = env.agg_ix(
-      42,
+      132,
       wr.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -718,7 +718,7 @@ fn remove_line_wrong_admin_rejected() {
    add.write_wire(&mut w).unwrap();
    assert!(env
       .run_ix(env.agg_ix(
-         41,
+         131,
          w.to_vec(),
          vec![
             AccountMeta::new(mm_admin(), true),
@@ -744,7 +744,7 @@ fn remove_line_wrong_admin_rejected() {
    let mut wr = [0u8; REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN];
    rem.write_wire(&mut wr).unwrap();
    let ix = env.agg_ix(
-      42,
+      132,
       wr.to_vec(),
       vec![
          AccountMeta::new(wrong_signer(), true),
@@ -765,7 +765,7 @@ fn close_netting_wrong_admin_rejected() {
    let np = netting_pda_for_event(&event_id_soccer());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      43,
+      133,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(wrong_signer(), true),
@@ -787,7 +787,7 @@ fn close_netting_uninitialized_pda_rejected() {
    env.upsert(fake, system_owned_empty());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      43,
+      133,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -817,7 +817,7 @@ fn run_add_line(
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    env.run_ix(env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -949,7 +949,7 @@ fn remove_line_with_open_profit_rejected() {
    let mut wr = [0u8; REMOVE_LINE_FROM_LIABILITY_NETTING_IX_LEN];
    rem.write_wire(&mut wr).unwrap();
    let ix = env.agg_ix(
-      42,
+      132,
       wr.to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),
@@ -968,7 +968,7 @@ fn close_netting_with_open_profit_rejected() {
    let np = netting_pda_for_event(&event_id_soccer());
    let sys = mollusk_svm::program::keyed_account_for_system_program().0;
    let ix = env.agg_ix(
-      43,
+      133,
       netting_scope_bytes(),
       vec![
          AccountMeta::new(mm_admin(), true),

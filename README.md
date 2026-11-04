@@ -49,7 +49,7 @@ For some example code, see the template SPAMM [README.md](https://github.com/pur
 
 ## Deployment
 
-The **SPAMM Aggregator** program is deployed to Solana **mainnet** at `5pammQjfw9f1oWtL9rLipVuYf5ufmzeKVeRwrXcA961H` and a frontend is hosted at [automaticsportsmarkets.com](https://automaticsportsmarkets.com). It is also on **devnet** at the same address. Each market settles in the SPL mint on its `MarketId`. A devnet USDC mint you can use is `Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr` ([faucet](https://spl-token-faucet.com/)). If the devnet SOL airdrop is 429, you can get some [here](https://faucet.solana.com/).
+The **SPAMM Aggregator** program is deployed to Solana **devnet** at `yanoV1SiWVpRFErBBGZiYp6LeRPM1X4CrfFKQZ1DU7k` and a frontend is hosted at [automaticsportsmarkets.com](https://automaticsportsmarkets.com). Each market settles in the SPL mint on its `MarketId`. A devnet USDC mint you can use is `Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr` ([faucet](https://spl-token-faucet.com/)). If the devnet SOL airdrop is 429, you can get some [here](https://faucet.solana.com/).
 
 **Breaking changes** are to be expected. The **aggregator admin** can delete Aggregator PDAs (like Bet Accounts) at any time.
 
@@ -2966,11 +2966,11 @@ Mollusk SBF integration tests live under `aggregator/program/tests/spamm_mollusk
 **Build both artifacts** (from repo root; re-run after changing aggregator or example MM):
 
 ```powershell
-cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet
+cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet,fast-sha512
 cargo build-sbf --arch v3 --manifest-path market_maker/program/Cargo.toml
 ```
 
-For mainnet deploys: `--no-default-features --features bpf-entrypoint,mainnet`.
+`fast-sha512` is needed because Mollusk has no `sol_sha512` syscall. Devnet deploys use `--features devnet` only. For mainnet deploys: `--no-default-features --features bpf-entrypoint,mainnet`.
 
 **Run** (from `aggregator/program`; `--features test-sbf` is required):
 

@@ -113,7 +113,7 @@ fn scenario_netting_create_add_fill_m4() {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let ix = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       add_line_account_metas(crate::common::netting_pda_for_event(&eid)),
    );
@@ -217,7 +217,7 @@ fn scenario_ml_p0_m0_opposing_stakes_net_liability_deposit() {
    );
 
    let wd = env.agg_ix(
-      50,
+      150,
       1u64.to_le_bytes().to_vec(),
       vec![
          AccountMeta::new(mm_admin(), true),

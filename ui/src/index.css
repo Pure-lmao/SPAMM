@@ -82,6 +82,10 @@
    --sport-bar-basketball: #cc5a24;
    --sport-bar-hockey: #0d8aa3;
    --sport-bar-football: #a51414;
+   --sport-bar-cs2: #a87d12;
+   --sport-bar-dota: #7a1a14;
+   --sport-bar-lol: #1f5fbf;
+   --sport-bar-valorant: #e8404f;
 
    font-family: "Segoe UI", system-ui, sans-serif;
    line-height: 1.45;
@@ -205,6 +209,26 @@ h1 {
 .sport-section[data-sport="5"],
 .event-page-header[data-sport="5"] {
    --sport-bar-tint: var(--sport-bar-hockey);
+}
+
+.sport-section[data-sport="101"],
+.event-page-header[data-sport="101"] {
+   --sport-bar-tint: var(--sport-bar-cs2);
+}
+
+.sport-section[data-sport="102"],
+.event-page-header[data-sport="102"] {
+   --sport-bar-tint: var(--sport-bar-dota);
+}
+
+.sport-section[data-sport="103"],
+.event-page-header[data-sport="103"] {
+   --sport-bar-tint: var(--sport-bar-lol);
+}
+
+.sport-section[data-sport="104"],
+.event-page-header[data-sport="104"] {
+   --sport-bar-tint: var(--sport-bar-valorant);
 }
 
 .sport-title {
@@ -419,7 +443,7 @@ h1 {
    box-sizing: border-box;
 }
 
-.events-table tbody tr[data-sport="1"] > td:nth-child(2) .odds-buttons:has(.odd-btn:nth-child(3)) {
+.events-table tbody tr[data-sport] > td:nth-child(2) .odds-buttons:has(.odd-btn:nth-child(3)) {
    grid-template-columns: repeat(3, var(--odd-box-width)) !important;
 }
 

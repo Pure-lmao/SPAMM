@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement, type ReactNode } from "react";
-import { periodCaption, resolveMarketDisplay } from "spamm-aggregator-sdk";
+import { resolveMarketDisplay } from "spamm-aggregator-sdk";
 import type { BetColumn } from "../betting/types";
-import { marketDomKey, shouldShowPeriodBadge, uiMarketDisplayCtx } from "./eventMarketsDisplay";
+import { marketDomKey, periodCaption, shouldShowPeriodBadge, uiMarketDisplayCtx } from "./eventMarketsDisplay";
 import { lineRawForSpreadOrTotal } from "./lineFromMarket";
 import { formatMarketLineDisplay, parseOdds } from "./oddsFormat";
 import { useOddsTableLabels } from "./oddsTableLabels";
@@ -62,7 +62,7 @@ function PeriodMeta({ sportId, m }: { sportId: number; m: UiMarket }): ReactElem
    if (!shouldShowPeriodBadge(sportId, m)) {
       return null;
    }
-   return <span className="event-market-period">{periodCaption(m.period_id)}</span>;
+   return <span className="event-market-period">{periodCaption(sportId, m.period_id)}</span>;
 }
 
 function PlayerNameCell({

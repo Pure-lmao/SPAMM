@@ -91,7 +91,7 @@ fn fill_netting_m4_bet_and_grade(env: &mut Env, bet_id: u64, result: u8) {
    let mut w = [0u8; ADD_LINE_TO_LIABILITY_NETTING_IX_LEN];
    add.write_wire(&mut w).unwrap();
    let add_ix = env.agg_ix(
-      41,
+      131,
       w.to_vec(),
       add_line_account_metas(netting_pda_for_event(&eid)),
    );

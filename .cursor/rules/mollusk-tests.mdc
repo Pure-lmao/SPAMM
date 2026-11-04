@@ -17,6 +17,8 @@ Aggregator program tests are **Mollusk SBF tests**. They load compiled BPF **`.s
 | Edit MM program, only rebuild aggregator | Stale MM: harness copies from `market_maker/program/target/deploy/spamm_market_maker.so`. |
 | Parallel tests on Windows | File-lock errors copying `.so` — use `--test-threads=1`. |
 | `cargo build-sbf` aggregator for mainnet without disabling defaults | Default features include `devnet`; mainnet deploy needs `--no-default-features --features bpf-entrypoint,mainnet`. |
+| Build aggregator test `.so` with `--features devnet` only | RFQ tests fail with `unsupported BPF instruction`: Mollusk has no `sol_sha512` syscall. Tests need `--features devnet,fast-sha512`. |
+| Build in the sandbox shell and assume `target/deploy` updated | The sandbox may set `CARGO_TARGET_DIR` to a temp cache. Run `Remove-Item Env:CARGO_TARGET_DIR` first, then check the `.so` timestamp. |
 
 ## Prerequisites
 
@@ -46,11 +48,11 @@ Mollusk registers programs by **filename stem** (`spamm_aggregator`, `spamm_mark
 Run both after changing **any** on-chain program code under test:
 
 ```powershell
-cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet
+cargo build-sbf --arch v3 --manifest-path aggregator/program/Cargo.toml --features devnet,fast-sha512
 cargo build-sbf --arch v3 --manifest-path market_maker/program/Cargo.toml
 ```
 
-For mainnet deploys: `--no-default-features --features bpf-entrypoint,mainnet`. Devnet is the default (`devnet` is in `[features] default`).
+`fast-sha512` is for Mollusk only. Devnet deploys use `--features devnet` (devnet has `sol_sha512`). For mainnet deploys: `--no-default-features --features bpf-entrypoint,mainnet` (`mainnet` already enables `fast-sha512`). Devnet is the default (`devnet` is in `[features] default`).
 
 Rebuild **only** the crate you changed if you know the other is fresh:
 
@@ -78,7 +80,7 @@ cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --tes
 ## Agent workflow after program edits
 
 1. `cargo check -p spamm_aggregator --features devnet` (and `-p spamm_market_maker` if MM touched).
-2. `cargo build-sbf --arch v3` for each changed program (see table; aggregator needs `--features devnet` or `mainnet`).
+2. `cargo build-sbf --arch v3` for each changed program (see table; aggregator test builds need `--features devnet,fast-sha512`).
 3. `cargo test -p spamm_aggregator --features test-sbf --test spamm_mollusk -- --test-threads=1` with a focused filter when possible.
 4. If panic says **Missing SBF artifacts**, run the two build commands — do not retry `cargo test` alone.
 

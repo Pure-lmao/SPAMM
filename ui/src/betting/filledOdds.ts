@@ -1,4 +1,5 @@
 import { ODDS_SCALE } from 'spamm-aggregator-sdk';
+import { formatDecimalOdds } from '../settings/convertOdds';
 
 /** Filled odds scaled integer from on-chain `payout` / `amount`. */
 export function filledOddsScaled(amount: bigint, payout: bigint): bigint {
@@ -31,5 +32,5 @@ export function formatFilledBetOdds(amount: bigint, payout: bigint): string {
    if (!Number.isFinite(x) || x <= 0) {
       return '—';
    }
-   return x >= 10 ? x.toFixed(2) : x.toFixed(3);
+   return formatDecimalOdds(x, 'slip');
 }

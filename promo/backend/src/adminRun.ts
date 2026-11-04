@@ -53,14 +53,14 @@ export type PromoAdminContext = {
    rpcs: RpcClients;
 };
 
-const marketMakerDir = path.join(
+const apiDir = path.join(
    path.dirname(fileURLToPath(import.meta.url)),
-   '../../../market_maker',
+   '../../../api',
 );
 
 async function loadPromoAdminSigner(): Promise<KeyPairSigner> {
    return loadKeypairSignerFromJsonFile(
-      path.join(marketMakerDir, 'client/admin_keypair.json'),
+      path.join(apiDir, 'YLmo_admin_keypair.json'),
    );
 }
 

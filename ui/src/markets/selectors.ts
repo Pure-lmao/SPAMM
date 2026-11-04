@@ -175,12 +175,17 @@ function pickSoccerMain1x2(markets: UiMarket[]): UiMarket | undefined {
    return undefined;
 }
 
+/** ML, or a full-match 1X2 when the format allows draws (esports bo2). */
 function pickNonSoccerMainMl(markets: UiMarket[]): UiMarket | undefined {
    const rows = markets.filter((m) => m.mkt_string === "ML" && m.period_id === 0);
-   if (!rows.length) {
-      return undefined;
+   if (rows.length) {
+      return [...rows].sort(sortById)[0];
    }
-   return [...rows].sort(sortById)[0];
+   const threeWay = markets.filter((m) => m.mkt_string === "1X2" && m.period_id === 0);
+   if (threeWay.length) {
+      return [...threeWay].sort(sortById)[0];
+   }
+   return undefined;
 }
 
 export function pickMainMoneylineMarket(markets: UiMarket[] | undefined, sportId: number): UiMarket | undefined {

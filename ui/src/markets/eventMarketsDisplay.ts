@@ -2,13 +2,33 @@ import {
    PROMO_MKT_ID,
    isMainPeriod,
    isPromoMarketId,
-   periodCaption,
+   periodCaption as sdkPeriodCaption,
    type MarketDisplayCtx,
 } from "spamm-aggregator-sdk";
 import type { UiMarket } from "./types";
 
-export { PROMO_MKT_ID, periodCaption };
+export { PROMO_MKT_ID };
 export const PROMO_MKT_STRING = "PROMO";
+
+/** Esports sport ids (`api/initDb.ts`). Map N is period 10 + N, up to map 10. */
+const ESPORTS_SPORT_IDS: ReadonlySet<number> = new Set([101, 102, 103, 104]);
+const MAP_PERIOD_BASE = 10;
+const MAX_MAP_PERIOD = 20;
+
+export function isEsportsSport(sportId: number): boolean {
+   return ESPORTS_SPORT_IDS.has(sportId);
+}
+
+export function isEsportsMapPeriod(sportId: number, period: number): boolean {
+   return isEsportsSport(sportId) && period > MAP_PERIOD_BASE && period <= MAX_MAP_PERIOD;
+}
+
+export function periodCaption(sportId: number, period: number): string {
+   if (isEsportsMapPeriod(sportId, period)) {
+      return `Map ${period - MAP_PERIOD_BASE}`;
+   }
+   return sdkPeriodCaption(period);
+}
 
 export function uiMarketDisplayCtx(
    m: Pick<UiMarket, "id" | "mkt_string" | "line_value" | "period_id" | "sport_id" | "player_id" | "player_name">,

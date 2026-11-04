@@ -1,4 +1,4 @@
-import { convertOdds, type OddsFormat } from "../settings/convertOdds";
+import { convertOdds, floorToFixed, type OddsFormat } from "../settings/convertOdds";
 
 const INT_EPS = 1e-9;
 
@@ -6,7 +6,7 @@ const INT_EPS = 1e-9;
 export const ODDS_DB_SCALE = 10_000;
 
 export function decimalOddsFromDb(dbValue: number): number {
-   return Number((dbValue / ODDS_DB_SCALE).toFixed(2));
+   return Number(floorToFixed(dbValue / ODDS_DB_SCALE, 2));
 }
 
 function formatDecimalMinimal(abs: number): string {
