@@ -47,8 +47,8 @@ use crate::{
       fill_helpers::invoke_parlay_quote_cpi,
       cashout_helpers::{
          accept_cashout_payment, cashout_payment_dest, finish_cashout_parlay,
-         maybe_open_live_cashout_escrow, parse_cashout_quote_return_for_mm, pay_cashout_from_free_liability,
-         validate_parlay_cashout_orig_ticket, verify_cashout_fill_preamble, verify_cashout_mm_encumbrance,
+         maybe_open_live_cashout_escrow, OpenLiveCashoutEscrow, parse_cashout_quote_return_for_mm, pay_cashout_from_free_liability,
+         validate_parlay_cashout_orig_ticket, verify_cashout_fill_preamble, CashoutFillPreamble, verify_cashout_mm_encumbrance,
          verify_ticket_feepayer, ParlayCashoutOrigTicket,
       },
    },
@@ -78,20 +78,20 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       log!("fill_parlay_cashout: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    }
-   verify_cashout_fill_preamble(
-      &accounts[0],  // feepayer
-      &accounts[2],  // user
-      &accounts[3],  // user_ata
-      &accounts[6],  // cashout_pda
-      &accounts[10], // config_pda
-      &accounts[11], // mint
-      &accounts[12], // token_program
-      &accounts[13], // associated_token_program
-      &accounts[14], // rent_sysvar
-      &accounts[15], // system_program
-      &accounts[16], // clock_sysvar
-      "fill_parlay_cashout",
-   )?;
+   verify_cashout_fill_preamble(&CashoutFillPreamble {
+      feepayer: &accounts[0],
+      user: &accounts[2],
+      user_ata: &accounts[3],
+      cashout_pda: &accounts[6],
+      config_pda: &accounts[10],
+      mint: &accounts[11],
+      token_program: &accounts[12],
+      associated_token_program: &accounts[13],
+      rent_sysvar: &accounts[14],
+      system_program: &accounts[15],
+      clock_sysvar: &accounts[16],
+      label: "fill_parlay_cashout",
+   })?;
    run_fill_parlay_cashout(accounts, data)
 }
 
@@ -240,8 +240,8 @@ fn finish_fill_parlay_cashout_after_ticket(
       ticket.payout_removed,
    )?;
    let timestamp = clock_unix_timestamp_u32(clock_sysvar)?;
-   maybe_open_live_cashout_escrow(
-      ticket.delay,
+   maybe_open_live_cashout_escrow(&mut OpenLiveCashoutEscrow {
+      delay: ticket.delay,
       feepayer,
       user,
       escrow_pda,
@@ -250,15 +250,15 @@ fn finish_fill_parlay_cashout_after_ticket(
       token_program,
       rent_sysvar,
       system_program,
-      ticket.orig_bet_id,
-      ix_data_meta.cashout_id,
-      timestamp,
-      ix_data_meta.amount,
-      ticket.payout_removed,
-      max_payment,
-      *mm_program.address(),
-      true,
-   )?;
+      orig_bet_id: ticket.orig_bet_id,
+      cashout_id: ix_data_meta.cashout_id,
+      timestamp: timestamp,
+      amount: ix_data_meta.amount,
+      payout_removed: ticket.payout_removed,
+      payment: max_payment,
+      market_maker: mm_program.address(),
+      is_parlay: true,
+   })?;
 
    let payment_dest: &AccountView = cashout_payment_dest(ticket.delay, escrow_ata, user_ata);
    let payment_before = get_token_account_balance(payment_dest)?;

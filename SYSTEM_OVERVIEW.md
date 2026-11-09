@@ -109,7 +109,7 @@ User stake → **bet ATA** (authority = bet PDA). MM profit collateral → **lia
 
 ## Discriminators (ranges)
 
-**Aggregator:** `0–5` admin/register/vaults · `10–13` fills · `20–23` freebet fills · `30–33` boosted fills · `90–95` cashout · `100–101` grade · `110–115` settle · `130–133` netting · `150` withdraw liability · `160–168` promo issuer · `200–204` proxies · `254–255` devnet admin.
+**Aggregator:** `0–5` admin/register/vaults · `10–13` fills · `20–23` freebet fills · `30–33` boosted fills · `90–95` cashout · `100–101` grade · `110–115` settle · `130–133` netting · `150` withdraw liability · `160–168` promo issuer · `200–204` proxies · `220` message · `254–255` devnet admin.
 
 **MM:** `100–102` init/signer/ATA · `110–114` event/market · `120–123` auction quote/fill · `130–131` RFQ fill · `140–145` cashout quote/fill · `150` withdraw · `254–255` admin. Quote CPIs **must never error** — return `(0,0)` / `max_payment=0`.
 

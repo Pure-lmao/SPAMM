@@ -38,6 +38,7 @@ import {
    decodeFillRfqParlayIxData,
    decodeIssueBoostIxData,
    decodeIssueFreebetIxData,
+   decodeMessageIxData,
    encodeFillCashoutIxData,
    encodeFillParlayCashoutIxData,
    encodeFillParlayIxData,
@@ -53,6 +54,7 @@ import {
    encodeGetQuoteParlayIxData,
    encodeIssueBoostIxData,
    encodeIssueFreebetIxData,
+   encodeMessageIxData,
    getAddLineToNettingIxPayloadDecoder,
    getAddLineToNettingIxPayloadEncoder,
    getEventIdDecoder,
@@ -248,6 +250,8 @@ export const GET_PARLAY_QUOTE_PROXY_IX_DISCRIMINATOR = 201;
 export const GET_MARKET_QUOTES_PROXY_IX_DISCRIMINATOR = 202;
 export const GET_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR = 203;
 export const GET_PARLAY_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR = 204;
+// message — 220
+export const MESSAGE_IX_DISCRIMINATOR = 220;
 // devnet
 export const WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR = 254;
 export const FORCE_CLOSE_PDA_IX_DISCRIMINATOR = 255;
@@ -495,6 +499,8 @@ export function encodeAggregatorInstructionData(ix: AggregatorInstructionData): 
          const p = getU64Encoder().encode(ix.amount);
          return concatDiscriminator(WITHDRAW_FROM_LIABILITY_ACCOUNT_IX_DISCRIMINATOR, p);
       }
+      case 'message':
+         return concatDiscriminator(MESSAGE_IX_DISCRIMINATOR, encodeMessageIxData(ix.message));
       case 'writeArbitraryData': {
          return concatDiscriminator(WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR, ix.data);
       }
@@ -778,6 +784,8 @@ export function decodeAggregatorInstructionData(data: ReadonlyUint8Array): Aggre
             throw new RangeError('withdrawFromLiabilityAccount: expected 8 bytes');
          }
          return { kind: 'withdrawFromLiabilityAccount', amount: getU64Decoder().decode(restBytes) };
+      case MESSAGE_IX_DISCRIMINATOR:
+         return { kind: 'message', message: decodeMessageIxData(restBytes) };
       case WRITE_ARBITRARY_DATA_IX_DISCRIMINATOR:
          if (rest.length === 0) {
             throw new RangeError('writeArbitraryData: expected at least one payload byte');
@@ -3627,6 +3635,23 @@ export async function getWithdrawFromLiabilityAccountIx(
 }
 
 /**
+ * **`message`** — no-op that logs a UTF-8 message so third-party indexers can pick it up from the transaction (no state change, no token movement).
+ *
+ * **Rust:** `aggregator::instructions::message::process` (`MESSAGE_IX_DISCRIMINATOR` = 220). Data: raw UTF-8 message bytes after discriminator (no length prefix; must pass `str::from_utf8`).
+ *
+ * @param marketOperator - **TS:** `Address` — signer. **Rust:** `market_operator` (signer, checked by `verify_signer`).
+ * @param message - **TS:** `string` — encoded via {@link encodeMessageIxData}. **Rust:** `&str` emitted with `log!`.
+ * @returns **`Promise<Instruction>`** — one account: market operator (readonly signer). **Note:** message length is bounded only by the transaction size limit.
+ */
+export async function getMessageIx(marketOperator: Address, message: string): Promise<Instruction> {
+   return {
+      programAddress: AGGREGATOR_PROGRAM_ID,
+      accounts: [rs(marketOperator)],
+      data: encodeAggregatorInstructionData({ kind: 'message', message }),
+   };
+}
+
+/**
  * **`force_close_pda`** — dev-only: admin closes an arbitrary PDA owned by the aggregator program and recovers rent.
  *
  * **Rust:** `aggregator::instructions::force_close_pda::process` (`FORCE_CLOSE_PDA_IX_DISCRIMINATOR` = 255). No instruction data after discriminator.
@@ -3926,6 +3951,7 @@ export type AggregatorInstructionInput =
      }
    | { kind: 'closeNettingAccount'; eventId: EventId; operator: Address; mint: Address; admin: Address; mmProgram: Address }
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint; mmAdmin: Address; mmProgram: Address; mint: Address }
+   | { kind: 'message'; marketOperator: Address; message: string }
    | { kind: 'writeArbitraryData'; admin: Address; account: Address; data: Uint8Array }
    | { kind: 'forceClosePda'; admin: Address; pda: Address };
 
@@ -4169,6 +4195,8 @@ export async function getInstructionIx(input: AggregatorInstructionInput): Promi
          return getCloseNettingAccountIx(input.eventId, input.operator, input.mint, input.admin, input.mmProgram);
       case 'withdrawFromLiabilityAccount':
          return getWithdrawFromLiabilityAccountIx(input.amount, input.mmAdmin, input.mmProgram, input.mint);
+      case 'message':
+         return getMessageIx(input.marketOperator, input.message);
       case 'writeArbitraryData':
          return getWriteArbitraryDataIx(input.admin, input.account, input.data);
       case 'forceClosePda':

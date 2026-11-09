@@ -41,6 +41,7 @@ pub use settle_boosted_bet::SETTLE_BOOSTED_BET_IX_DISCRIMINATOR;
 pub use settle_boosted_parlay::SETTLE_BOOSTED_PARLAY_IX_DISCRIMINATOR;
 pub use issue_boost::ISSUE_BOOST_IX_DISCRIMINATOR;
 pub use revoke_boost::REVOKE_BOOST_IX_DISCRIMINATOR;
+pub use message::MESSAGE_IX_DISCRIMINATOR;
 
 use crate::instructions::{
    add_line_to_netting_account::ADD_LINE_TO_NETTING_ACCOUNT_IX_DISCRIMINATOR,
@@ -102,6 +103,7 @@ mod settle_parlay;
 mod settle_freebet;
 mod settle_freebet_parlay;
 mod change_config_status;
+mod message;
 #[cfg(feature = "devnet")]
 mod force_close_pda;
 mod withdraw_from_liability_account;
@@ -205,6 +207,9 @@ pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResu
       GET_PARLAY_CASHOUT_QUOTE_PROXY_IX_DISCRIMINATOR => {
          get_cashout_parlay_quote_proxy::process(accounts, data)
       }
+
+      //message - 220
+      MESSAGE_IX_DISCRIMINATOR => message::process(accounts, data),
 
       // devnet-only admin tooling (254 / 255)
       #[cfg(feature = "devnet")]

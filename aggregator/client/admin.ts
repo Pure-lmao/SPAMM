@@ -1,4 +1,4 @@
-import { AGGREGATOR_PROGRAM_ID, BetResult, CONFIG_PDA, decodeAggregatorInstructionData, decodeMmAccountConfig, getBetPda, getBetsData, getCashoutData, getCashoutParlaysData, getCashoutsData, getChangeConfigStatusIx, getConfigPda, getDeregisterMmIx, getForceClosePdaIx, getFreebetFillBetIx, getGradeBetsIx, getGradeParlayIx, getCreatePromoIssuerAtaIx, getInitFreebetIssuerIx, getInitProgramIx, getIssueFreebetIx, getMmAccountConfigDecoder, getMmConfigPda, getMmEncumbranceData, getMmListData, getMmListPda, getNettingPda, getParlayBetPda, getParlaysData, getSettleBetIx, getSettleParlayIx, getWriteArbitraryDataIx, ODDS_SCALE, readAccountDataRaw, type IssueFreebetIxData } from "spamm-aggregator-sdk";
+import { AGGREGATOR_PROGRAM_ID, BetResult, CONFIG_PDA, decodeAggregatorInstructionData, decodeMmAccountConfig, getBetPda, getBetsData, getCashoutData, getCashoutParlaysData, getCashoutsData, getChangeConfigStatusIx, getConfigPda, getDeregisterMmIx, getForceClosePdaIx, getFreebetFillBetIx, getGradeBetsIx, getGradeParlayIx, getCreatePromoIssuerAtaIx, getInitFreebetIssuerIx, getInitProgramIx, getIssueFreebetIx, getMmAccountConfigDecoder, getMmConfigPda, getMmEncumbranceData, getMmListData, getMmListPda, getNettingPda, getParlayBetPda, getParlaysData, getSettleBetIx, getSettleParlayIx, getWriteArbitraryDataIx, ODDS_SCALE, readAccountDataRaw, type IssueFreebetIxData, getMessageIx, decodeMessageIxData } from "spamm-aggregator-sdk";
 import { loadKeypairSignerFromJsonFile } from "./utils.ts";
 import { createRpcClients, sendAndConfirmInstructions, simulateTransaction } from "./txSend.ts";
 import { address, type Address, type Instruction } from "@solana/kit";
@@ -239,3 +239,35 @@ async function getCashoutParlays() {
    }
 }
 // getCashoutParlays().catch(console.error);
+
+async function sendMessage(message: string) {
+   const ix = await getMessageIx(MARKET_OPERATOR_SIGNER.address, message);
+   const txResult = await sendAndConfirmInstructions([ix], [MARKET_OPERATOR_SIGNER]);
+   console.log(txResult);
+}
+// sendMessage(JSON.stringify({
+//    version: 0,
+//    message: {
+//       type: "event",
+//       event_id: "1234567890",
+//       event: "testA vs testB",
+//       event_time: Math.floor(Date.now() / 1000),
+//    }
+// })).catch(console.error);
+
+import type { Signature } from "@solana/kit";
+import { getBase58Encoder } from "@solana/kit";
+async function parseMessageTx(tx_sig: string) {
+   const tx = await clients.rpc.getTransaction(tx_sig as Signature, { commitment: 'confirmed', encoding: 'jsonParsed', maxSupportedTransactionVersion: 1 }).send();
+   const ixs = tx?.transaction.message.instructions ?? [];
+   for(const ix of ixs) {
+      if("data" in ix) {
+         const data = ix.data!;
+         const dataBuffer = getBase58Encoder().encode(data);
+         const message = decodeMessageIxData(dataBuffer.slice(1));
+         const msg = JSON.parse(message);
+         console.log(msg);
+      }
+   }
+}
+// parseMessageTx("4wxvyWDMvc9R4jsvxuGBaozNdpAsDNqwGJ8sTbAZAPKLWeTpiU9Zs2iwJaheEdYoxYgtEzZ4nahgCtKcSuk3rTw2").catch(console.error);

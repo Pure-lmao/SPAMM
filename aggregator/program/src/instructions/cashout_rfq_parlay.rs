@@ -38,8 +38,8 @@ use crate::{
    errors::SpammError, helpers::{
       clock_unix_timestamp_u32, get_token_account_balance, verify_mm_config_pda, verify_mm_program_executable, verify_token_account,
       cashout_helpers::{
-         accept_cashout_payment, cashout_payment_dest, finish_cashout_parlay, maybe_open_live_cashout_escrow, pay_cashout_from_free_liability,
-         validate_parlay_cashout_orig_ticket, verify_cashout_fill_preamble, verify_cashout_mm_encumbrance,
+         accept_cashout_payment, cashout_payment_dest, finish_cashout_parlay, maybe_open_live_cashout_escrow, OpenLiveCashoutEscrow, pay_cashout_from_free_liability,
+         validate_parlay_cashout_orig_ticket, verify_cashout_fill_preamble, CashoutFillPreamble, verify_cashout_mm_encumbrance,
          verify_ticket_feepayer, ParlayCashoutOrigTicket,
       },
    }, readers::read_address_ref_unchecked, rfq_verify::verify_rfq_ed25519_signature, state::{
@@ -64,20 +64,20 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       log!("fill_rfq_parlay_cashout: accounts mismatch");
       return Err(ProgramError::NotEnoughAccountKeys);
    }
-   verify_cashout_fill_preamble(
-      &accounts[0],
-      &accounts[2],
-      &accounts[3],
-      &accounts[6],
-      &accounts[10],
-      &accounts[11],
-      &accounts[12],
-      &accounts[13],
-      &accounts[14],
-      &accounts[15],
-      &accounts[16],
-      "fill_rfq_parlay_cashout",
-   )?;
+   verify_cashout_fill_preamble(&CashoutFillPreamble {
+      feepayer: &accounts[0],
+      user: &accounts[2],
+      user_ata: &accounts[3],
+      cashout_pda: &accounts[6],
+      config_pda: &accounts[10],
+      mint: &accounts[11],
+      token_program: &accounts[12],
+      associated_token_program: &accounts[13],
+      rent_sysvar: &accounts[14],
+      system_program: &accounts[15],
+      clock_sysvar: &accounts[16],
+      label: "fill_rfq_parlay_cashout",
+   })?;
    run_fill_rfq_parlay_cashout(accounts, data)
 }
 
@@ -215,8 +215,8 @@ fn finish_rfq_parlay_cashout_after_ticket(
    let mm_liability_token_account = &mm_rest[3];
    let mm_token_account = &mm_rest[4];
 
-   maybe_open_live_cashout_escrow(
-      ticket.delay,
+   maybe_open_live_cashout_escrow(&mut OpenLiveCashoutEscrow {
+      delay: ticket.delay,
       feepayer,
       user,
       escrow_pda,
@@ -225,15 +225,15 @@ fn finish_rfq_parlay_cashout_after_ticket(
       token_program,
       rent_sysvar,
       system_program,
-      ticket.orig_bet_id,
-      meta.cashout_id,
-      now,
-      meta.amount,
-      ticket.payout_removed,
-      meta.max_payment,
-      *mm_program.address(),
-      true,
-   )?;
+      orig_bet_id: ticket.orig_bet_id,
+      cashout_id: meta.cashout_id,
+      timestamp: now,
+      amount: meta.amount,
+      payout_removed: ticket.payout_removed,
+      payment: meta.max_payment,
+      market_maker: mm_program.address(),
+      is_parlay: true,
+   })?;
 
    let payment_dest: &AccountView = cashout_payment_dest(ticket.delay, escrow_ata, user_ata);
    let payment_before = get_token_account_balance(payment_dest)?;

@@ -2090,6 +2090,30 @@ export function parseU32Prefix(rest: ReadonlyUint8Array): { freebetId: number; b
    return { freebetId, body: new Uint8Array(rest.subarray(U32_LEN)) };
 }
 
+const utf8MessageEncoder = new TextEncoder();
+const utf8MessageDecoder = new TextDecoder('utf-8', { fatal: true, ignoreBOM: true });
+
+/**
+ * `message` router body (after discriminator `220`): raw UTF-8 bytes, no length prefix.
+ * Rust: `aggregator::instructions::message::process` — `str::from_utf8(data)` then `log!`.
+ * Throws if `message` is not well-formed (lone surrogates would otherwise be silently replaced with U+FFFD).
+ */
+export function encodeMessageIxData(message: string): Uint8Array {
+   const bytes = utf8MessageEncoder.encode(message);
+   if (utf8MessageDecoder.decode(bytes) !== message) {
+      throw new RangeError('message must be well-formed UTF-16 (lone surrogates cannot be encoded as UTF-8)');
+   }
+   return bytes;
+}
+
+export function decodeMessageIxData(data: ReadonlyUint8Array): string {
+   try {
+      return utf8MessageDecoder.decode(new Uint8Array(data));
+   } catch {
+      throw new RangeError(`message body (${data.length} bytes) is not valid UTF-8`);
+   }
+}
+
 const getIssueFreebetIxHeaderEncoder = () =>
    getStructEncoder([
       ['freebetId', getU32Encoder()],

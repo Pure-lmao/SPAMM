@@ -45,9 +45,9 @@ use crate::{
       verify_mm_market_data_pda, verify_mm_program_executable, verify_quote_buffer, verify_token_account,
       reject_duplicate_mm_programs,
       cashout_helpers::{
-         accept_cashout_payment, cashout_payment_dest, cashout_requires_delay, finish_cashout_single,
-         maybe_open_live_cashout_escrow, parse_cashout_quote_return_for_mm, pay_cashout_from_free_liability, require_cashout_sequence_at_least, split_fillers,
-         validate_cashout_size, verify_cashout_fill_preamble, verify_cashout_mm_encumbrance,
+         accept_cashout_payment, cashout_payment_dest, cashout_requires_delay, finish_cashout_single, FinishCashoutSingle,
+         maybe_open_live_cashout_escrow, OpenLiveCashoutEscrow, parse_cashout_quote_return_for_mm, pay_cashout_from_free_liability, require_cashout_sequence_at_least, split_fillers,
+         validate_cashout_size, verify_cashout_fill_preamble, CashoutFillPreamble, verify_cashout_mm_encumbrance,
          verify_ticket_feepayer,
       }, freebet_helpers::require_not_promo, verify_bet_pda,
    }, state::{
@@ -107,7 +107,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    }
    reject_duplicate_mm_programs(mm_accounts, MM_ACCOUNTS_PER_MM)?;
 
-   verify_cashout_fill_preamble(
+   verify_cashout_fill_preamble(&CashoutFillPreamble {
       feepayer,
       user,
       user_ata,
@@ -119,8 +119,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       rent_sysvar,
       system_program,
       clock_sysvar,
-      "fill_cashout",
-   )?;
+      label: "fill_cashout",
+   })?;
 
    let parsed = FillCashoutIxData::decode(data)?;
    let mut orig_fillers_buf = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
@@ -305,8 +305,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
    );
 
    let timestamp = clock_unix_timestamp_u32(clock_sysvar)?;
-   maybe_open_live_cashout_escrow(
-      delay,
+   maybe_open_live_cashout_escrow(&mut OpenLiveCashoutEscrow {
+      delay: delay,
       feepayer,
       user,
       escrow_pda,
@@ -315,15 +315,15 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       token_program,
       rent_sysvar,
       system_program,
-      orig.bet_id,
-      parsed.cashout_id,
-      timestamp,
-      parsed.amount,
-      payout_removed,
-      winner.max_payment,
-      *winner.mm_address,
-      false,
-   )?;
+      orig_bet_id: orig.bet_id,
+      cashout_id: parsed.cashout_id,
+      timestamp: timestamp,
+      amount: parsed.amount,
+      payout_removed: payout_removed,
+      payment: winner.max_payment,
+      market_maker: winner.mm_address,
+      is_parlay: false,
+   })?;
 
    let payment_dest: &AccountView = cashout_payment_dest(delay, escrow_ata, user_ata);
    let payment_before = get_token_account_balance(payment_dest)?;
@@ -384,7 +384,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       )?;
    }
 
-   finish_cashout_single(
+   finish_cashout_single(&mut FinishCashoutSingle {
       feepayer,
       ticket_feepayer,
       user,
@@ -397,21 +397,21 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       token_program,
       rent_sysvar,
       system_program,
-      winner.mm_encumbrance_pda,
-      winner.mm_address,
-      &orig,
-      parsed.cashout_id,
-      parsed.amount,
+      filling_encumbrance: winner.mm_encumbrance_pda,
+      filling_mm: winner.mm_address,
+      orig: &orig,
+      cashout_id: parsed.cashout_id,
+      amount: parsed.amount,
       payout_removed,
       timestamp,
-      event_state_sequence,
-      event_game_state,
-      &remaining,
-      &cashed,
+      cashout_event_state_sequence: event_state_sequence,
+      cashout_event_game_state: event_game_state,
+      remaining: &remaining,
+      cashed: &cashed,
       delay,
       escrow_ata,
       payment_before,
-      winner.max_payment,
-   )
+      payment: winner.max_payment,
+   })
 }
 

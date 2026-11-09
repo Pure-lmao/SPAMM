@@ -1101,6 +1101,7 @@ export type DecodedAggregatorInstruction =
    | { kind: 'removeLineFromNettingAccount'; data: RemoveLineFromNettingIxData }
    | { kind: 'closeNettingAccount'; eventId: EventId; operator: Address; mint: Address }
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint }
+   | { kind: 'message'; message: string }
    | { kind: 'writeArbitraryData'; data: Uint8Array }
    | { kind: 'forceClosePda' };
 

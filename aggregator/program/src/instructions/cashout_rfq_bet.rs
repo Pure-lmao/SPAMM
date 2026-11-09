@@ -43,8 +43,8 @@ use crate::{
    errors::SpammError, helpers::{
       clock_unix_timestamp_u32, get_token_account_balance, verify_event_state, verify_mint, verify_mm_config_pda, verify_mm_market_data_pda, verify_mm_program_executable, verify_token_account,
       cashout_helpers::{
-         accept_cashout_payment, cashout_payment_dest, cashout_requires_delay, finish_cashout_single, maybe_open_live_cashout_escrow, pay_cashout_from_free_liability, require_cashout_sequence_at_least, split_fillers,
-         validate_cashout_size, verify_cashout_fill_preamble, verify_cashout_mm_encumbrance,
+         accept_cashout_payment, cashout_payment_dest, cashout_requires_delay, finish_cashout_single, FinishCashoutSingle, maybe_open_live_cashout_escrow, OpenLiveCashoutEscrow, pay_cashout_from_free_liability, require_cashout_sequence_at_least, split_fillers,
+         validate_cashout_size, verify_cashout_fill_preamble, CashoutFillPreamble, verify_cashout_mm_encumbrance,
          verify_ticket_feepayer,
       },
       freebet_helpers::require_not_promo, verify_bet_pda,
@@ -87,7 +87,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       return Err(ProgramError::NotEnoughAccountKeys);
    };
 
-   verify_cashout_fill_preamble(
+   verify_cashout_fill_preamble(&CashoutFillPreamble {
       feepayer,
       user,
       user_ata,
@@ -99,8 +99,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       rent_sysvar,
       system_program,
       clock_sysvar,
-      "fill_rfq_cashout",
-   )?;
+      label: "fill_rfq_cashout",
+   })?;
 
    let (parsed, sig) = FillRfqCashoutIxData::decode_with_signature(data)?;
    let mut orig_fillers_buf = [const { MaybeUninit::<BetFiller>::uninit() }; MAX_NUMBER_OF_MMS];
@@ -188,8 +188,8 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       parsed.event_state_sequence,
    );
    let filling_mm = *mm_program.address();
-   maybe_open_live_cashout_escrow(
-      delay,
+   maybe_open_live_cashout_escrow(&mut OpenLiveCashoutEscrow {
+      delay: delay,
       feepayer,
       user,
       escrow_pda,
@@ -198,15 +198,15 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
       token_program,
       rent_sysvar,
       system_program,
-      orig.bet_id,
-      parsed.cashout_id,
-      now,
-      parsed.amount,
-      payout_removed,
-      parsed.max_payment,
-      filling_mm,
-      false,
-   )?;
+      orig_bet_id: orig.bet_id,
+      cashout_id: parsed.cashout_id,
+      timestamp: now,
+      amount: parsed.amount,
+      payout_removed: payout_removed,
+      payment: parsed.max_payment,
+      market_maker: &filling_mm,
+      is_parlay: false,
+   })?;
    {
       let payment_dest: &AccountView = cashout_payment_dest(delay, escrow_ata, user_ata);
       let payment_before = get_token_account_balance(payment_dest)?;
@@ -256,7 +256,7 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          ],
          &[Signer::from(&seeds)],
       )?;
-      finish_cashout_single(
+      finish_cashout_single(&mut FinishCashoutSingle {
          feepayer,
          ticket_feepayer,
          user,
@@ -269,22 +269,22 @@ pub fn process(accounts: &mut [AccountView], data: &[u8]) -> ProgramResult {
          token_program,
          rent_sysvar,
          system_program,
-         mm_encumbrance_pda,
-         &filling_mm,
-         &orig,
-         parsed.cashout_id,
-         parsed.amount,
+         filling_encumbrance: mm_encumbrance_pda,
+         filling_mm: &filling_mm,
+         orig: &orig,
+         cashout_id: parsed.cashout_id,
+         amount: parsed.amount,
          payout_removed,
-         now,
-         parsed.event_state_sequence,
-         parsed.event_game_state,
-         &remaining,
-         &cashed,
+         timestamp: now,
+         cashout_event_state_sequence: parsed.event_state_sequence,
+         cashout_event_game_state: parsed.event_game_state,
+         remaining: &remaining,
+         cashed: &cashed,
          delay,
          escrow_ata,
          payment_before,
-         parsed.max_payment,
-      )?;
+         payment: parsed.max_payment,
+      })?;
    }
    Ok(())
 }

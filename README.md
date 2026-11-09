@@ -1073,6 +1073,7 @@ The first byte of aggregator instruction `data` selects the handler.
 | 202 | `get_market_quotes_proxy` |
 | 203 | `get_cashout_quote_proxy` |
 | 204 | `get_parlay_cashout_quote_proxy` |
+| 220 | `message` |
 | 254 | `write_arbitrary_data` |
 | 255 | `force_close_pda` |
 
@@ -2877,6 +2878,29 @@ Accounts:
 | 6 | config pda | readonly | Aggregator config; pause-checked |
 | 7 | mint | readonly | |
 | 8 | token program | readonly | |
+
+### message
+
+Discriminator: **220**
+
+This can be called by any signer to post a message to the program so it can be indexed by third parties. It is a no-op: the message bytes are written to the program logs with `log_message` and no account data is read or modified. This could be used by a Market Operator to link event ids to event names or event results permanently onchain. Indexers should filter by sender since there is no auth check in the program. The struct of the message is entirely up to the sender.
+
+Data:
+
+```rust
+struct MessageIxData {
+   discriminator: u8, // 220
+   message: [u8; N], // N = message length in bytes; raw UTF-8, no length prefix
+}
+```
+
+The message must be valid UTF-8 (the runtime's `sol_log_` rejects invalid UTF-8) and is bounded only by the transaction size limit.
+
+Accounts:
+
+| Index | Account | Role | Notes |
+| --- | --- | --- | --- |
+| 0 | market operator | readonly, signer | Any signer; not checked against a market or the config PDA |
 
 ### write_arbitrary_data
 

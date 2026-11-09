@@ -221,81 +221,89 @@ pub fn split_fillers(
    Ok(payout_removed)
 }
 
+/// Accounts and log label for [`verify_cashout_fill_preamble`], bundled so the call passes one
+/// pointer instead of spilling every argument onto the caller's SBF stack frame.
+pub struct CashoutFillPreamble<'a> {
+   pub feepayer: &'a AccountView,
+   pub user: &'a AccountView,
+   pub user_ata: &'a AccountView,
+   pub cashout_pda: &'a AccountView,
+   pub config_pda: &'a AccountView,
+   pub mint: &'a AccountView,
+   pub token_program: &'a AccountView,
+   pub associated_token_program: &'a AccountView,
+   pub rent_sysvar: &'a AccountView,
+   pub system_program: &'a AccountView,
+   pub clock_sysvar: &'a AccountView,
+   pub label: &'a str,
+}
+
 /// Shared account checks for the four cashout-fill instructions.
-pub fn verify_cashout_fill_preamble(
-   feepayer: &AccountView,
-   user: &AccountView,
-   user_ata: &AccountView,
-   cashout_pda: &AccountView,
-   config_pda: &AccountView,
-   mint: &AccountView,
-   token_program: &AccountView,
-   associated_token_program: &AccountView,
-   rent_sysvar: &AccountView,
-   system_program: &AccountView,
-   clock_sysvar: &AccountView,
-   label: &str,
-) -> ProgramResult {
-   verify_signer(feepayer)?;
-   verify_signer(user)?;
-   verify_token_program(token_program)?;
-   verify_associated_token_program(associated_token_program)?;
-   verify_rent_sysvar(rent_sysvar)?;
-   verify_system_program(system_program)?;
-   verify_clock_sysvar(clock_sysvar)?;
-   verify_mint(mint, mint.address())?;
-   verify_token_account(true, user_ata, user, mint, token_program, false)?;
-   verify_config_pda(config_pda, true)?;
-   ensure_pda_unused(cashout_pda, label)?;
+pub fn verify_cashout_fill_preamble(args: &CashoutFillPreamble<'_>) -> ProgramResult {
+   verify_signer(args.feepayer)?;
+   verify_signer(args.user)?;
+   verify_token_program(args.token_program)?;
+   verify_associated_token_program(args.associated_token_program)?;
+   verify_rent_sysvar(args.rent_sysvar)?;
+   verify_system_program(args.system_program)?;
+   verify_clock_sysvar(args.clock_sysvar)?;
+   verify_mint(args.mint, args.mint.address())?;
+   verify_token_account(true, args.user_ata, args.user, args.mint, args.token_program, false)?;
+   verify_config_pda(args.config_pda, true)?;
+   ensure_pda_unused(args.cashout_pda, args.label)?;
    Ok(())
 }
 
+/// Accounts and values for [`maybe_open_live_cashout_escrow`], bundled so the call passes one
+/// pointer instead of spilling every argument onto the caller's SBF stack frame.
+pub struct OpenLiveCashoutEscrow<'a> {
+   pub delay: bool,
+   pub feepayer: &'a AccountView,
+   pub user: &'a AccountView,
+   pub escrow_pda: &'a mut AccountView,
+   pub escrow_ata: &'a AccountView,
+   pub mint: &'a AccountView,
+   pub token_program: &'a AccountView,
+   pub rent_sysvar: &'a AccountView,
+   pub system_program: &'a AccountView,
+   pub orig_bet_id: u64,
+   pub cashout_id: u64,
+   pub timestamp: u32,
+   pub amount: u64,
+   pub payout_removed: u64,
+   pub payment: u64,
+   pub market_maker: &'a Address,
+   pub is_parlay: bool,
+}
+
 /// Create the live cashout escrow PDA when delay is required; no-op otherwise.
-pub fn maybe_open_live_cashout_escrow(
-   delay: bool,
-   feepayer: &AccountView,
-   user: &AccountView,
-   escrow_pda: &mut AccountView,
-   escrow_ata: &AccountView,
-   mint: &AccountView,
-   token_program: &AccountView,
-   rent_sysvar: &AccountView,
-   system_program: &AccountView,
-   orig_bet_id: u64,
-   cashout_id: u64,
-   timestamp: u32,
-   amount: u64,
-   payout_removed: u64,
-   payment: u64,
-   market_maker: Address,
-   is_parlay: bool,
-) -> ProgramResult {
-   if !delay {
+pub fn maybe_open_live_cashout_escrow(args: &mut OpenLiveCashoutEscrow<'_>) -> ProgramResult {
+   if !args.delay {
       return Ok(());
    }
    let escrow = CashoutEscrow {
       discriminator: CASHOUT_ESCROW_DISCRIMINATOR,
       bump: 0,
-      owner: *user.address(),
-      feepayer: *feepayer.address(),
-      orig_bet_id,
-      cashout_id,
-      timestamp,
-      amount,
-      payout_removed,
-      payment,
-      market_maker,
-      is_parlay,
+      owner: *args.user.address(),
+      feepayer: *args.feepayer.address(),
+      orig_bet_id: args.orig_bet_id,
+      cashout_id: args.cashout_id,
+      timestamp: args.timestamp,
+      amount: args.amount,
+      payout_removed: args.payout_removed,
+      payment: args.payment,
+      market_maker: *args.market_maker,
+      is_parlay: args.is_parlay,
    };
    create_cashout_escrow(
-      feepayer,
-      user.address(),
-      escrow_pda,
-      escrow_ata,
-      mint,
-      token_program,
-      rent_sysvar,
-      system_program,
+      args.feepayer,
+      args.user.address(),
+      args.escrow_pda,
+      args.escrow_ata,
+      args.mint,
+      args.token_program,
+      args.rent_sysvar,
+      args.system_program,
       &escrow,
    )
 }
@@ -854,97 +862,102 @@ pub fn pay_cashout_from_free_liability(
    Ok(amount_to_send)
 }
 
+/// Accounts and values for [`finish_cashout_single`], bundled so the call passes one
+/// pointer instead of spilling every argument onto the caller's SBF stack frame.
+pub struct FinishCashoutSingle<'a> {
+   pub feepayer: &'a AccountView,
+   pub ticket_feepayer: &'a mut AccountView,
+   pub user: &'a AccountView,
+   pub user_ata: &'a mut AccountView,
+   pub bet_pda: &'a mut AccountView,
+   pub bet_ata: &'a mut AccountView,
+   pub cashout_pda: &'a mut AccountView,
+   pub cashout_ata: &'a AccountView,
+   pub mint: &'a AccountView,
+   pub token_program: &'a AccountView,
+   pub rent_sysvar: &'a AccountView,
+   pub system_program: &'a AccountView,
+   pub filling_encumbrance: &'a AccountView,
+   pub filling_mm: &'a Address,
+   pub orig: &'a BetAccountHeader,
+   pub cashout_id: u64,
+   pub amount: u64,
+   pub payout_removed: u64,
+   pub timestamp: u32,
+   pub cashout_event_state_sequence: u16,
+   pub cashout_event_game_state: EventGameState,
+   pub remaining: &'a [BetFiller],
+   pub cashed: &'a [BetFiller],
+   pub delay: bool,
+   pub escrow_ata: &'a AccountView,
+   pub payment_before: u64,
+   pub payment: u64,
+}
+
 /// Dest must have risen by the full quoted payment; then novate the slice.
 #[inline(never)]
-pub fn finish_cashout_single(
-   feepayer: &AccountView,
-   ticket_feepayer: &mut AccountView,
-   user: &AccountView,
-   user_ata: &mut AccountView,
-   bet_pda: &mut AccountView,
-   bet_ata: &mut AccountView,
-   cashout_pda: &mut AccountView,
-   cashout_ata: &AccountView,
-   mint: &AccountView,
-   token_program: &AccountView,
-   rent_sysvar: &AccountView,
-   system_program: &AccountView,
-   filling_encumbrance: &AccountView,
-   filling_mm: &Address,
-   orig: &BetAccountHeader,
-   cashout_id: u64,
-   amount: u64,
-   payout_removed: u64,
-   timestamp: u32,
-   cashout_event_state_sequence: u16,
-   cashout_event_game_state: EventGameState,
-   remaining: &[BetFiller],
-   cashed: &[BetFiller],
-   delay: bool,
-   escrow_ata: &AccountView,
-   payment_before: u64,
-   payment: u64,
-) -> ProgramResult {
-   if delay {
+pub fn finish_cashout_single(args: &mut FinishCashoutSingle<'_>) -> ProgramResult {
+   if args.delay {
       require_exact_token_increase(
-         escrow_ata,
-         payment_before,
-         payment,
+         args.escrow_ata,
+         args.payment_before,
+         args.payment,
       )?;
    } else {
       require_exact_token_increase(
-         user_ata,
-         payment_before,
-         payment,
+         args.user_ata,
+         args.payment_before,
+         args.payment,
       )?;
    }
+   let orig = args.orig;
    let header = cashout_header_from_bet(
-      filling_mm,
-      *feepayer.address(),
+      args.filling_mm,
+      *args.feepayer.address(),
       orig,
-      cashout_id,
-      amount,
-      payout_removed,
-      timestamp,
-      cashout_event_state_sequence,
-      cashout_event_game_state,
+      args.cashout_id,
+      args.amount,
+      args.payout_removed,
+      args.timestamp,
+      args.cashout_event_state_sequence,
+      args.cashout_event_game_state,
       orig.num_fillers,
    );
    create_cashout_account(
-      feepayer,
-      filling_mm,
-      cashout_pda,
-      cashout_ata,
-      mint,
-      token_program,
-      rent_sysvar,
-      system_program,
+      args.feepayer,
+      args.filling_mm,
+      args.cashout_pda,
+      args.cashout_ata,
+      args.mint,
+      args.token_program,
+      args.rent_sysvar,
+      args.system_program,
       &header,
-      &cashed[..orig.num_fillers as usize],
+      &args.cashed[..orig.num_fillers as usize],
    )?;
-   bump_open_cashout_tickets(filling_encumbrance, 1)?;
+   bump_open_cashout_tickets(args.filling_encumbrance, 1)?;
    let bet_id_bytes = orig.bet_id.to_le_bytes();
    transfer_stake_to_cashout(
-      bet_ata,
-      cashout_ata,
-      bet_pda,
-      amount,
+      args.bet_ata,
+      args.cashout_ata,
+      args.bet_pda,
+      args.amount,
       BET_ACCOUNT_SEED,
-      user.address(),
+      args.user.address(),
       &bet_id_bytes,
       orig.bump,
    )?;
    let remain_amount = orig.amount
-      .checked_sub(amount).ok_or(ProgramError::ArithmeticOverflow)?;
+      .checked_sub(args.amount).ok_or(ProgramError::ArithmeticOverflow)?;
    let remain_payout = orig.payout
-      .checked_sub(payout_removed).ok_or(ProgramError::ArithmeticOverflow)?;
+      .checked_sub(args.payout_removed).ok_or(ProgramError::ArithmeticOverflow)?;
    let is_full = remain_amount == 0;
-   if delay {
+   if args.delay {
       patch_bet_amounts(
-         bet_pda,
+         args.bet_pda,
          remain_amount,
          remain_payout,
-         remaining,
+         args.remaining,
          orig.num_fillers,
          if is_full {
             BetResult::CashedOut
@@ -956,19 +969,19 @@ pub fn finish_cashout_single(
       let bump_bytes = [orig.bump];
       let signer_seed = [
          Seed::from(BET_ACCOUNT_SEED),
-         Seed::from(user.address().as_ref()),
+         Seed::from(args.user.address().as_ref()),
          Seed::from(&bet_id_bytes),
          Seed::from(&bump_bytes),
       ];
       let signers = [Signer::from(&signer_seed)];
-      safe_close_ata(bet_ata, ticket_feepayer, user_ata, bet_pda, &signers)?;
-      close_pda_return_rent(bet_pda, ticket_feepayer)?;
+      safe_close_ata(args.bet_ata, args.ticket_feepayer, args.user_ata, args.bet_pda, &signers)?;
+      close_pda_return_rent(args.bet_pda, args.ticket_feepayer)?;
    } else {
       patch_bet_amounts(
-         bet_pda,
+         args.bet_pda,
          remain_amount,
          remain_payout,
-         remaining,
+         args.remaining,
          orig.num_fillers,
          BetResult::Pending,
       )?;
