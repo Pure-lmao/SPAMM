@@ -32,17 +32,15 @@ const QUOTE_PROBE_MIN_ODDS = ODDS_SCALE + 100n;
 /** Unused on-chain for quote-proxy instructions; must be > 0 for SDK validation. */
 const QUOTE_PROBE_BET_ID = 1n;
 
-function proxyQuotesToRows(quotes: readonly ProxyQuoteData[], amount: bigint): MmQuoteRow[] {
-   const valid = quotes
+function proxyQuotesToRows(quotes: readonly ProxyQuoteData[]): MmQuoteRow[] {
+   return quotes
       .filter((q) => q.maxAmount > 0n && q.oddsScaled > 0n)
       .map((q) => ({
          mmProgramAddress: q.mmAddress,
          maxAmount: q.maxAmount,
          oddsScaled: q.oddsScaled,
-      }));
-   const fills = valid.filter((x) => x.maxAmount >= amount);
-   const pool = fills.length > 0 ? fills : [];
-   return [...pool].sort((a, b) => Number(b.oddsScaled - a.oddsScaled));
+      }))
+      .sort((a, b) => (a.oddsScaled === b.oddsScaled ? 0 : a.oddsScaled > b.oddsScaled ? -1 : 1));
 }
 
 export type MmQuoteRow = Readonly<{
@@ -122,7 +120,7 @@ export async function runMmQuoteFlow(params: {
       if (!returnData || returnData.length === 0) {
          return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors };
       }
-      const sorted = proxyQuotesToRows(decodeProxyQuoteReturnData(returnData), params.amount);
+      const sorted = proxyQuotesToRows(decodeProxyQuoteReturnData(returnData));
       const top = sorted.slice(0, MAX_NUMBER_OF_MMS_PROXY);
       const conservativeMinOddsScaled =
          top.length === 0
@@ -233,7 +231,7 @@ export async function runMmParlayQuoteFlow(params: {
       if (!returnData || returnData.length === 0) {
          return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors, bestMm: null };
       }
-      const sorted = proxyQuotesToRows(decodeProxyParlayQuoteReturnData(returnData), params.amount);
+      const sorted = proxyQuotesToRows(decodeProxyParlayQuoteReturnData(returnData));
       const best = sorted[0] ?? null;
       const conservativeMinOddsScaled =
          best === null

@@ -1,6 +1,6 @@
 import type { ParlayLegWire } from "../aggregator/sdk/ts/src/types";
 import { BetResult } from "../aggregator/sdk/ts/src/types";
-import type { Selection } from "./quickIndexer";
+import type { Selection } from "./realIndexer";
 import type { Address } from "@solana/kit";
 
 

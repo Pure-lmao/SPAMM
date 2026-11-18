@@ -11,7 +11,7 @@ import {
    type ParlayBetAccountData,
 } from "spamm-aggregator-sdk";
 import { mapBoostAccountToIssuerAuth, mapFreebetAccountToIssuerAuth } from "../betting/freebets";
-import { type BetRecord, type Selection } from "../../../api/quickIndexer";
+import { type BetRecord, type Selection } from "../../../api/realIndexer";
 
 const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 

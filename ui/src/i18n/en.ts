@@ -99,6 +99,7 @@ export const enMessages = {
       fetchingOdds: "Fetching best odds",
       someMms: "Some MMs did not quote:",
       best: "(best)",
+      useQuoteOdds: "Use these odds",
       potentialReturn: "Potential return",
       signInWallet: "Sign in wallet…",
       tryRfq: "Try RFQ",

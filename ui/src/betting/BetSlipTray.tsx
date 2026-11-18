@@ -30,6 +30,7 @@ import {
    userWinCreditBase,
    buildMarketIdForSelection,
    parlayLegFromSelection,
+   oddsScaledToCoverStake,
    parseMinOddsScaled,
    quoteErrorMessageForUi,
    quoteErrorsSummaryForUi,
@@ -54,6 +55,7 @@ import {
    explainFreebetOddsForQuotes,
    fetchAvailableBoosts,
    fetchAvailableFreebets,
+   combinedBoardOddsScaled,
    filterQuoteRowsForFreebet,
    freebetKey,
    freebetPickerLabel,
@@ -138,6 +140,9 @@ export function BetSlipTray(): ReactElement | null {
    const sendLockRef = useRef(false);
    const prevCountRef = useRef(0);
    const legsAtPlaceRef = useRef<string | null>(null);
+   /** While true, stake and quotes choose the odds. Typing or clicking a price pins it. */
+   const followBookOddsRef = useRef(true);
+   const quoteGenRef = useRef(0);
 
    const { account, isConnected } = useWallet();
    const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
@@ -155,6 +160,34 @@ export function BetSlipTray(): ReactElement | null {
    const oddsFormatRef = useRef(oddsFormat);
    oddsFormatRef.current = oddsFormat;
    const appliedOddsFormatRef = useRef(oddsFormat);
+
+   const applyOddsScaled = useCallback((scaled: bigint) => {
+      if (scaled <= 0n) {
+         setMinOdds("");
+         return;
+      }
+      setConservativeMin(scaled);
+      setMinOdds(formatOddsInputFromDecimal(Number(scaled) / Number(ODDS_SCALE), oddsFormatRef.current));
+   }, []);
+
+   const seedBoardOdds = useCallback(() => {
+      const board = combinedBoardOddsScaled(selections);
+      if (board == null || board <= ODDS_SCALE) {
+         setMinOdds("");
+         return;
+      }
+      applyOddsScaled(board);
+   }, [applyOddsScaled, selections]);
+
+   const pinOddsScaled = useCallback((scaled: bigint) => {
+      followBookOddsRef.current = false;
+      applyOddsScaled(scaled);
+   }, [applyOddsScaled]);
+
+   const onMinOddsChange = useCallback((value: string) => {
+      followBookOddsRef.current = false;
+      setMinOdds(value);
+   }, []);
    const { connect, isConnecting: connectBusy, resetError } = useConnectWallet();
    const connectors = useWalletConnectors();
 
@@ -167,6 +200,7 @@ export function BetSlipTray(): ReactElement | null {
    );
 
    useEffect(() => {
+      quoteGenRef.current += 1;
       const n = selections.length;
       if (n === 0) {
          setAmount("");
@@ -190,6 +224,8 @@ export function BetSlipTray(): ReactElement | null {
          setSelectedBoostKey("");
          return;
       }
+      followBookOddsRef.current = true;
+      seedBoardOdds();
       if (prevCountRef.current === 0) {
          setAmount("10");
       }
@@ -206,7 +242,7 @@ export function BetSlipTray(): ReactElement | null {
       setRfqQuotes([]);
       setRfqRequest(null);
       setRfqMmCount(0);
-   }, [selections.length, selections.map((s) => s.id).join("|")]);
+   }, [seedBoardOdds, selections.length, selections.map((s) => s.id).join("|")]);
 
    const promoQuoteKey = selectedBoostKey || selectedFreebetKey;
    const quotesAttempted =
@@ -314,6 +350,7 @@ export function BetSlipTray(): ReactElement | null {
       setQuoteErr(null);
       setQuoteMmErrors([]);
       setQuoteScopeKey(null);
+      const gen = ++quoteGenRef.current;
       const userAddress = isConnected && account != null ? address(account) : SIM_FEE_PAYER_ADDRESS;
 
       const voucher = selectedBoostVoucher ?? selectedVoucher;
@@ -341,24 +378,21 @@ export function BetSlipTray(): ReactElement | null {
             const marketId = buildMarketIdForSelection(sel);
             const side = pickBetSide(sel.column, sel.mktString, sel.outcomeIndex, sel.marketWireId);
             const q = await runMmQuoteFlow({ rpc, userAddress, marketId, side, amount: amt, allowedMms });
+            if (gen !== quoteGenRef.current) {
+               return;
+            }
             const top = filterQuoteRowsForFreebet(q.topMms, voucher);
             if (top.length === 0) {
                setQuoteStatus("err");
                setQuoteErr(quoteErrorsSummaryForUi(q.errors, quoteFailHint(q.topMms)));
                setQuoteRows([]);
                setQuoteMmErrors(q.errors);
-               setMinOdds("");
+               if (followBookOddsRef.current) {
+                  seedBoardOdds();
+               }
                setQuoteScopeKey(quoteKey);
                return;
             }
-            const conservative = top.reduce(
-               (m, x) => (x.oddsScaled < m ? x.oddsScaled : m),
-               top[0]!.oddsScaled,
-            );
-            setConservativeMin(conservative);
-            setMinOdds(
-               formatOddsInputFromDecimal(Number(conservative) / Number(ODDS_SCALE), oddsFormatRef.current),
-            );
             setQuoteRows(top);
             setQuoteMmErrors(q.errors);
             setBestParlayMm(null);
@@ -367,6 +401,9 @@ export function BetSlipTray(): ReactElement | null {
          } else {
             const legs = selections.map(parlayLegFromSelection);
             const q = await runMmParlayQuoteFlow({ rpc, userAddress, legs, amount: amt, allowedMms });
+            if (gen !== quoteGenRef.current) {
+               return;
+            }
             const top = filterQuoteRowsForFreebet(q.topMms, voucher);
             if (top.length === 0) {
                setQuoteStatus("err");
@@ -381,18 +418,12 @@ export function BetSlipTray(): ReactElement | null {
                setQuoteRows([]);
                setQuoteMmErrors(q.errors);
                setBestParlayMm(null);
-               setMinOdds("");
+               if (followBookOddsRef.current) {
+                  seedBoardOdds();
+               }
                setQuoteScopeKey(quoteKey);
                return;
             }
-            const conservative = top.reduce(
-               (m, x) => (x.oddsScaled < m ? x.oddsScaled : m),
-               top[0]!.oddsScaled,
-            );
-            setConservativeMin(conservative);
-            setMinOdds(
-               formatOddsInputFromDecimal(Number(conservative) / Number(ODDS_SCALE), oddsFormatRef.current),
-            );
             setQuoteRows(top);
             setQuoteMmErrors(q.errors);
             setBestParlayMm(top[0]!.mmProgramAddress);
@@ -400,6 +431,9 @@ export function BetSlipTray(): ReactElement | null {
             setQuoteScopeKey(quoteKey);
          }
       } catch (e) {
+         if (gen !== quoteGenRef.current) {
+            return;
+         }
          setQuoteStatus("err");
          setQuoteErr(quoteErrorMessageForUi(e instanceof Error ? e.message : String(e)));
          setQuoteRows([]);
@@ -407,7 +441,7 @@ export function BetSlipTray(): ReactElement | null {
          setBestParlayMm(null);
          setQuoteScopeKey(quoteKey);
       }
-   }, [selections, isConnected, account, amount, rpc, selectedVoucher, selectedFreebetKey, selectedBoostVoucher, selectedBoostKey]);
+   }, [selections, isConnected, account, amount, rpc, selectedVoucher, selectedFreebetKey, selectedBoostVoucher, selectedBoostKey, seedBoardOdds]);
 
    const fetchRfqQuotes = useCallback(async () => {
       const amt = parseUsdcAmountUiToBaseUnits(amount);
@@ -488,6 +522,21 @@ export function BetSlipTray(): ReactElement | null {
       }, 450);
       return () => window.clearTimeout(t);
    }, [selections, amount, runQuotes, isCollapsed, rfqOnly]);
+
+   useEffect(() => {
+      if (!followBookOddsRef.current || quoteRows.length === 0) {
+         return;
+      }
+      const amt = parseUsdcAmountUiToBaseUnits(amount);
+      if (amt == null || amt <= 0n) {
+         return;
+      }
+      const scaled = oddsScaledToCoverStake(quoteRows, amt);
+      if (scaled == null) {
+         return;
+      }
+      applyOddsScaled(scaled);
+   }, [amount, applyOddsScaled, quoteRows]);
 
    const minOddsScaled = useMemo(
       () => parseMinOddsScaled(minOdds, conservativeMin, oddsFormat),
@@ -1076,7 +1125,7 @@ export function BetSlipTray(): ReactElement | null {
                         {!rfqOnly && (
                            <label className="bet-modal-field">
                               <span className="bet-modal-field-label">{minOddsLabel}</span>
-                              <OddsInputWithDecimal value={minOdds} onChange={setMinOdds} />
+                              <OddsInputWithDecimal value={minOdds} onChange={onMinOddsChange} />
                            </label>
                         )}
                         {rfqOnly && (
@@ -1161,7 +1210,14 @@ export function BetSlipTray(): ReactElement | null {
                               >
                                  {i + 1}. {String(row.mmProgramAddress).slice(0, 8)}…{" "}
                                  {formatUsdcBaseUnitsForUi(row.maxAmount)} USDC @{" "}
-                                 <span className="odds-value">{formatSlipOdds(dec, oddsFormat)}</span>
+                                 <button
+                                    type="button"
+                                    className="bet-slip-tray__quote-odds odds-value"
+                                    title={t("slip.useQuoteOdds")}
+                                    onClick={() => pinOddsScaled(row.oddsScaled)}
+                                 >
+                                    {formatSlipOdds(dec, oddsFormat)}
+                                 </button>
                                  {isBest ? ` ${t("slip.best")}` : ""}
                               </li>
                            );
@@ -1282,7 +1338,7 @@ export function BetSlipTray(): ReactElement | null {
                           {!rfqOnly && (
                              <label className="bet-modal-field">
                                 <span className="bet-modal-field-label">{minOddsLabel}</span>
-                                <OddsInputWithDecimal value={minOdds} onChange={setMinOdds} disabled={sending} />
+                                <OddsInputWithDecimal value={minOdds} onChange={onMinOddsChange} disabled={sending} />
                              </label>
                           )}
                        </div>
@@ -1372,7 +1428,14 @@ export function BetSlipTray(): ReactElement | null {
                                       >
                                          {i + 1}. {String(row.mmProgramAddress).slice(0, 8)}…{" "}
                                          {formatUsdcBaseUnitsForUi(row.maxAmount)} USDC @{" "}
-                                         <span className="odds-value">{formatSlipOdds(dec, oddsFormat)}</span>
+                                         <button
+                                            type="button"
+                                            className="bet-slip-tray__quote-odds odds-value"
+                                            title={t("slip.useQuoteOdds")}
+                                            onClick={() => pinOddsScaled(row.oddsScaled)}
+                                         >
+                                            {formatSlipOdds(dec, oddsFormat)}
+                                         </button>
                                          {isBest ? ` ${t("slip.best")}` : ""}
                                       </li>
                                    );

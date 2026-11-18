@@ -21,7 +21,7 @@ import {
    promotionalMarketToJson,
 } from "./localDb";
 import { safeJSONStringify } from "./utils";
-import { getClosedBetRecordsByUser } from "./quickIndexer";
+import { getClosedBetRecordsByUser } from "./realIndexer";
 import { parseRfqCashoutHttpRequestJson, parseRfqHttpRequestJson, RFQ_MM_WS_PATH } from "spamm-aggregator-sdk";
 import { rfqHub, type MmWsData } from "./rfqHub";
 

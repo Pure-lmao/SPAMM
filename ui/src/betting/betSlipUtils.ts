@@ -24,6 +24,37 @@ export function selectionMatches(
    return selectionId(a) === selectionId(b);
 }
 
+/**
+ * Odds floor that lets fills walk the book until `stake` is covered.
+ * Offers are taken best price first. The returned price is the worst offer
+ * still required. If the book is smaller than `stake`, that is the worst offer shown.
+ */
+export function oddsScaledToCoverStake(
+   rows: readonly { oddsScaled: bigint; maxAmount: bigint }[],
+   stake: bigint,
+): bigint | null {
+   if (stake <= 0n) {
+      return null;
+   }
+   const book = rows
+      .filter((row) => row.maxAmount > 0n && row.oddsScaled > 0n)
+      .slice()
+      .sort((a, b) => (a.oddsScaled === b.oddsScaled ? 0 : a.oddsScaled > b.oddsScaled ? -1 : 1));
+   if (book.length === 0) {
+      return null;
+   }
+   let covered = 0n;
+   let marginal = book[0]!.oddsScaled;
+   for (const row of book) {
+      covered += row.maxAmount;
+      marginal = row.oddsScaled;
+      if (covered >= stake) {
+         break;
+      }
+   }
+   return marginal;
+}
+
 export function parseMinOddsScaled(raw: string, fallback: bigint, format: OddsFormat = "decimal"): bigint {
    const n = parseUserOddsToDecimal(raw, format);
    if (n == null || n <= 0) {

@@ -1458,6 +1458,23 @@ h1 {
    color: var(--text);
 }
 
+.bet-slip-tray__quote-odds {
+   appearance: none;
+   border: 0;
+   margin: 0;
+   padding: 0;
+   background: none;
+   font: inherit;
+   color: var(--odds-colour);
+   cursor: pointer;
+   text-decoration: underline;
+   text-underline-offset: 2px;
+}
+
+.bet-slip-tray__quote-odds:hover {
+   color: var(--accent);
+}
+
 .bet-slip-tray__mm-errors {
    margin: 0.35rem 0 0;
    font-size: 0.78rem;
