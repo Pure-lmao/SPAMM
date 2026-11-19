@@ -1,4 +1,3 @@
-import type { Database } from "bun:sqlite";
 import type { Address } from "@solana/kit";
 import {
    BetResult,
@@ -56,6 +55,10 @@ export type BetRecord = {
    bet_id: bigint;
    type: BetRecordType;
    user_address: string;
+   /** Market operator from `MarketId`. Parlays use the first leg. */
+   operator: string;
+   /** Mint from `MarketId`. Parlays use the first leg. */
+   mint: string;
    selections: Selection[];
    amount_requested: number;
    amount_filled: number;
@@ -89,6 +92,10 @@ export type CashoutEscrowRecord = {
    cashout_id: bigint;
    type: BetRecordType;
    owner_address: string;
+   /** Market operator from the cashout `MarketId`. Parlays use the first leg. */
+   operator: string;
+   /** Mint from the cashout `MarketId`. Parlays use the first leg. */
+   mint: string;
    amount: number;
    payout_removed: number;
    payment: number;
@@ -107,6 +114,10 @@ export type CashoutRecord = {
    orig_bet_id: bigint;
    cashout_id: bigint;
    type: BetRecordType;
+   /** Market operator from `MarketId`. Parlays use the first leg. */
+   operator: string;
+   /** Mint from `MarketId`. Parlays use the first leg. */
+   mint: string;
    amount: number;
    payout: number;
    selections: Selection[];
@@ -129,15 +140,11 @@ type DbBetRow = Omit<BetRecord, "selections" | "bet_id" | "fillers"> & {
    bet_id: string;
    selections: string;
    fillers: string;
-   unresolved: number;
-   resolve_attempts: number;
 };
 
 type DbCashoutEscrowRow = Omit<CashoutEscrowRecord, "orig_bet_id" | "cashout_id"> & {
    orig_bet_id: string;
    cashout_id: string;
-   unresolved: number;
-   resolve_attempts: number;
 };
 
 type DbCashoutRow = Omit<CashoutRecord, "selections" | "event_states" | "orig_bet_id" | "cashout_id"> & {
@@ -145,8 +152,6 @@ type DbCashoutRow = Omit<CashoutRecord, "selections" | "event_states" | "orig_be
    cashout_id: string;
    selections: string;
    event_states: string;
-   unresolved: number;
-   resolve_attempts: number;
 };
 
 export type UpdateMeta = {
@@ -176,6 +181,15 @@ export type UnresolvedEscrowRow = {
    status: string;
    resolve_attempts: number;
 };
+
+/** Operator and mint from the first selection. Parlay legs are stored in leg order. */
+export function marketOperatorAndMint(selections: readonly Selection[]): { operator: string; mint: string } {
+   const first = selections[0];
+   if (first == null || first.operator === "" || first.mint === "") {
+      throw new Error("market operator and mint require a selection");
+   }
+   return { operator: first.operator, mint: first.mint };
+}
 
 export function selectionFromMarketId(
    marketId: MarketId,
@@ -264,6 +278,8 @@ function rowToBetRecord(row: DbBetRow): BetRecord {
       bet_id: BigInt(row.bet_id),
       type: row.type,
       user_address: row.user_address,
+      operator: row.operator,
+      mint: row.mint,
       selections: parseSelectionsJson(row.selections),
       amount_requested: row.amount_requested,
       amount_filled: row.amount_filled,
@@ -292,6 +308,8 @@ function rowToCashoutRecord(row: DbCashoutRow): CashoutRecord {
       orig_bet_id: BigInt(row.orig_bet_id),
       cashout_id: BigInt(row.cashout_id),
       type: row.type,
+      operator: row.operator,
+      mint: row.mint,
       amount: row.amount,
       payout: row.payout,
       selections: parseSelectionsJson(row.selections),
@@ -318,6 +336,8 @@ function rowToCashoutEscrowRecord(row: DbCashoutEscrowRow): CashoutEscrowRecord 
       cashout_id: BigInt(row.cashout_id),
       type: row.type,
       owner_address: row.owner_address,
+      operator: row.operator,
+      mint: row.mint,
       amount: row.amount,
       payout_removed: row.payout_removed,
       payment: row.payment,
@@ -330,139 +350,6 @@ function rowToCashoutEscrowRecord(row: DbCashoutEscrowRow): CashoutEscrowRecord 
       last_update_slot: row.last_update_slot,
       status: row.status,
    };
-}
-
-const LEGACY_COLUMNS: Record<string, { name: string; definition: string }[]> = {
-   bet_accounts: [
-      { name: "promo_type", definition: "promo_type INTEGER NOT NULL DEFAULT 0" },
-      { name: "fillers", definition: "fillers TEXT NOT NULL DEFAULT '[]'" },
-      { name: "unresolved", definition: "unresolved INTEGER NOT NULL DEFAULT 0" },
-      { name: "resolve_attempts", definition: "resolve_attempts INTEGER NOT NULL DEFAULT 0" },
-   ],
-   cashout_accounts: [
-      { name: "unresolved", definition: "unresolved INTEGER NOT NULL DEFAULT 0" },
-      { name: "resolve_attempts", definition: "resolve_attempts INTEGER NOT NULL DEFAULT 0" },
-   ],
-   cashout_escrow_accounts: [
-      { name: "unresolved", definition: "unresolved INTEGER NOT NULL DEFAULT 0" },
-      { name: "resolve_attempts", definition: "resolve_attempts INTEGER NOT NULL DEFAULT 0" },
-   ],
-};
-
-function addLegacyColumns(database: Database, table: string): void {
-   const columns = LEGACY_COLUMNS[table];
-   if (columns == null) {
-      return;
-   }
-   const existing = new Set(
-      database.query<{ name: string }, []>(`PRAGMA table_info(${table})`).all().map((col) => col.name),
-   );
-   for (const column of columns) {
-      if (!existing.has(column.name)) {
-         database.run(`ALTER TABLE ${table} ADD COLUMN ${column.definition}`);
-      }
-   }
-}
-
-let schemaReady = false;
-
-export function ensureSchema(): void {
-   if (schemaReady) {
-      return;
-   }
-   const database = getDb();
-   database.run(`CREATE TABLE IF NOT EXISTS bet_accounts (
-      id TEXT PRIMARY KEY,
-      bet_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      user_address TEXT NOT NULL,
-      selections TEXT NOT NULL,
-      amount_requested INTEGER NOT NULL,
-      amount_filled INTEGER NOT NULL,
-      min_odds_requested INTEGER NOT NULL,
-      payout INTEGER NOT NULL,
-      timestamp INTEGER NOT NULL,
-      result INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      created_sig TEXT NOT NULL,
-      graded_at INTEGER,
-      graded_sig TEXT,
-      final_payout INTEGER,
-      claimed_at INTEGER,
-      claimed_sig TEXT,
-      last_update_slot INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      freebet_id INTEGER,
-      promo_type INTEGER NOT NULL DEFAULT 0,
-      fillers TEXT NOT NULL DEFAULT '[]',
-      unresolved INTEGER NOT NULL DEFAULT 0,
-      resolve_attempts INTEGER NOT NULL DEFAULT 0
-   )`);
-   addLegacyColumns(database, "bet_accounts");
-
-   database.run(`CREATE TABLE IF NOT EXISTS cashout_accounts (
-      id TEXT PRIMARY KEY,
-      orig_bet_id TEXT NOT NULL,
-      cashout_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      amount INTEGER NOT NULL,
-      payout INTEGER NOT NULL,
-      selections TEXT NOT NULL,
-      event_states TEXT NOT NULL,
-      fillingMm TEXT NOT NULL,
-      timestamp INTEGER NOT NULL,
-      result INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      created_sig TEXT NOT NULL,
-      graded_at INTEGER,
-      graded_sig TEXT,
-      final_payout INTEGER,
-      claimed_at INTEGER,
-      claimed_sig TEXT,
-      last_update_slot INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      unresolved INTEGER NOT NULL DEFAULT 0,
-      resolve_attempts INTEGER NOT NULL DEFAULT 0
-   )`);
-   database.run(`CREATE INDEX IF NOT EXISTS idx_cashout_accounts_orig_bet_id ON cashout_accounts (orig_bet_id)`);
-   database.run(`CREATE INDEX IF NOT EXISTS idx_cashout_accounts_cashout_id ON cashout_accounts (cashout_id)`);
-   addLegacyColumns(database, "cashout_accounts");
-
-   database.run(`CREATE TABLE IF NOT EXISTS cashout_escrow_accounts (
-      id TEXT PRIMARY KEY,
-      orig_bet_id TEXT NOT NULL,
-      cashout_id TEXT NOT NULL,
-      type TEXT NOT NULL,
-      owner_address TEXT NOT NULL,
-      amount INTEGER NOT NULL,
-      payout_removed INTEGER NOT NULL,
-      payment INTEGER NOT NULL,
-      market_maker TEXT NOT NULL,
-      timestamp INTEGER NOT NULL,
-      created_at INTEGER NOT NULL,
-      created_sig TEXT NOT NULL,
-      claimed_at INTEGER,
-      claimed_sig TEXT,
-      last_update_slot INTEGER NOT NULL,
-      status TEXT NOT NULL,
-      unresolved INTEGER NOT NULL DEFAULT 0,
-      resolve_attempts INTEGER NOT NULL DEFAULT 0
-   )`);
-   database.run(`CREATE INDEX IF NOT EXISTS idx_cashout_escrow_orig_bet_id ON cashout_escrow_accounts (orig_bet_id)`);
-   database.run(`CREATE INDEX IF NOT EXISTS idx_cashout_escrow_cashout_id ON cashout_escrow_accounts (cashout_id)`);
-   addLegacyColumns(database, "cashout_escrow_accounts");
-
-   database.run(`CREATE TABLE IF NOT EXISTS indexer_state (
-      id INTEGER PRIMARY KEY CHECK (id = 1),
-      last_sig TEXT,
-      last_slot INTEGER
-   )`);
-   database.run(`CREATE TABLE IF NOT EXISTS applied_instructions (
-      signature TEXT NOT NULL,
-      ix_index INTEGER NOT NULL,
-      PRIMARY KEY (signature, ix_index)
-   )`);
-   schemaReady = true;
 }
 
 export function isInstructionApplied(signature: string, ixIndex: number): boolean {
@@ -532,12 +419,15 @@ export function addBetAccount(
    fillers: Filler[] = [],
 ): void {
    const database = getDb();
+   const { operator, mint } = marketOperatorAndMint(selections);
    const unresolved = fromChain ? 0 : 1;
    const conflictClause = fromChain
       ? ` ON CONFLICT(id) DO UPDATE SET
          bet_id = excluded.bet_id,
          type = excluded.type,
          user_address = excluded.user_address,
+         operator = excluded.operator,
+         mint = excluded.mint,
          selections = excluded.selections,
          amount_requested = excluded.amount_requested,
          amount_filled = excluded.amount_filled,
@@ -550,19 +440,21 @@ export function addBetAccount(
          fillers = excluded.fillers,
          unresolved = 0,
          resolve_attempts = 0
-         WHERE bet_accounts.status = '${BetRecordStatus.Pending}'
-            AND excluded.last_update_slot >= bet_accounts.last_update_slot`
+      WHERE bet_accounts.status = '${BetRecordStatus.Pending}'
+         AND excluded.last_update_slot >= bet_accounts.last_update_slot`
       : ` ON CONFLICT(id) DO NOTHING`;
    database.run(
       `INSERT INTO bet_accounts
-      (id, bet_id, type, user_address, selections, amount_requested, amount_filled, min_odds_requested, payout,
+      (id, bet_id, type, user_address, operator, mint, selections, amount_requested, amount_filled, min_odds_requested, payout,
       timestamp, result, created_at, created_sig, last_update_slot, status, freebet_id, promo_type, fillers, unresolved, resolve_attempts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)${conflictClause}`,
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)${conflictClause}`,
       [
          betAddress,
          betId.toString(),
          type,
          userAddress,
+         operator,
+         mint,
          safeJSONStringify(selections),
          Number(amountRequested),
          Number(amountFilled),
@@ -574,8 +466,8 @@ export function addBetAccount(
          meta.createdSig,
          meta.lastUpdateSlot,
          BetRecordStatus.Pending,
-         freebetId ?? 0,
-         promoType ?? 0,
+         freebetId,
+         promoType,
          safeJSONStringify(fillers),
          unresolved,
          0,
@@ -597,6 +489,7 @@ export function refreshBetFromChain(
    fillers: Filler[],
 ): void {
    const database = getDb();
+   const { operator, mint } = marketOperatorAndMint(selections);
    const existing = database.query<{ status: string; selections: string }, [string]>(
       `SELECT status, selections FROM bet_accounts WHERE id = ?`,
    ).get(betAddress);
@@ -606,6 +499,8 @@ export function refreshBetFromChain(
          bet_id = ?,
          type = ?,
          user_address = ?,
+         operator = ?,
+         mint = ?,
          selections = ?,
          amount_filled = ?,
          min_odds_requested = ?,
@@ -620,6 +515,8 @@ export function refreshBetFromChain(
          betId.toString(),
          type,
          userAddress,
+         operator,
+         mint,
          safeJSONStringify(nextSelections),
          Number(amountFilled),
          Number(minOddsRequested),
@@ -661,10 +558,13 @@ export function addCashoutAccount(
    fromChain: boolean,
 ): void {
    const database = getDb();
+   const { operator, mint } = marketOperatorAndMint(selections);
    const unresolved = fromChain ? 0 : 1;
    const conflictClause = fromChain
       ? ` ON CONFLICT(id) DO UPDATE SET
          type = excluded.type,
+         operator = excluded.operator,
+         mint = excluded.mint,
          amount = excluded.amount,
          payout = excluded.payout,
          selections = excluded.selections,
@@ -674,18 +574,20 @@ export function addCashoutAccount(
          last_update_slot = excluded.last_update_slot,
          unresolved = 0,
          resolve_attempts = 0
-         WHERE cashout_accounts.status = '${BetRecordStatus.Pending}'
-            AND excluded.last_update_slot >= cashout_accounts.last_update_slot`
+      WHERE cashout_accounts.status = '${BetRecordStatus.Pending}'
+         AND excluded.last_update_slot >= cashout_accounts.last_update_slot`
       : ` ON CONFLICT(id) DO NOTHING`;
    database.run(
       `INSERT INTO cashout_accounts
-      (id, orig_bet_id, cashout_id, type, amount, payout, selections, event_states, fillingMm, timestamp, result, created_at, created_sig, last_update_slot, status, unresolved, resolve_attempts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)${conflictClause}`,
+      (id, orig_bet_id, cashout_id, type, operator, mint, amount, payout, selections, event_states, fillingMm, timestamp, result, created_at, created_sig, last_update_slot, status, unresolved, resolve_attempts)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)${conflictClause}`,
       [
          cashoutAddress,
          origBetId.toString(),
          cashoutId.toString(),
          type,
+         operator,
+         mint,
          Number(amount),
          Number(payout),
          safeJSONStringify(selections),
@@ -714,6 +616,7 @@ export function refreshCashoutFromChain(
    timestamp: number,
 ): void {
    const database = getDb();
+   const { operator, mint } = marketOperatorAndMint(selections);
    const existing = database.query<{ status: string; selections: string }, [string]>(
       `SELECT status, selections FROM cashout_accounts WHERE id = ?`,
    ).get(cashoutAddress);
@@ -721,6 +624,8 @@ export function refreshCashoutFromChain(
    database.run(
       `UPDATE cashout_accounts SET
          type = ?,
+         operator = ?,
+         mint = ?,
          amount = ?,
          payout = ?,
          selections = ?,
@@ -732,6 +637,8 @@ export function refreshCashoutFromChain(
        WHERE id = ?`,
       [
          type,
+         operator,
+         mint,
          Number(amount),
          Number(payout),
          safeJSONStringify(nextSelections),
@@ -741,11 +648,18 @@ export function refreshCashoutFromChain(
          cashoutAddress,
       ],
    );
+   database.run(
+      `UPDATE cashout_escrow_accounts SET operator = ?, mint = ?
+       WHERE unresolved = 1 AND cashout_id = (SELECT cashout_id FROM cashout_accounts WHERE id = ?)`,
+      [operator, mint, cashoutAddress],
+   );
 }
 
 export function addCashoutEscrowAccount(
    escrowAddress: string,
    escrow: CashoutEscrowAccountData,
+   operator: string,
+   mint: string,
    meta: UpdateMeta,
    fromChain: boolean,
 ): void {
@@ -753,13 +667,15 @@ export function addCashoutEscrowAccount(
    const unresolved = fromChain ? 0 : 1;
    database.run(
       `INSERT INTO cashout_escrow_accounts
-      (id, orig_bet_id, cashout_id, type, owner_address, amount, payout_removed, payment, market_maker, timestamp, created_at, created_sig, last_update_slot, status, unresolved, resolve_attempts)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      (id, orig_bet_id, cashout_id, type, owner_address, operator, mint, amount, payout_removed, payment, market_maker, timestamp, created_at, created_sig, last_update_slot, status, unresolved, resolve_attempts)
+      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
       ON CONFLICT(id) DO UPDATE SET
          orig_bet_id = excluded.orig_bet_id,
          cashout_id = excluded.cashout_id,
          type = excluded.type,
          owner_address = excluded.owner_address,
+         operator = excluded.operator,
+         mint = excluded.mint,
          amount = excluded.amount,
          payout_removed = excluded.payout_removed,
          payment = excluded.payment,
@@ -775,6 +691,8 @@ export function addCashoutEscrowAccount(
          escrow.cashoutId.toString(),
          escrow.isParlay ? "parlay" : "single",
          escrow.owner,
+         operator,
+         mint,
          Number(escrow.amount),
          Number(escrow.payoutRemoved),
          Number(escrow.payment),

@@ -18,7 +18,6 @@ import { AGGREGATOR_PROGRAM_ID } from "spamm-aggregator-sdk";
 import { createRpcClients, type RpcClients } from "../aggregator/client/txSend";
 import { withRpcRetry } from "../aggregator/client/txSendV1";
 import {
-   ensureSchema,
    getIndexerWatermark,
    setIndexerWatermark,
 } from "./indexerDb";
@@ -164,7 +163,6 @@ export async function backfillProgramHistory(
    options?: { afterSlot?: number },
    rpc: Rpc<SolanaRpcApi> = defaultRpc(),
 ): Promise<void> {
-   ensureSchema();
    const floor = options?.afterSlot ?? Number(V1_FROM_SLOT) - 1;
    try {
       await backfillViaHelius(rpc, floor);
@@ -175,7 +173,6 @@ export async function backfillProgramHistory(
 }
 
 export async function retryUnresolvedAccounts(rpc: Rpc<SolanaRpcApi> = defaultRpc()): Promise<void> {
-   ensureSchema();
    await retryUnresolvedV1(rpc);
 }
 
@@ -676,7 +673,6 @@ async function runLogsSession(
 }
 
 async function main(): Promise<void> {
-   ensureSchema();
    const httpUrl = requireHeliusHttpUrl();
    const clients = createRpcClients({ httpUrl });
    sharedRpc = clients.rpc;

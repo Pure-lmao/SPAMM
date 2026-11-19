@@ -6,7 +6,8 @@
     "start": "bun run index.ts",
     "api": "bun run index.ts",
     "discord": "bun run bot/index.ts",
-    "promo": "bun run scripts/promo-cli.ts"
+    "promo": "bun run scripts/promo-cli.ts",
+    "setup-indexer-db": "bun run scripts/setup-indexer-db.ts"
   },
   "dependencies": {
     "@solana/kit": "^8.2.0",

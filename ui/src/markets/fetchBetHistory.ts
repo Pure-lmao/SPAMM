@@ -177,6 +177,11 @@ export function normalizeBetRecordFromApi(raw: unknown): BetRecord | null {
    if (r.id == null || r.bet_id == null || r.user_address == null) {
       return null;
    }
+   const operator = typeof r.operator === "string" ? r.operator : "";
+   const mint = typeof r.mint === "string" ? r.mint : "";
+   if (operator === "" || mint === "") {
+      return null;
+   }
    const amount_requested = Number(r.amount_requested);
    const amount_filled = Number(r.amount_filled);
    const min_odds_requested = Number(r.min_odds_requested);
@@ -200,6 +205,8 @@ export function normalizeBetRecordFromApi(raw: unknown): BetRecord | null {
       bet_id: toBigIntField(r.bet_id, "bet_id"),
       type,
       user_address: String(r.user_address),
+      operator,
+      mint,
       selections,
       amount_requested,
       amount_filled,

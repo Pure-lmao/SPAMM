@@ -11,7 +11,7 @@ These ids are suggested but ultimately controlled by the market operator. Only 0
 4 - Basketball
 5 - Ice Hockey
 6 - Tennis
-7 - Golf
+7 - MMA
 8 - Motorsports
 9 - Cricket
 101 - Counter-Strike 2

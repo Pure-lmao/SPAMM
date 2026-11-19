@@ -34,6 +34,7 @@ import {
    listUnresolvedBets,
    listUnresolvedCashouts,
    listUnresolvedEscrows,
+   marketOperatorAndMint,
    noteUnresolvedAttempt,
    refreshBetFromChain,
    refreshCashoutFromChain,
@@ -166,9 +167,9 @@ function accountAt(accounts: readonly Address[], index: number): Address | null 
 async function readBet(
    rpc: Rpc<SolanaRpcApi>,
    betPda: Address,
-): Promise<{ account: BetAccountData; fromChain: boolean } | { error: unknown }> {
+): Promise<{ account: BetAccountData } | { error: unknown }> {
    try {
-         return { account: await withRpcRetry(() => getBetData(rpc, betPda)), fromChain: true };
+      return { account: await withRpcRetry(() => getBetData(rpc, betPda)) };
    } catch (error) {
       return { error };
    }
@@ -191,6 +192,9 @@ export async function applyV1Instruction(
       return;
    }
    const commit = await prepareV1(rpc, decoded, ix, ctx);
+   if (commit == null) {
+      return;
+   }
    withInstructionWrite(ctx.signature, ix.ixIndex, commit);
 }
 
@@ -199,7 +203,7 @@ async function prepareV1(
    decoded: AggregatorInstructionData,
    ix: IndexedInstruction,
    ctx: IndexedTxContext,
-): Promise<() => void> {
+): Promise<(() => void) | null> {
    const meta: UpdateMeta = {
       createdAt: ctx.blockTime,
       createdSig: ctx.signature,
@@ -445,6 +449,19 @@ async function prepareV1(
    return noop;
 }
 
+async function readCashoutAccount<T>(
+   load: () => Promise<T>,
+   signature: string,
+   label: string,
+): Promise<T | null> {
+   try {
+      return await withRpcRetry(load);
+   } catch (error) {
+      console.error(label, signature, error instanceof Error ? error.message : error);
+      return null;
+   }
+}
+
 async function prepareSingleCashout(
    rpc: Rpc<SolanaRpcApi>,
    decoded: Extract<AggregatorInstructionData, { kind: "fillCashout" | "fillRfqCashout" }>,
@@ -452,20 +469,22 @@ async function prepareSingleCashout(
    ctx: IndexedTxContext,
    meta: UpdateMeta,
    userOwner: Address | null,
-): Promise<() => void> {
-   const data = decoded.data;
+): Promise<(() => void) | null> {
    const cashoutAddress = accountAt(ix.accounts, 6);
    const mint = accountAt(ix.accounts, CASHOUT_IX_MINT_INDEX);
    const origBet = accountAt(ix.accounts, 4);
    if (cashoutAddress == null || mint == null || userOwner == null || origBet == null) {
-      console.error("cashout fill missing accounts", ctx.signature);
+      console.error("cashout fill missing accounts", decoded.kind, ctx.signature);
       return () => {};
    }
-   let cashoutAccount: CashoutAccountData;
+   const data = decoded.data;
    let fromChain = true;
-   try {
-      cashoutAccount = await withRpcRetry(() => getCashoutData(rpc, cashoutAddress));
-   } catch {
+   let cashoutAccount: CashoutAccountData | null = await readCashoutAccount(
+      () => getCashoutData(rpc, cashoutAddress),
+      ctx.signature,
+      `cashout account unavailable (${decoded.kind})`,
+   );
+   if (cashoutAccount == null) {
       fromChain = false;
       cashoutAccount = {
          discriminator: 8,
@@ -498,8 +517,8 @@ async function prepareSingleCashout(
       };
    }
    const escrowAddress = accountAt(ix.accounts, 8);
-   const escrow = await loadEscrow(rpc, escrowAddress, userOwner, data.origBetId, data.cashoutId, false, ctx, meta);
    const delayed = escrowAddress != null && escrowAddress !== SYSTEM_PROGRAM_ID;
+   const escrow = await loadEscrow(rpc, escrowAddress, userOwner, cashoutAccount.origBetId, cashoutAccount.cashoutId, false, ctx);
    const payment = escrow?.fromChain
       ? Number(escrow.account.payment)
       : delayed
@@ -511,6 +530,7 @@ async function prepareSingleCashout(
       cashoutAccount.cashoutEventStateSequence,
       cashoutAccount.cashoutEventGameState,
    )];
+   const market = marketOperatorAndMint(selections);
    const eventStates = [{ sequence: cashoutAccount.cashoutEventStateSequence, game_state: cashoutAccount.cashoutEventGameState }];
    return () => {
       addCashoutAccount(
@@ -528,7 +548,7 @@ async function prepareSingleCashout(
          fromChain,
       );
       if (escrow != null && escrowAddress != null) {
-         addCashoutEscrowAccount(escrowAddress, escrow.account, meta, escrow.fromChain);
+         addCashoutEscrowAccount(escrowAddress, escrow.account, market.operator, market.mint, meta, escrow.fromChain);
       }
       applyOrigBetCashoutFill(origBet, cashoutAccount.amount, cashoutAccount.payout, delayed, payment, meta);
    };
@@ -541,23 +561,23 @@ async function prepareParlayCashout(
    ctx: IndexedTxContext,
    meta: UpdateMeta,
    userOwner: Address | null,
-): Promise<() => void> {
-   const data = decoded.data;
+): Promise<(() => void) | null> {
    const cashoutAddress = accountAt(ix.accounts, 6);
    const mint = accountAt(ix.accounts, CASHOUT_IX_MINT_INDEX);
    const origBet = accountAt(ix.accounts, 4);
    if (cashoutAddress == null || mint == null || userOwner == null || origBet == null) {
-      console.error("parlay cashout fill missing accounts", ctx.signature);
+      console.error("parlay cashout fill missing accounts", decoded.kind, ctx.signature);
       return () => {};
    }
-   let cashoutParlayAccount: CashoutParlayAccountData;
-   let selections: Selection[];
+   const data = decoded.data;
    let fromChain = true;
-   try {
-      cashoutParlayAccount = await withRpcRetry(() => getCashoutParlayData(rpc, cashoutAddress));
-      selections = cashoutParlayAccount.legs.slice(0, cashoutParlayAccount.numLegs).map((leg) =>
-         selectionFromMarketId(leg.marketId, leg.side, leg.cashoutEventStateSequence, leg.cashoutEventGameState, leg.oddsScaled));
-   } catch {
+   let cashoutParlayAccount: CashoutParlayAccountData | null = await readCashoutAccount(
+      () => getCashoutParlayData(rpc, cashoutAddress),
+      ctx.signature,
+      `parlay cashout account unavailable (${decoded.kind})`,
+   );
+   let selections: Selection[];
+   if (cashoutParlayAccount == null) {
       fromChain = false;
       cashoutParlayAccount = {
          discriminator: 9,
@@ -590,19 +610,28 @@ async function prepareParlayCashout(
             snapshot.eventStateSequence,
             snapshot.eventGameState,
          ));
+   } else {
+      selections = cashoutParlayAccount.legs.slice(0, cashoutParlayAccount.numLegs).map((leg) =>
+         selectionFromMarketId(leg.marketId, leg.side, leg.cashoutEventStateSequence, leg.cashoutEventGameState, leg.oddsScaled));
    }
+   const market = marketOperatorAndMint(selections);
    const escrowAddress = accountAt(ix.accounts, 8);
-   const escrow = await loadEscrow(rpc, escrowAddress, userOwner, data.origBetId, data.cashoutId, true, ctx, meta);
    const delayed = escrowAddress != null && escrowAddress !== SYSTEM_PROGRAM_ID;
+   const escrow = await loadEscrow(rpc, escrowAddress, userOwner, cashoutParlayAccount.origBetId, cashoutParlayAccount.cashoutId, true, ctx);
    const payment = escrow?.fromChain
       ? Number(escrow.account.payment)
       : delayed
          ? null
          : tokenIncreaseForOwner(ctx.meta, userOwner, mint);
-   const eventStates = cashoutParlayAccount.legs.map((leg) => ({
-      sequence: leg.cashoutEventStateSequence,
-      game_state: leg.cashoutEventGameState,
-   }));
+   const eventStates = fromChain
+      ? cashoutParlayAccount.legs.slice(0, cashoutParlayAccount.numLegs).map((leg) => ({
+         sequence: leg.cashoutEventStateSequence,
+         game_state: leg.cashoutEventGameState,
+      }))
+      : data.snapshots.slice(0, data.numLegs).map((snapshot) => ({
+         sequence: snapshot.eventStateSequence,
+         game_state: snapshot.eventGameState,
+      }));
    return () => {
       addCashoutAccount(
          cashoutAddress,
@@ -619,7 +648,7 @@ async function prepareParlayCashout(
          fromChain,
       );
       if (escrow != null && escrowAddress != null) {
-         addCashoutEscrowAccount(escrowAddress, escrow.account, meta, escrow.fromChain);
+         addCashoutEscrowAccount(escrowAddress, escrow.account, market.operator, market.mint, meta, escrow.fromChain);
       }
       applyOrigBetCashoutFill(origBet, cashoutParlayAccount.amount, cashoutParlayAccount.payout, delayed, payment, meta);
    };
@@ -633,33 +662,35 @@ async function loadEscrow(
    cashoutId: bigint,
    isParlay: boolean,
    ctx: IndexedTxContext,
-   _meta: UpdateMeta,
 ): Promise<{ account: CashoutEscrowAccountData; fromChain: boolean } | null> {
    if (escrowAddress == null || escrowAddress === SYSTEM_PROGRAM_ID) {
       return null;
    }
-   try {
-      const account = await withRpcRetry(() => getCashoutEscrowData(rpc, escrowAddress));
+   const account = await readCashoutAccount(
+      () => getCashoutEscrowData(rpc, escrowAddress),
+      ctx.signature,
+      "cashout escrow unavailable",
+   );
+   if (account != null) {
       return { account, fromChain: true };
-   } catch {
-      return {
-         fromChain: false,
-         account: {
-            discriminator: 0,
-            bump: 0,
-            owner,
-            feepayer: SYSTEM_PROGRAM_ID,
-            origBetId,
-            cashoutId,
-            timestamp: ctx.blockTime,
-            amount: 0n,
-            payoutRemoved: 0n,
-            payment: 0n,
-            marketMaker: SYSTEM_PROGRAM_ID,
-            isParlay,
-         },
-      };
    }
+   return {
+      fromChain: false,
+      account: {
+         discriminator: 0,
+         bump: 0,
+         owner,
+         feepayer: SYSTEM_PROGRAM_ID,
+         origBetId,
+         cashoutId,
+         timestamp: ctx.blockTime,
+         amount: 0n,
+         payoutRemoved: 0n,
+         payment: 0n,
+         marketMaker: SYSTEM_PROGRAM_ID,
+         isParlay,
+      },
+   };
 }
 
 export async function retryUnresolvedAccounts(rpc: Rpc<SolanaRpcApi>): Promise<void> {
@@ -738,7 +769,7 @@ async function retryCashout(rpc: Rpc<SolanaRpcApi>, id: string, type: "single" |
             account.amount,
             account.payout,
             selections,
-            account.legs.map((leg) => ({ sequence: leg.cashoutEventStateSequence, game_state: leg.cashoutEventGameState })),
+            account.legs.slice(0, account.numLegs).map((leg) => ({ sequence: leg.cashoutEventStateSequence, game_state: leg.cashoutEventGameState })),
             account.mm,
             account.timestamp,
          );
