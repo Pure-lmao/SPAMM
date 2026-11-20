@@ -142,6 +142,7 @@ export enum Sport {
    Golf = 7,
    Motorsports = 8,
    Cricket = 9,
+   Mma = 10,
    Cs2 = 101,
    Dota = 102,
    Lol = 103,
