@@ -3635,15 +3635,15 @@ export async function getWithdrawFromLiabilityAccountIx(
 }
 
 /**
- * **`message`** — no-op that logs a UTF-8 message so third-party indexers can pick it up from the transaction (no state change, no token movement).
+ * **`message`** — no-op that carries an opaque byte payload so third-party indexers can read it from the transaction (no state change, no token movement).
  *
- * **Rust:** `aggregator::instructions::message::process` (`MESSAGE_IX_DISCRIMINATOR` = 220). Data: raw UTF-8 message bytes after discriminator (no length prefix; must pass `str::from_utf8`).
+ * **Rust:** `aggregator::instructions::message::process` (`MESSAGE_IX_DISCRIMINATOR` = 220). Data: raw message bytes after discriminator (no length prefix; the program does not interpret them).
  *
  * @param marketOperator - **TS:** `Address` — signer. **Rust:** `market_operator` (signer, checked by `verify_signer`).
- * @param message - **TS:** `string` — encoded via {@link encodeMessageIxData}. **Rust:** `&str` emitted with `log!`.
+ * @param message - **TS:** `Uint8Array` — copied via {@link encodeMessageIxData}. **Rust:** `&[u8]` instruction data (encoding is chosen by the caller).
  * @returns **`Promise<Instruction>`** — one account: market operator (readonly signer). **Note:** message length is bounded only by the transaction size limit.
  */
-export async function getMessageIx(marketOperator: Address, message: string): Promise<Instruction> {
+export async function getMessageIx(marketOperator: Address, message: Uint8Array): Promise<Instruction> {
    return {
       programAddress: AGGREGATOR_PROGRAM_ID,
       accounts: [rs(marketOperator)],
@@ -3951,7 +3951,7 @@ export type AggregatorInstructionInput =
      }
    | { kind: 'closeNettingAccount'; eventId: EventId; operator: Address; mint: Address; admin: Address; mmProgram: Address }
    | { kind: 'withdrawFromLiabilityAccount'; amount: bigint; mmAdmin: Address; mmProgram: Address; mint: Address }
-   | { kind: 'message'; marketOperator: Address; message: string }
+   | { kind: 'message'; marketOperator: Address; message: Uint8Array }
    | { kind: 'writeArbitraryData'; admin: Address; account: Address; data: Uint8Array }
    | { kind: 'forceClosePda'; admin: Address; pda: Address };
 

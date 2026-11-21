@@ -240,12 +240,12 @@ async function getCashoutParlays() {
 }
 // getCashoutParlays().catch(console.error);
 
-async function sendMessage(message: string) {
+async function sendMessage(message: Uint8Array) {
    const ix = await getMessageIx(MARKET_OPERATOR_SIGNER.address, message);
    const txResult = await sendAndConfirmInstructions([ix], [MARKET_OPERATOR_SIGNER]);
    console.log(txResult);
 }
-// sendMessage(JSON.stringify({
+// sendMessage(new TextEncoder().encode(JSON.stringify({
 //    version: 0,
 //    message: {
 //       type: "event",
@@ -253,7 +253,7 @@ async function sendMessage(message: string) {
 //       event: "testA vs testB",
 //       event_time: Math.floor(Date.now() / 1000),
 //    }
-// })).catch(console.error);
+// }))).catch(console.error);
 
 import type { Signature } from "@solana/kit";
 import { getBase58Encoder } from "@solana/kit";
@@ -265,7 +265,7 @@ async function parseMessageTx(tx_sig: string) {
          const data = ix.data!;
          const dataBuffer = getBase58Encoder().encode(data);
          const message = decodeMessageIxData(dataBuffer.slice(1));
-         const msg = JSON.parse(message);
+         const msg = JSON.parse(new TextDecoder().decode(message));
          console.log(msg);
       }
    }

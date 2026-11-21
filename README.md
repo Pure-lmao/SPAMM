@@ -2883,18 +2883,18 @@ Accounts:
 
 Discriminator: **220**
 
-This can be called by any signer to post a message to the program so it can be indexed by third parties. It is a no-op: the message bytes are written to the program logs with `log_message` and no account data is read or modified. This could be used by a Market Operator to link event ids to event names or event results permanently onchain. Indexers should filter by sender since there is no auth check in the program. The struct of the message is entirely up to the sender.
+This can be called by any signer to post a message in the transaction so it can be indexed by third parties. It is a no-op: the instruction data is not interpreted, and no account data is read or modified. This could be used by a Market Operator to link event ids to event names or event results permanently onchain. Indexers should filter by sender since there is no auth check in the program. The encoding and struct of the message are entirely up to the sender.
 
 Data:
 
 ```rust
 struct MessageIxData {
    discriminator: u8, // 220
-   message: [u8; N], // N = message length in bytes; raw UTF-8, no length prefix
+   message: [u8; N], // N = message length in bytes; opaque payload, no length prefix
 }
 ```
 
-The message must be valid UTF-8 (the runtime's `sol_log_` rejects invalid UTF-8) and is bounded only by the transaction size limit.
+The payload is opaque bytes (encoding is chosen by the market operator) and is bounded only by the transaction size limit.
 
 Accounts:
 
