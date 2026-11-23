@@ -1,9 +1,25 @@
-import { betSlipLabel, groupTitle, type MarketId } from "spamm-aggregator-sdk";
+import { betSlipLabel, groupTitle, isMainPeriod, type MarketId } from "spamm-aggregator-sdk";
 import { useMemo } from "react";
 import { useI18n } from "../i18n/useI18n";
 import { displayEventTitle } from "./eventDisplay";
 import { periodCaption, shouldShowPeriodBadge } from "./eventMarketsDisplay";
 import type { BetCardEvent, UiMarket, UiPromotionalMarket } from "./types";
+
+function scorePair(home: number | null | undefined, away: number | null | undefined): string | null {
+   if (home == null || away == null || !Number.isFinite(home) || !Number.isFinite(away)) {
+      return null;
+   }
+   return `${home}-${away}`;
+}
+
+/** Period score when the pick is on a period; otherwise the match score. */
+export function eventScoreLabel(ev: BetCardEvent, period: number): string | null {
+   if (!isMainPeriod(ev.sport_id, period)) {
+      const row = ev.periods.find((p) => p.periodId === period);
+      return row == null ? null : scorePair(row.homeScore, row.awayScore);
+   }
+   return scorePair(ev.home_score, ev.away_score);
+}
 
 export function eventLookupKey(chain: MarketId): string {
    const eid = chain.eventId;
@@ -72,6 +88,7 @@ export function useBetMarketCopy(): BetMarketCopy {
 
 export type BetMarketDisplayLines = Readonly<{
    eventTitle: string;
+   scoreLabel: string | null;
    liveSuffix: string;
    periodMarket: string;
    pick: string;
@@ -88,6 +105,7 @@ export function betMarketDisplayLines(
    copy: BetMarketCopy = englishBetCopy,
 ): BetMarketDisplayLines {
    const eventTitle = ev != null ? displayEventTitle(ev) : copy.event(chain.eventId.event.toString());
+   const scoreLabel = ev != null ? eventScoreLabel(ev, chain.period) : null;
    const liveSuffix = !chain.isPregame ? copy.live : "";
 
    if (promo != null) {
@@ -98,6 +116,7 @@ export function betMarketDisplayLines(
          : promo.title;
       return {
          eventTitle,
+         scoreLabel,
          liveSuffix,
          periodMarket,
          pick,
@@ -112,6 +131,7 @@ export function betMarketDisplayLines(
       const pick = copy.side(side);
       return {
          eventTitle,
+         scoreLabel,
          liveSuffix,
          periodMarket: fb,
          pick,
@@ -141,6 +161,7 @@ export function betMarketDisplayLines(
    const detailLine = `${periodMarket} · ${pick}`;
    return {
       eventTitle,
+      scoreLabel,
       liveSuffix,
       periodMarket,
       pick,

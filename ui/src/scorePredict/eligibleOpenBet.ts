@@ -7,6 +7,7 @@ import { fetchOpenWalletBets, type WalletSingleRow } from '../markets/fetchBetHi
 import type { UiGroupedEvent, UiGroupedSport } from '../markets/types';
 import { sportsDayBoundsMs } from '../../../api/sportsDay';
 import type { ApiPredictionContest } from './types';
+import { API_DOMAIN } from '../network';
 
 const MIN_STAKE_BASE_UNITS = 1_000_000n;
 
@@ -130,7 +131,7 @@ export async function resolveQualifyingOpenBet(params: {
 }
 
 export async function fetchEventsTree(): Promise<UiGroupedSport[]> {
-   const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? '';
+   const apiDomain = API_DOMAIN;
    const res = await fetch(`${apiDomain}/api/events?all=true`);
    if (!res.ok) {
       throw new Error(`${res.status} ${res.statusText}`);

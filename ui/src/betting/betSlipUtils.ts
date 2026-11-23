@@ -129,9 +129,7 @@ export function parlayLegFromSelection(sel: BetSlipSelection): ParlayLegSel {
    };
 }
 
-export function solscanTxUrl(signature: string): string {
-   return `https://solscan.io/tx/${encodeURIComponent(signature)}?cluster=devnet`;
-}
+export { solscanAccountUrl, solscanTxUrl } from "../network";
 
 const PROXY_QUOTE_DECODE_ERR =
    /^proxy quote return data len \d+ is not a multiple of \d+$/;

@@ -13,7 +13,7 @@ import {
 import { mapBoostAccountToIssuerAuth, mapFreebetAccountToIssuerAuth } from "../betting/freebets";
 import { type BetRecord, type Selection } from "../../../api/realIndexer";
 
-const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
+import { LABS_DOMAIN } from "../network";
 
 export type WalletParlayLeg = {
    marketId: MarketId;
@@ -367,23 +367,56 @@ export async function fetchOpenWalletBets(
    );
 }
 
-/** Claimed bets for a wallet (`/api/betHistory?user=`). */
-export async function fetchClosedBetHistory(userAddress: string): Promise<readonly WalletBetRow[]> {
+export type ClosedBetHistoryPage = {
+   rows: readonly WalletBetRow[];
+   /** `created_at:id` cursor for the next older page. `null` when this page is the last. */
+   next: string | null;
+};
+
+export type ClosedBetHistoryQuery = {
+   limit?: number;
+   before?: string | null;
+   mint?: string;
+   operator?: string;
+};
+
+/** One page of claimed bets (`/api/betHistory?user=&limit=&before=`). Newest first. */
+export async function fetchClosedBetHistory(
+   userAddress: string,
+   query: ClosedBetHistoryQuery = {},
+): Promise<ClosedBetHistoryPage> {
    const q = new URLSearchParams({ user: userAddress });
-   const res = await fetch(`${apiDomain}/api/betHistory?${q.toString()}`);
+   if (query.limit != null) {
+      q.set("limit", String(query.limit));
+   }
+   if (query.before != null && query.before !== "") {
+      q.set("before", query.before);
+   }
+   if (query.mint != null && query.mint !== "") {
+      q.set("mint", query.mint);
+   }
+   if (query.operator != null && query.operator !== "") {
+      q.set("operator", query.operator);
+   }
+   const res = await fetch(`${LABS_DOMAIN}/api/betHistory?${q.toString()}`);
    if (!res.ok) {
       throw new Error(`${res.status} ${res.statusText}`);
    }
-   const raw = await res.json();
-   if (!Array.isArray(raw)) {
-      throw new Error("Expected array from /api/betHistory");
+   const raw = (await res.json()) as unknown;
+   if (raw == null || typeof raw !== "object" || !Array.isArray((raw as { accounts?: unknown }).accounts)) {
+      throw new Error("Expected { accounts, next } from /api/betHistory");
    }
-   const records = raw.map((item, i) => {
+   const body = raw as { accounts: unknown[]; next?: unknown };
+   const next = typeof body.next === "string" && body.next !== "" ? body.next : null;
+   const records = body.accounts.map((item, i) => {
       const rec = normalizeBetRecordFromApi(item);
       if (rec == null) {
          console.warn("Dropped closed bet history row", i);
       }
       return rec;
    }).filter((rec): rec is BetRecord => rec !== null);
-   return sortWalletBetRows(records.map(closedBetRecordToRow).filter((row): row is WalletBetRow => row !== null));
+   return {
+      rows: sortWalletBetRows(records.map(closedBetRecordToRow).filter((row): row is WalletBetRow => row !== null)),
+      next,
+   };
 }

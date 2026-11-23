@@ -9,15 +9,20 @@
     "gen:favicon": "bun scripts/gen-favicon.mjs"
   },
   "dependencies": {
+    "@privy-io/react-auth": "^3.52.0",
+    "@solana-program/memo": "^0.16.0",
+    "@solana-program/system": "^0.16.0",
+    "@solana-program/token": "^0.18.0",
     "@solana/connector": "^0.2.4",
-    "@solana/kit": "^8.3.0",
     "@solana/keys": "^8.3.0",
+    "@solana/kit": "^8.3.0",
     "@wallet-standard/app": "^1.1.0",
     "@wallet-standard/base": "^1.1.0",
-    "spamm-score-predict-sdk": "file:../score_predict/sdk/ts",
+    "modern-screenshot": "^4.7.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
-    "react-router-dom": "^7.15.1"
+    "react-router-dom": "^7.15.1",
+    "spamm-score-predict-sdk": "file:../score_predict/sdk/ts"
   },
   "devDependencies": {
     "@types/react": "^19.0.0",

@@ -1,4 +1,4 @@
-import { useAccount } from "@solana/connector/react";
+import { useAppWallet } from "../wallet/useAppWallet";
 import { useCallback, useEffect, useRef, useState, type ReactElement } from "react";
 import { requestFreebetRefresh } from "../betting/freebetRefresh";
 import { formatOddsInputFromDecimal, oddsFormatInputLabel, parseUserOddsToDecimal } from "../settings/convertOdds";
@@ -20,7 +20,7 @@ function formatEventStart(ms: number): string {
 }
 
 export function DemoPage(): ReactElement {
-   const { address: connectedAddress } = useAccount();
+   const { account: connectedAddress } = useAppWallet();
    const { oddsFormat } = useSettings();
    const appliedOddsFormatRef = useRef(oddsFormat);
 

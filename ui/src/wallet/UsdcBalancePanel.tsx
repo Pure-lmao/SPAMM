@@ -7,8 +7,9 @@ import {
    type Rpc,
    type SolanaRpcApi,
 } from "@solana/kit";
-import { useCluster, useWallet } from "@solana/connector/react";
+import { useCluster } from "@solana/connector/react";
 import { useAppTransactionSigner } from "./useAppTransactionSigner";
+import { useAppWallet } from "./useAppWallet";
 import { signErrorMessageForUi } from "./walletStandardV1Signer";
 import { getWalletUsdcTokenBalance } from "spamm-aggregator-sdk";
 import { formatUsdcBaseUnitsForUi, USDC_BASE_UNITS_PER_TOKEN } from "../betting/usdc";
@@ -16,8 +17,8 @@ import { buildSignV1Transaction, httpToWsRpcUrl, resolveAppHttpRpcUrl } from "..
 import { buildDevnetUsdcAirdropIx } from "./devnetUsdcAirdropIx";
 import { subscribeWalletBalanceRefresh } from "./walletBalanceRefresh";
 import { useI18n } from "../i18n/useI18n";
+import { IS_DEVNET, LABS_DOMAIN } from "../network";
 
-const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 const MIN_UI_USDC = 10n;
 const MIN_BALANCE_BASE = MIN_UI_USDC * USDC_BASE_UNITS_PER_TOKEN;
@@ -45,7 +46,7 @@ function formatSolFromLamports(lamports: bigint): string {
 }
 
 export function UsdcBalancePanel(): ReactElement | null {
-   const { isConnected, account } = useWallet();
+   const { isConnected, account } = useAppWallet();
    const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
    const { cluster } = useCluster();
    const { t } = useI18n();
@@ -144,7 +145,7 @@ export function UsdcBalancePanel(): ReactElement | null {
       try {
          const user = String(address(account));
          const q = new URLSearchParams({ user });
-         const res = await fetch(`${apiDomain}/api/airdrop/sol?${q.toString()}`);
+         const res = await fetch(`${LABS_DOMAIN}/api/airdrop/sol?${q.toString()}`);
          const raw: unknown = await res.json().catch(() => null);
          if (!res.ok) {
             const msg =
@@ -175,8 +176,8 @@ export function UsdcBalancePanel(): ReactElement | null {
       return null;
    }
 
-   const showUsdcAirdrop = balanceBase !== null && balanceBase < MIN_BALANCE_BASE;
-   const showSolAirdrop = solLamports !== null && solLamports < MIN_SOL_LAMPORTS;
+   const showUsdcAirdrop = IS_DEVNET && balanceBase !== null && balanceBase < MIN_BALANCE_BASE;
+   const showSolAirdrop = IS_DEVNET && solLamports !== null && solLamports < MIN_SOL_LAMPORTS;
 
    return (
       <div className="usdc-balance-panel">

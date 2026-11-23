@@ -8,7 +8,8 @@ import {
    type Rpc,
    type SolanaRpcApi,
 } from "@solana/kit";
-import { useCluster, useWallet } from "@solana/connector/react";
+import { useCluster } from "@solana/connector/react";
+import { useAppWallet } from "../wallet/useAppWallet";
 import { useAppTransactionSigner } from "../wallet/useAppTransactionSigner";
 import { signErrorMessageForUi } from "../wallet/walletStandardV1Signer";
 import { requestWalletBalanceRefresh } from "../wallet/walletBalanceRefresh";
@@ -44,7 +45,7 @@ import {
 } from "../betting/cashout";
 import { buildSignV1Transaction, httpToWsRpcUrl, resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { formatUsdcBaseUnitsForUi } from "../betting/usdc";
-import { userWinCreditBase, solscanTxUrl } from "../betting/betSlipUtils";
+import { userWinCreditBase, solscanAccountUrl, solscanTxUrl } from "../betting/betSlipUtils";
 import { convertOdds, type OddsFormat } from "../settings/convertOdds";
 import { useSettings } from "../settings/SettingsContext";
 import {
@@ -54,24 +55,23 @@ import {
    type WalletBetRow,
    type WalletParlayLeg,
 } from "../markets/fetchBetHistory";
-import { fetchBetCardEvents } from "../markets/fetchEvent";
-import { fetchPromosForBetLookup } from "../markets/fetchPromos";
 import {
    betMarketDisplayLines,
    eventLookupKey,
-   indexPromotionalMarkets,
    isPromoMarketChain,
    promoMarketLookupKey,
    useBetMarketCopy,
    type BetMarketDisplayLines,
 } from "../markets/myBetsMarketDisplay";
+import { useBetPresentation } from "../markets/useBetPresentation";
 import type { BetCardEvent, UiPromotionalMarket } from "../markets/types";
 import { useI18n } from "../i18n/useI18n";
 import type { Translate } from "../i18n/translate";
+import { BetCardMark } from "./BetCardMark";
 
 type LoadState = "idle" | "loading" | "ok" | "err";
 
-type MyBetsTab = "open" | "closed";
+type MyBetsTab = "pending" | "graded" | "closed";
 
 const MAX_SETTLE_IX_PER_TX = 9;
 const CASHOUT_QUOTE_DEBOUNCE_MS = 450;
@@ -254,10 +254,6 @@ function truncateAddressMiddle(addr: string, head = 4, tail = 4): string {
    return `${addr.slice(0, head)}…${addr.slice(-tail)}`;
 }
 
-function solscanAddressUrl(address: string): string {
-   return `https://solscan.io/account/${encodeURIComponent(address)}?cluster=devnet`;
-}
-
 function BetBanner({
    betPda,
    betId,
@@ -273,7 +269,7 @@ function BetBanner({
 }): ReactElement {
    const { t, formatBetTime } = useI18n();
    const when = placedAt != null ? formatBetTime(placedAt) : "";
-   const href = historySig ? solscanTxUrl(historySig) : solscanAddressUrl(betPda);
+   const href = historySig ? solscanTxUrl(historySig) : solscanAccountUrl(betPda);
    const linkLabel = historySig ? truncateAddressMiddle(historySig, 4, 4) : truncateAddressMiddle(betPda);
    return (
       <div className={`my-bets-card__banner my-bets-card__banner--${resultModifierClass(result)}`}>
@@ -352,13 +348,6 @@ function BetStakeGrid({
    );
 }
 
-function walletBetMarketIds(row: WalletBetRow): readonly MarketId[] {
-   if (row.kind === "single") {
-      return [row.data.marketId];
-   }
-   return row.legs.map((leg) => leg.marketId);
-}
-
 function BetMarketBody({
    lines,
    hideEventLine = false,
@@ -371,6 +360,7 @@ function BetMarketBody({
          {!hideEventLine && (
             <p className="my-bets-card__event-line">
                <span className="my-bets-card__event-title">{lines.eventTitle}</span>
+               {lines.scoreLabel != null && <span className="my-bets-card__score">{lines.scoreLabel}</span>}
                {lines.liveSuffix !== "" && <span className="my-bets-card__live-mark">{lines.liveSuffix}</span>}
             </p>
          )}
@@ -444,7 +434,7 @@ function CashoutModal({
    onClose: () => void;
    onChanged: () => void;
 }): ReactElement {
-   const { account, isConnected } = useWallet();
+   const { account, isConnected } = useAppWallet();
    const { signer: walletSigner, ready: signerReady, walletName } = useAppTransactionSigner();
    const { cluster } = useCluster();
    const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
@@ -729,7 +719,7 @@ function CardActions({
    eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement | null {
-   const { account, isConnected } = useWallet();
+   const { account, isConnected } = useAppWallet();
    const { signer: walletSigner, ready: signerReady, walletName } = useAppTransactionSigner();
    const { cluster } = useCluster();
    const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
@@ -885,13 +875,14 @@ function BetCard({
    finalPayout?: bigint | null;
 }): ReactElement {
    const copy = useBetMarketCopy();
+   const cardRef = useRef<HTMLLIElement>(null);
    const ek = eventLookupKey(b.marketId);
    const promoKey = isPromoMarketChain(b.marketId) ? promoMarketLookupKey(b.marketId) : null;
    const promo = promoKey != null ? (promosByMarketKey.get(promoKey) ?? null) : null;
    const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, b.marketId, b.side, promo, copy);
 
    return (
-      <li className="my-bets-card">
+      <li ref={cardRef} className="my-bets-card">
          <BetBanner
             betPda={betPda}
             betId={b.betId}
@@ -909,7 +900,10 @@ function BetCard({
                boost={b.promoType === PROMO_BOOST}
                finalPayout={finalPayout}
             />
-            {actions}
+            <div className="my-bets-card__foot">
+               {actions}
+               <BetCardMark cardRef={cardRef} />
+            </div>
          </div>
       </li>
    );
@@ -926,6 +920,19 @@ function ParlayLegOdds({ oddsScaled }: { oddsScaled: bigint | null }): ReactElem
    );
 }
 
+function parlayHasMixedLegGrades(legs: readonly WalletParlayLeg[]): boolean {
+   let graded = false;
+   let pending = false;
+   for (const leg of legs) {
+      if (leg.result == null || leg.result === BetResult.Pending) {
+         pending = true;
+      } else {
+         graded = true;
+      }
+   }
+   return graded && pending;
+}
+
 function ParlayLegRow({
    leg,
    legIndex,
@@ -933,6 +940,7 @@ function ParlayLegRow({
    promosByMarketKey,
    hideEventLine = false,
    hideOdds = false,
+   showPendingGrade = false,
 }: {
    leg: WalletParlayLeg;
    legIndex: number;
@@ -940,6 +948,7 @@ function ParlayLegRow({
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
    hideEventLine?: boolean;
    hideOdds?: boolean;
+   showPendingGrade?: boolean;
 }): ReactElement {
    const copy = useBetMarketCopy();
    const { t } = useI18n();
@@ -947,8 +956,8 @@ function ParlayLegRow({
    const promoKey = isPromoMarketChain(leg.marketId) ? promoMarketLookupKey(leg.marketId) : null;
    const promo = promoKey != null ? (promosByMarketKey.get(promoKey) ?? null) : null;
    const lines = betMarketDisplayLines(eventsByKey.get(ek) ?? undefined, leg.marketId, leg.side, promo, copy);
-   const legResult = leg.result;
-   const showResult = legResult != null && legResult !== BetResult.Pending;
+   const legResult = leg.result ?? BetResult.Pending;
+   const showResult = legResult !== BetResult.Pending || showPendingGrade;
    return (
       <li className="my-bets-card__parlay-leg">
          <span className="my-bets-card__parlay-leg-num" aria-hidden>
@@ -973,10 +982,12 @@ function ParlayEventGroup({
    items,
    eventsByKey,
    promosByMarketKey,
+   showPendingGrade = false,
 }: {
    items: readonly ParlayLegItem[];
    eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
+   showPendingGrade?: boolean;
 }): ReactElement {
    const copy = useBetMarketCopy();
    const first = items[0]!.leg;
@@ -991,6 +1002,7 @@ function ParlayEventGroup({
          <div className="my-bets-card__parlay-event-head">
             <p className="my-bets-card__event-line">
                <span className="my-bets-card__event-title">{lines.eventTitle}</span>
+               {lines.scoreLabel != null && <span className="my-bets-card__score">{lines.scoreLabel}</span>}
                {lines.liveSuffix !== "" && <span className="my-bets-card__live-mark">{lines.liveSuffix}</span>}
             </p>
             <span className="my-bets-card__parlay-odds">{eventOdds}</span>
@@ -1005,6 +1017,7 @@ function ParlayEventGroup({
                   promosByMarketKey={promosByMarketKey}
                   hideEventLine
                   hideOdds
+                  showPendingGrade={showPendingGrade}
                />
             ))}
          </ol>
@@ -1024,6 +1037,7 @@ function ParlayLegsList({
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
 }): ReactElement {
    const groups = groupParlayLegsForDisplay(legs);
+   const showPendingGrade = parlayHasMixedLegGrades(legs);
    return (
       <ol className="my-bets-card__parlay-legs">
          {groups.map((group) =>
@@ -1033,6 +1047,7 @@ function ParlayLegsList({
                   items={group.items}
                   eventsByKey={eventsByKey}
                   promosByMarketKey={promosByMarketKey}
+                  showPendingGrade={showPendingGrade}
                />
             ) : (
                <ParlayLegRow
@@ -1041,6 +1056,7 @@ function ParlayLegsList({
                   legIndex={group.index}
                   eventsByKey={eventsByKey}
                   promosByMarketKey={promosByMarketKey}
+                  showPendingGrade={showPendingGrade}
                />
             ),
          )}
@@ -1062,9 +1078,10 @@ function ParlayBetCard({
    actions?: ReactElement | null;
 }): ReactElement {
    const { t } = useI18n();
+   const cardRef = useRef<HTMLLIElement>(null);
    const legCount = row.legs.length;
    return (
-      <li className="my-bets-card my-bets-card--parlay">
+      <li ref={cardRef} className="my-bets-card my-bets-card--parlay">
          <BetBanner
             betPda={betPda}
             betId={row.betId}
@@ -1090,13 +1107,16 @@ function ParlayBetCard({
                boost={(row.promoType ?? row.account?.promoType) === PROMO_BOOST}
                finalPayout={row.finalPayout ?? null}
             />
-            {actions}
+            <div className="my-bets-card__foot">
+               {actions}
+               <BetCardMark cardRef={cardRef} />
+            </div>
          </div>
       </li>
    );
 }
 
-function WalletBetCard({
+export function WalletBetCard({
    row,
    eventsByKey,
    promosByMarketKey,
@@ -1144,7 +1164,7 @@ function WalletBetCard({
 }
 
 export function MyBetsPage(): ReactElement {
-   const { account, isConnected } = useWallet();
+   const { account, isConnected } = useAppWallet();
    const { signer: walletSigner, ready: signerReady, walletName } = useAppTransactionSigner();
    const { cluster } = useCluster();
    const { t } = useI18n();
@@ -1163,11 +1183,9 @@ export function MyBetsPage(): ReactElement {
    const [closedState, setClosedState] = useState<LoadState>("idle");
    const [closedErr, setClosedErr] = useState<string | null>(null);
    const [closedRows, setClosedRows] = useState<readonly WalletBetRow[]>([]);
-   const [betTab, setBetTab] = useState<MyBetsTab>("open");
-   const [eventsByKey, setEventsByKey] = useState<ReadonlyMap<string, BetCardEvent | null>>(() => new Map());
-   const [promosByMarketKey, setPromosByMarketKey] = useState<ReadonlyMap<string, UiPromotionalMarket>>(
-      () => new Map(),
-   );
+   const [closedNext, setClosedNext] = useState<string | null>(null);
+   const [closedMoreState, setClosedMoreState] = useState<LoadState>("idle");
+   const [betTab, setBetTab] = useState<MyBetsTab>("pending");
    const [claimBusy, setClaimBusy] = useState(false);
    const [claimErr, setClaimErr] = useState<string | null>(null);
    const claimLockRef = useRef(false);
@@ -1186,95 +1204,23 @@ export function MyBetsPage(): ReactElement {
       [settledRows.length],
    );
 
-   const activeState = betTab === "open" ? state : closedState;
-   const activeErr = betTab === "open" ? err : closedErr;
-   const openCount = rows.length;
+   const pendingRows = useMemo(
+      () => rows.filter((row) => walletBetRowResult(row) === BetResult.Pending),
+      [rows],
+   );
+   const gradedRows = useMemo(
+      () => rows.filter((row) => walletBetRowResult(row) !== BetResult.Pending),
+      [rows],
+   );
+   const activeRows = betTab === "pending" ? pendingRows : betTab === "graded" ? gradedRows : closedRows;
+   const activeState = betTab === "closed" ? closedState : state;
+   const activeErr = betTab === "closed" ? closedErr : err;
    const closedCount = closedRows.length;
-   const activeEmpty = betTab === "open" ? openCount === 0 : closedCount === 0;
-   const activeLoading = activeState === "loading" && activeEmpty;
+   const activeEmpty = activeRows.length === 0;
+   const activeLoading = activeState === "loading" && (betTab === "closed" ? closedRows.length === 0 : rows.length === 0);
 
-   const eventKeys = useMemo(() => {
-      const keys = new Map<string, { sport: number; league: number; event: number }>();
-      for (const row of [...rows, ...closedRows]) {
-         const markets =
-            row.kind === "single"
-               ? [{ marketId: row.data.marketId }]
-               : row.legs.map((leg) => ({ marketId: leg.marketId }));
-         for (const { marketId: mid } of markets) {
-            const eid = mid.eventId;
-            const k = eventLookupKey(mid);
-            keys.set(k, { sport: eid.sport, league: eid.league, event: Number(eid.event) });
-         }
-      }
-      return keys;
-   }, [closedRows, rows]);
-
-   const hasPromoBets = useMemo(() => {
-      for (const row of [...rows, ...closedRows]) {
-         for (const marketId of walletBetMarketIds(row)) {
-            if (isPromoMarketChain(marketId)) {
-               return true;
-            }
-         }
-      }
-      return false;
-   }, [closedRows, rows]);
-
-   useEffect(() => {
-      const missing = [...eventKeys.entries()].filter(([key]) => !eventsByKey.has(key));
-      if (missing.length === 0) {
-         return;
-      }
-      let cancelled = false;
-      void (async () => {
-         const byKey = new Map<string, BetCardEvent>();
-         try {
-            const cards = await fetchBetCardEvents(missing.map(([, ids]) => ids.event));
-            for (const ev of cards) {
-               byKey.set(`${ev.sport_id}:${ev.league_id}:${ev.id}`, ev);
-            }
-         } catch {
-            /* mark missing keys null below so we do not retry per bet */
-         }
-         if (!cancelled) {
-            setEventsByKey((prev) => {
-               const next = new Map(prev);
-               for (const [key] of missing) {
-                  if (!next.has(key)) {
-                     next.set(key, byKey.get(key) ?? null);
-                  }
-               }
-               return next;
-            });
-         }
-      })();
-      return () => {
-         cancelled = true;
-      };
-   }, [eventKeys, eventsByKey]);
-
-   useEffect(() => {
-      if (!hasPromoBets) {
-         setPromosByMarketKey(new Map());
-         return;
-      }
-      let cancelled = false;
-      void (async () => {
-         try {
-            const promos = await fetchPromosForBetLookup();
-            if (!cancelled) {
-               setPromosByMarketKey(indexPromotionalMarkets(promos));
-            }
-         } catch {
-            if (!cancelled) {
-               setPromosByMarketKey(new Map());
-            }
-         }
-      })();
-      return () => {
-         cancelled = true;
-      };
-   }, [hasPromoBets]);
+   const presentationRows = useMemo(() => [...rows, ...closedRows], [rows, closedRows]);
+   const { eventsByKey, promosByMarketKey } = useBetPresentation(presentationRows);
 
    const loadOpen = useCallback(async () => {
       if (!isConnected || !account) {
@@ -1298,21 +1244,47 @@ export function MyBetsPage(): ReactElement {
    const loadClosed = useCallback(async () => {
       if (!isConnected || !account) {
          setClosedRows([]);
+         setClosedNext(null);
+         setClosedMoreState("idle");
          setClosedState("idle");
          setClosedErr(null);
          return;
       }
       setClosedState("loading");
+      setClosedMoreState("idle");
       setClosedErr(null);
       try {
-         const list = await fetchClosedBetHistory(account);
-         setClosedRows(list);
+         const page = await fetchClosedBetHistory(account);
+         setClosedRows(page.rows);
+         setClosedNext(page.next);
          setClosedState("ok");
       } catch (e) {
+         setClosedNext(null);
          setClosedErr(e instanceof Error ? e.message : String(e));
          setClosedState("err");
       }
    }, [account, isConnected]);
+
+   const loadMoreClosed = useCallback(async () => {
+      if (!isConnected || !account || closedNext == null || closedMoreState === "loading") {
+         return;
+      }
+      setClosedMoreState("loading");
+      setClosedErr(null);
+      try {
+         const page = await fetchClosedBetHistory(account, { before: closedNext });
+         setClosedRows((prev) => {
+            const seen = new Set(prev.map((row) => row.address));
+            const extra = page.rows.filter((row) => !seen.has(row.address));
+            return extra.length === 0 ? prev : [...prev, ...extra];
+         });
+         setClosedNext(page.next);
+         setClosedMoreState("ok");
+      } catch (e) {
+         setClosedErr(e instanceof Error ? e.message : String(e));
+         setClosedMoreState("err");
+      }
+   }, [account, closedMoreState, closedNext, isConnected]);
 
    useEffect(() => {
       void loadOpen();
@@ -1418,25 +1390,36 @@ export function MyBetsPage(): ReactElement {
                type="button"
                className="my-bets-page__refresh"
                disabled={activeState === "loading"}
-               onClick={() => void (betTab === "open" ? loadOpen() : loadClosed())}
+               onClick={() => void (betTab === "closed" ? loadClosed() : loadOpen())}
             >
                {activeState === "loading" ? t("myBets.refreshing") : t("myBets.refresh")}
             </button>
          </div>
 
-         {activeState === "err" && activeErr != null && <p className="my-bets-page__err">{activeErr}</p>}
-         {claimErr != null && betTab === "open" && <p className="my-bets-page__err">{claimErr}</p>}
+         {((activeState === "err" && activeErr != null) || (betTab === "closed" && closedMoreState === "err" && closedErr != null)) && (
+            <p className="my-bets-page__err">{betTab === "closed" && closedMoreState === "err" ? closedErr : activeErr}</p>
+         )}
+         {claimErr != null && betTab === "graded" && <p className="my-bets-page__err">{claimErr}</p>}
 
          <div className="my-bets-page__tabs-row">
             <div className="my-bets-page__tabs" role="tablist" aria-label={t("myBets.groups")}>
                <button
                   type="button"
                   role="tab"
-                  aria-selected={betTab === "open"}
-                  className={`my-bets-page__tab${betTab === "open" ? " my-bets-page__tab--active" : ""}`}
-                  onClick={() => setBetTab("open")}
+                  aria-selected={betTab === "pending"}
+                  className={`my-bets-page__tab${betTab === "pending" ? " my-bets-page__tab--active" : ""}`}
+                  onClick={() => setBetTab("pending")}
                >
-                  {t("myBets.openBets", { count: rows.length })}
+                  {t("myBets.pendingBets", { count: pendingRows.length })}
+               </button>
+               <button
+                  type="button"
+                  role="tab"
+                  aria-selected={betTab === "graded"}
+                  className={`my-bets-page__tab${betTab === "graded" ? " my-bets-page__tab--active" : ""}`}
+                  onClick={() => setBetTab("graded")}
+               >
+                  {t("myBets.gradedBets", { count: gradedRows.length })}
                </button>
                <button
                   type="button"
@@ -1445,10 +1428,10 @@ export function MyBetsPage(): ReactElement {
                   className={`my-bets-page__tab${betTab === "closed" ? " my-bets-page__tab--active" : ""}`}
                   onClick={() => setBetTab("closed")}
                >
-                  {t("myBets.closedBets", { count: closedRows.length })}
+                  {t("myBets.closedBets", { count: closedNext != null ? `${closedCount}+` : closedCount })}
                </button>
             </div>
-            {betTab === "open" && settledRows.length > 0 && (
+            {betTab === "graded" && settledRows.length > 0 && (
                <button
                   type="button"
                   className="my-bets-page__claim"
@@ -1477,13 +1460,17 @@ export function MyBetsPage(): ReactElement {
 
             {activeState === "ok" && activeEmpty && (
                <p className="my-bets-page__empty">
-                  {betTab === "open" ? t("myBets.emptyOpen") : t("myBets.emptyClosed")}
+                  {betTab === "pending"
+                     ? t("myBets.emptyPending")
+                     : betTab === "graded"
+                       ? t("myBets.emptyGraded")
+                       : t("myBets.emptyClosed")}
                </p>
             )}
 
-            {betTab === "open" && openCount > 0 && (
+            {betTab !== "closed" && activeRows.length > 0 && (
                <ul className="my-bets-list">
-                  {rows.map((row) => (
+                  {activeRows.map((row) => (
                      <WalletBetCard
                         key={row.address}
                         row={row}
@@ -1505,6 +1492,16 @@ export function MyBetsPage(): ReactElement {
                      <WalletBetCard key={row.address} row={row} eventsByKey={eventsByKey} promosByMarketKey={promosByMarketKey} />
                   ))}
                </ul>
+            )}
+            {betTab === "closed" && closedState === "ok" && closedNext != null && (
+               <button
+                  type="button"
+                  className="my-bets-page__more"
+                  disabled={closedMoreState === "loading"}
+                  onClick={() => void loadMoreClosed()}
+               >
+                  {closedMoreState === "loading" ? t("myBets.loadingMore") : t("myBets.loadMore")}
+               </button>
             )}
          </div>
       </main>

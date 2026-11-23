@@ -10,8 +10,9 @@ import {
    type Rpc,
    type SolanaRpcApi,
 } from "@solana/kit";
-import { useCluster, useConnectWallet, useWallet, useWalletConnectors } from "@solana/connector/react";
+import { useCluster } from "@solana/connector/react";
 import { useAppTransactionSigner } from "../wallet/useAppTransactionSigner";
+import { useAppWallet } from "../wallet/useAppWallet";
 import { signErrorMessageForUi } from "../wallet/walletStandardV1Signer";
 import { requestWalletBalanceRefresh } from "../wallet/walletBalanceRefresh";
 import {
@@ -144,7 +145,7 @@ export function BetSlipTray(): ReactElement | null {
    const followBookOddsRef = useRef(true);
    const quoteGenRef = useRef(0);
 
-   const { account, isConnected } = useWallet();
+   const { account, isConnected, connectFirstWallet, connectors, connectBusy } = useAppWallet();
    const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
    const { cluster } = useCluster();
    const { oddsFormat } = useSettings();
@@ -188,8 +189,6 @@ export function BetSlipTray(): ReactElement | null {
       followBookOddsRef.current = false;
       setMinOdds(value);
    }, []);
-   const { connect, isConnecting: connectBusy, resetError } = useConnectWallet();
-   const connectors = useWalletConnectors();
 
    const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
 
@@ -580,14 +579,8 @@ export function BetSlipTray(): ReactElement | null {
    }, [amount, minOddsScaled, placedBetSummary?.filledPayoutLabel, usingFreebet, usingBoost, selectedBoost]);
 
    const onConnectClick = useCallback(() => {
-      resetError();
-      const ready = connectors.find((c) => c.ready);
-      const c = ready ?? connectors[0];
-      if (c == null) {
-         return;
-      }
-      void connect(c.id);
-   }, [connect, connectors, resetError]);
+      void connectFirstWallet();
+   }, [connectFirstWallet]);
 
    const reuseSelections = useCallback(() => {
       setPlacedBetSummary(null);
@@ -985,23 +978,17 @@ export function BetSlipTray(): ReactElement | null {
                      </ul>
                   )}
 
-                  <div className="bet-slip-tray__toolbar">
-                     {!slipLocked && (
-                        <button
-                           type="button"
-                           className="bet-slip-tray__clear-all"
-                           onClick={() => {
-                              if (sendPhase === "done") {
-                                 dismissSlip();
-                                 return;
-                              }
-                              clearSlip();
-                           }}
-                        >
-                           {sendPhase === "done" ? t("buttons.dismiss") : t("slip.clearAll")}
-                        </button>
-                     )}
-                     {sendPhase !== "done" && (
+                  {sendPhase !== "done" && (
+                     <div className="bet-slip-tray__toolbar">
+                        {!slipLocked && (
+                           <button
+                              type="button"
+                              className="bet-slip-tray__clear-all"
+                              onClick={() => clearSlip()}
+                           >
+                              {t("slip.clearAll")}
+                           </button>
+                        )}
                         <button
                            type="button"
                            className="bet-slip-tray__rfq-link"
@@ -1011,8 +998,8 @@ export function BetSlipTray(): ReactElement | null {
                         >
                            {t("slip.requestOffchain")}
                         </button>
-                     )}
-                  </div>
+                     </div>
+                  )}
 
                   {sendPhase === "done" ? (
                      <AppBrand asLink={false} className="bet-slip-tray__brand" />

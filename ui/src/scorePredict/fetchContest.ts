@@ -1,6 +1,7 @@
 import type { ApiPredictionContest } from './types';
+import { API_DOMAIN } from '../network';
 
-const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? '';
+const apiDomain = API_DOMAIN;
 
 export async function fetchTodayContest(): Promise<ApiPredictionContest | null> {
    const res = await fetch(`${apiDomain}/api/predictions/today`);

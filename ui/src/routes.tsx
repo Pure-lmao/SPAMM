@@ -6,6 +6,7 @@ import { EventMarketsPage } from "./pages/EventMarketsPage";
 import { HomePage } from "./pages/HomePage";
 import { MyBetsPage } from "./pages/MyBetsPage";
 import { NotFoundPage } from "./pages/NotFoundPage";
+import { IS_DEVNET } from "./network";
 
 export function AppRoutes(): ReactElement {
    return (
@@ -13,7 +14,7 @@ export function AppRoutes(): ReactElement {
          <Route element={<RootLayout />}>
             <Route index element={<HomePage />} />
             <Route path="my-bets" element={<MyBetsPage />} />
-            <Route path="demo" element={<DemoPage />} />
+            {IS_DEVNET ? <Route path="demo" element={<DemoPage />} /> : null}
             <Route path="events/:sportId/:leagueId/:eventId" element={<EventMarketsPage />} />
             <Route path="*" element={<NotFoundPage />} />
          </Route>

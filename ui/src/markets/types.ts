@@ -29,7 +29,14 @@ export type UiGroupedEvent = {
    markets?: UiMarket[];
 };
 
-/** `/api/events/cards` — event names. The pick is labeled from the on-chain market id. */
+/** One period's score from labs `/api/events`. */
+export type BetCardPeriodScore = {
+   periodId: number;
+   homeScore: number | null;
+   awayScore: number | null;
+};
+
+/** Labs `/api/events?operator=&ids={sport}|{league}|{event},...` — event names and scores. The pick is labeled from the on-chain market id. */
 export type BetCardEvent = {
    id: number;
    league_id: number;
@@ -37,6 +44,9 @@ export type BetCardEvent = {
    home_name: string;
    away_name: string;
    event_name: string;
+   home_score: number | null;
+   away_score: number | null;
+   periods: readonly BetCardPeriodScore[];
 };
 
 export type UiGroupedLeague = {

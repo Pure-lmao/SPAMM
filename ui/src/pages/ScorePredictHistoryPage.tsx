@@ -9,7 +9,8 @@ import {
    type Rpc,
    type SolanaRpcApi,
 } from '@solana/kit';
-import { useCluster, useWallet } from '@solana/connector/react';
+import { useCluster } from '@solana/connector/react';
+import { useAppWallet } from '../wallet/useAppWallet';
 import { useAppTransactionSigner } from '../wallet/useAppTransactionSigner';
 import { signErrorMessageForUi } from '../wallet/walletStandardV1Signer';
 import { requestWalletBalanceRefresh } from '../wallet/walletBalanceRefresh';
@@ -35,7 +36,7 @@ type EntryRow = {
 };
 
 export function ScorePredictHistoryPage(): ReactElement {
-   const { isConnected, account } = useWallet();
+   const { isConnected, account } = useAppWallet();
    const { cluster } = useCluster();
    const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
    const [rows, setRows] = useState<EntryRow[]>([]);

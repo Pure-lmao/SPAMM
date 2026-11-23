@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState, type ReactElement } from "react";
 import { address, createSolanaRpc, type Rpc, type SolanaRpcApi } from "@solana/kit";
-import { useCluster, useWallet } from "@solana/connector/react";
+import { useCluster } from "@solana/connector/react";
+import { useAppWallet } from "../wallet/useAppWallet";
 import { buildMarketLabel } from "../betting/marketLabel";
 import { pickBetSide } from "../betting/outcomeSide";
 import { useBetSlip } from "../betting/BetSlipContext";
@@ -49,7 +50,7 @@ export function PromoMarketsSection({ promos, eventFilter }: PromoMarketsSection
    const formatOdd = useFormatDbOdd();
    const collapsible = eventFilter != null;
    const [sectionOpen, setSectionOpen] = useState(true);
-   const { account, isConnected } = useWallet();
+   const { account, isConnected } = useAppWallet();
    const { cluster } = useCluster();
    const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
    const rpc = useMemo(() => createSolanaRpc(clusterRpcUrl) as Rpc<SolanaRpcApi>, [clusterRpcUrl]);

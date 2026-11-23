@@ -1,3 +1,5 @@
+import { API_DOMAIN } from "../network";
+
 export type DemoEvent = {
    id: number;
    sport_id: number;
@@ -8,7 +10,7 @@ export type DemoEvent = {
    start_time: number;
 };
 
-const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
+const apiDomain = API_DOMAIN;
 
 async function readJson(res: Response): Promise<unknown> {
    const text = await res.text();

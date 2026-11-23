@@ -21,6 +21,7 @@ import {
    type SolanaRpcApi,
    type TransactionSigner,
 } from "@solana/kit";
+import { PUBLIC_SOLANA_RPC, SOLANA_RPC_URL } from "../network";
 
 const PUBLIC_HTTP_RPC: Record<string, string> = {
    devnet: "https://api.devnet.solana.com",
@@ -136,7 +137,7 @@ export async function runPacedRpc<T>(fn: () => Promise<T>): Promise<T> {
 export function resolveHttpRpcUrl(raw: string | undefined | null): string {
    const u = (raw ?? "").trim();
    if (u === "") {
-      return PUBLIC_HTTP_RPC.devnet!;
+      return PUBLIC_SOLANA_RPC;
    }
    if (u.startsWith("https://") || u.startsWith("http://")) {
       return u;
@@ -145,15 +146,13 @@ export function resolveHttpRpcUrl(raw: string | undefined | null): string {
    if (key in PUBLIC_HTTP_RPC) {
       return PUBLIC_HTTP_RPC[key]!;
    }
-   return PUBLIC_HTTP_RPC.devnet!;
+   return PUBLIC_SOLANA_RPC;
 }
 
-/** Prefer `VITE_SOLANA_RPC_URL`, then connector cluster URL, then public devnet. */
+/** Prefer the NETWORK-selected RPC, then the connector cluster URL, then the public cluster RPC. */
 export function resolveAppHttpRpcUrl(clusterUrl?: string | null): string {
-   const env =
-      typeof import.meta.env.VITE_SOLANA_RPC_URL === "string" ? import.meta.env.VITE_SOLANA_RPC_URL.trim() : "";
-   if (env !== "") {
-      return resolveHttpRpcUrl(env);
+   if (SOLANA_RPC_URL !== "") {
+      return resolveHttpRpcUrl(SOLANA_RPC_URL);
    }
    const fromCluster = clusterUrl?.trim() ?? "";
    return resolveHttpRpcUrl(fromCluster !== "" ? fromCluster : null);

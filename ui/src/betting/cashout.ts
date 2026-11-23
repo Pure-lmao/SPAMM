@@ -28,10 +28,9 @@ import { getMmListCached } from "./mmCache";
 import { nextBetId } from "./nextBetId";
 import { buildSignV1Transaction, simulateInstructionReturnData } from "./txPipeline";
 import type { WalletBetRow } from "../markets/fetchBetHistory";
+import { LABS_DOMAIN } from "../network";
 
 type SignedV1Tx = Awaited<ReturnType<typeof buildSignV1Transaction>>;
-
-const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
 
 export function walletRowFreebetId(row: WalletBetRow): number {
    if (row.kind === "single") {
@@ -244,7 +243,7 @@ function pickBestRfqCashoutQuote(quotes: readonly RfqCashoutQuoteJson[]): RfqCas
 }
 
 export async function requestRfqCashoutQuotes(body: RfqCashoutHttpRequestJson): Promise<RfqCashoutHttpResponseJson> {
-   const res = await fetch(`${apiDomain}/api/rfq/cashout`, {
+   const res = await fetch(`${LABS_DOMAIN}/api/rfq/cashout`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

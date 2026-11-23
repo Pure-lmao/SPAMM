@@ -8,6 +8,7 @@ import UsdcBalancePanel from "../wallet/UsdcBalancePanel";
 import { SettingsMenu } from "../settings/SettingsMenu";
 import { WalletBar } from "../wallet/WalletBar";
 import { useI18n } from "../i18n/useI18n";
+import { PendingBetsPanel } from "../pages/PendingBetsPanel";
 
 /** Keep in sync with `max-width` in `index.css` for `.app-header` wallet menu rules. */
 const WALLET_MENU_MQ = "(max-width: 720px)";
@@ -91,9 +92,12 @@ export function RootLayout(): ReactElement {
                </div>
             </div>
          </header>
-         <main className="app-main">
-            <Outlet />
-         </main>
+         <div className="app-body">
+            <main className="app-main">
+               <Outlet />
+            </main>
+            <PendingBetsPanel />
+         </div>
          <AppFooter />
       </div>
    );

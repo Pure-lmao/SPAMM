@@ -18,7 +18,9 @@ import { fetchActivePromos } from "../markets/fetchPromos";
 import { PromoMarketsSection } from "../markets/PromoMarketsSection";
 import type { UiGroupedSport, UiPromotionalMarket } from "../markets/types";
 import { useI18n } from "../i18n/useI18n";
-const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
+import { API_DOMAIN } from "../network";
+
+const apiDomain = API_DOMAIN;
 
 async function fetchGroupedTree(): Promise<UiGroupedSport[]> {
    const res = await fetch(`${apiDomain}/api/events?all=true`);

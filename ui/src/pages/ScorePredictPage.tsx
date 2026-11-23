@@ -1,13 +1,9 @@
 import { useCallback, useEffect, useMemo, useState, type ReactElement } from 'react';
 import { Link } from 'react-router-dom';
 import { address, createSolanaRpc, type Rpc, type SolanaRpcApi } from '@solana/kit';
-import {
-   useCluster,
-   useConnectWallet,
-   useWallet,
-   useWalletConnectors,
-} from '@solana/connector/react';
+import { useCluster } from '@solana/connector/react';
 import { useAppTransactionSigner } from '../wallet/useAppTransactionSigner';
+import { useAppWallet } from '../wallet/useAppWallet';
 import { signErrorMessageForUi } from '../wallet/walletStandardV1Signer';
 import {
    encodePrediction,
@@ -64,11 +60,9 @@ function scoreLabel(kind: PredictionKind, home: number, away: number, total: num
 
 export function ScorePredictPage(): ReactElement {
    const { oddsFormat } = useSettings();
-   const { isConnected, account } = useWallet();
+   const { isConnected, account, connectFirstWallet, connectors, connectBusy } = useAppWallet();
    const { cluster } = useCluster();
    const { signer, ready: signerReady, walletName } = useAppTransactionSigner();
-   const { connect, isConnecting: connectBusy, resetError } = useConnectWallet();
-   const connectors = useWalletConnectors();
 
    const [contest, setContest] = useState<ApiPredictionContest | null | undefined>(undefined);
    const [err, setErr] = useState<string | null>(null);
@@ -299,14 +293,8 @@ export function ScorePredictPage(): ReactElement {
    }, [expectedTweet]);
 
    const onConnectClick = useCallback(() => {
-      resetError();
-      const ready = connectors.find((c) => c.ready);
-      const c = ready ?? connectors[0];
-      if (c == null) {
-         return;
-      }
-      void connect(c.id);
-   }, [connect, connectors, resetError]);
+      void connectFirstWallet();
+   }, [connectFirstWallet]);
 
    const canConnect = !connectBusy && connectors.length > 0;
 

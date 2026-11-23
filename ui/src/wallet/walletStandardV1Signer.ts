@@ -80,6 +80,18 @@ async function walletSignTransactionBytes(
       account,
       ...(chain != null && chain !== "" ? { chain } : {}),
    };
+   // Privy's wallet-standard signTransaction resolves only after the success
+   // screen is closed. Headless signing returns the signed transaction immediately
+   // so the caller can broadcast it.
+   if (walletName.toLowerCase() === "privy") {
+      return extractSignedBytes(
+         await feature.signTransaction({
+            ...base,
+            transaction: wire,
+            options: { uiOptions: { showWalletUIs: false } },
+         }),
+      );
+   }
    try {
       return extractSignedBytes(
          await feature.signTransaction({

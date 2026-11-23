@@ -12,7 +12,7 @@ import type { BetSlipSelection } from "./types";
 import { parlayLegFromSelection } from "./betSlipUtils";
 import { addressInList, oddsInFreebetRange, type PromoSlipLimits } from "./freebets";
 
-const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
+import { LABS_DOMAIN } from "../network";
 
 export function rfqSelectionsFromSlip(selections: readonly BetSlipSelection[]): RfqSelectionJson[] {
    return selections.map((sel) => {
@@ -88,7 +88,7 @@ export async function requestRfqQuotes(params: {
       amount: params.amount.toString(),
       selections: rfqSelectionsFromSlip(params.selections),
    };
-   const res = await fetch(`${apiDomain}/api/rfq`, {
+   const res = await fetch(`${LABS_DOMAIN}/api/rfq`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(body),

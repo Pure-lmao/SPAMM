@@ -1,6 +1,8 @@
 import type { UiPromotionalMarket } from "./types";
 
-const apiDomain = import.meta.env.VITE_API_DOMAIN?.trim() ?? "";
+import { API_DOMAIN } from "../network";
+
+const apiDomain = API_DOMAIN;
 
 export async function fetchActivePromos(): Promise<UiPromotionalMarket[]> {
    const res = await fetch(`${apiDomain}/api/promos?active=true`);
