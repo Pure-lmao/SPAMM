@@ -1,9 +1,12 @@
 import { useEffect, useRef, useState, type ReactElement } from "react";
-import { useFundWallet } from "@privy-io/react-auth/solana";
-import { SOLANA_CHAIN_ID } from "../network";
+import { useDepositFunds } from "@privy-io/react-auth";
+import { IS_DEVNET } from "../network";
 import { EPHEMERAL_DEVNET_WALLET_NAME } from "./ephemeralDevnetWallet";
 import { useAppWallet } from "./useAppWallet";
 import { useI18n } from "../i18n/useI18n";
+
+/** Stripe delivers USDC on mainnet only, including sandbox. */
+const STRIPE_SOLANA_CHAIN = "solana:5eykt4UsFv8P8NJdTREpY1vzqKqZKvdp";
 
 export function WalletBar(): ReactElement {
    const {
@@ -19,7 +22,7 @@ export function WalletBar(): ReactElement {
       logout,
       walletName,
    } = useAppWallet();
-   const { fundWallet } = useFundWallet();
+   const { depositFunds } = useDepositFunds();
    const { t } = useI18n();
    const [open, setOpen] = useState(false);
    const [step, setStep] = useState<"choose" | "wallets">("choose");
@@ -90,11 +93,19 @@ export function WalletBar(): ReactElement {
       setAccountMenu(false);
       setDepositError(null);
       setDepositing(true);
-      void fundWallet({
-         address: account,
-         options: {
-            chain: SOLANA_CHAIN_ID,
-            asset: "USDC",
+      void depositFunds({
+         destination: {
+            wallet: account,
+            asset: "usdc",
+            chain: STRIPE_SOLANA_CHAIN,
+         },
+         fiat: {
+            source: {
+               assets: ["usd", "eur"],
+               defaultAsset: "usd",
+            },
+            environment: IS_DEVNET ? "sandbox" : "production",
+            preferredProvider: "stripe",
          },
       })
          .catch((err: unknown) => {
