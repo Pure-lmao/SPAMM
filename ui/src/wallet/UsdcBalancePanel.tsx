@@ -17,14 +17,12 @@ import { buildSignV1Transaction, httpToWsRpcUrl, resolveAppHttpRpcUrl } from "..
 import { buildDevnetUsdcAirdropIx } from "./devnetUsdcAirdropIx";
 import { subscribeWalletBalanceRefresh } from "./walletBalanceRefresh";
 import { useI18n } from "../i18n/useI18n";
-import { IS_DEVNET, LABS_DOMAIN } from "../network";
+import { IS_DEVNET, MINT } from "../network";
+import { prefetchSolFreeAddressIfLow, solBalanceNeedsSponsor } from "./solFreeSponsor";
 
 
 const MIN_UI_USDC = 10n;
 const MIN_BALANCE_BASE = MIN_UI_USDC * USDC_BASE_UNITS_PER_TOKEN;
-
-/** 0.01 SOL in lamports. */
-const MIN_SOL_LAMPORTS = 10_000_000n;
 
 const LAMPORTS_PER_SOL = 1_000_000_000n;
 /** 0.0001 SOL — display precision is 4 decimal places. */
@@ -64,8 +62,6 @@ export function UsdcBalancePanel(): ReactElement | null {
    const [loadErr, setLoadErr] = useState<string | null>(null);
    const [usdcAirdropBusy, setUsdcAirdropBusy] = useState(false);
    const [usdcAirdropErr, setUsdcAirdropErr] = useState<string | null>(null);
-   const [solAirdropBusy, setSolAirdropBusy] = useState(false);
-   const [solAirdropErr, setSolAirdropErr] = useState<string | null>(null);
    const cancelledRef = useRef(false);
 
    const refresh = useCallback(async () => {
@@ -79,12 +75,13 @@ export function UsdcBalancePanel(): ReactElement | null {
       try {
          const userAddr = address(account);
          const [usdcBal, solBalRes] = await Promise.all([
-            getWalletUsdcTokenBalance(rpc, userAddr),
+            getWalletUsdcTokenBalance(rpc, userAddr, MINT),
             rpc.getBalance(userAddr).send(),
          ]);
          if (!cancelledRef.current) {
             setBalanceBase(usdcBal);
             setSolLamports(solBalRes.value);
+            prefetchSolFreeAddressIfLow(solBalRes.value);
          }
       } catch (e) {
          if (!cancelledRef.current) {
@@ -135,49 +132,12 @@ export function UsdcBalancePanel(): ReactElement | null {
       }
    }, [account, isConnected, refresh, rpc, rpcSubscriptions, signer, signerReady, walletName]);
 
-   const runSolAirdrop = useCallback(async () => {
-      if (!isConnected || !account) {
-         setSolAirdropErr("Connect a wallet first.");
-         return;
-      }
-      setSolAirdropBusy(true);
-      setSolAirdropErr(null);
-      try {
-         const user = String(address(account));
-         const q = new URLSearchParams({ user });
-         const res = await fetch(`${LABS_DOMAIN}/api/airdrop/sol?${q.toString()}`);
-         const raw: unknown = await res.json().catch(() => null);
-         if (!res.ok) {
-            const msg =
-               raw !== null &&
-               typeof raw === "object" &&
-               "error" in raw &&
-               typeof (raw as { error: unknown }).error === "string"
-                  ? (raw as { error: string }).error
-                  : res.statusText || "SOL airdrop request failed";
-            throw new Error(msg);
-         }
-         const parsed =
-            raw !== null && typeof raw === "object" && "success" in raw
-               ? (raw as { success: boolean; error?: string })
-               : null;
-         if (parsed === null || !parsed.success) {
-            throw new Error(parsed?.error ?? "SOL airdrop failed");
-         }
-         await refresh();
-      } catch (e) {
-         setSolAirdropErr(e instanceof Error ? e.message : String(e));
-      } finally {
-         setSolAirdropBusy(false);
-      }
-   }, [account, isConnected, refresh]);
-
    if (!isConnected || !account) {
       return null;
    }
 
    const showUsdcAirdrop = IS_DEVNET && balanceBase !== null && balanceBase < MIN_BALANCE_BASE;
-   const showSolAirdrop = IS_DEVNET && solLamports !== null && solLamports < MIN_SOL_LAMPORTS;
+   const sponsorActive = solLamports !== null && solBalanceNeedsSponsor(solLamports);
 
    return (
       <div className="usdc-balance-panel">
@@ -207,44 +167,34 @@ export function UsdcBalancePanel(): ReactElement | null {
                   )}
                </span>
                <span className="usdc-balance-panel__suffix">USDC</span>
-               {showSolAirdrop ? (
-                  <button
-                     type="button"
-                     className="usdc-balance-panel__airdrop"
-                     disabled={solAirdropBusy}
-                     onClick={() => void runSolAirdrop()}
-                  >
-                     {solAirdropBusy ? t("buttons.sending") : t("buttons.airdropSol")}
-                  </button>
+               {sponsorActive ? (
+                  <span className="usdc-balance-panel__sponsor">{t("buttons.txSponsorshipActive")}</span>
                ) : (
-                  <span className="usdc-balance-panel__lead-slot" aria-hidden="true" />
-               )}
-               <span className="usdc-balance-panel__amount-cell" aria-label="SOL balance">
-                  {solLamports === null && loadErr == null && <span className="usdc-balance-panel__amount-dim">…</span>}
-                  {solLamports !== null && (
-                     <span className="usdc-balance-panel__amount">{formatSolFromLamports(solLamports)}</span>
-                  )}
-                  {loadErr != null && solLamports === null && (
-                     <span className="usdc-balance-panel__err" title={loadErr}>
-                        —
+                  <>
+                     <span className="usdc-balance-panel__lead-slot" aria-hidden="true" />
+                     <span className="usdc-balance-panel__amount-cell" aria-label="SOL balance">
+                        {solLamports === null && loadErr == null && (
+                           <span className="usdc-balance-panel__amount-dim">…</span>
+                        )}
+                        {solLamports !== null && (
+                           <span className="usdc-balance-panel__amount">{formatSolFromLamports(solLamports)}</span>
+                        )}
+                        {loadErr != null && solLamports === null && (
+                           <span className="usdc-balance-panel__err" title={loadErr}>
+                              —
+                           </span>
+                        )}
                      </span>
-                  )}
-               </span>
-               <span className="usdc-balance-panel__suffix">SOL</span>
+                     <span className="usdc-balance-panel__suffix">SOL</span>
+                  </>
+               )}
             </div>
          </div>
-         {(solAirdropErr != null || usdcAirdropErr != null) && (
+         {usdcAirdropErr != null && (
             <div className="usdc-balance-panel__errs">
-               {solAirdropErr != null && (
-                  <span className="usdc-balance-panel__airdrop-err" title={solAirdropErr}>
-                     {solAirdropErr}
-                  </span>
-               )}
-               {usdcAirdropErr != null && (
-                  <span className="usdc-balance-panel__airdrop-err" title={usdcAirdropErr}>
-                     {usdcAirdropErr}
-                  </span>
-               )}
+               <span className="usdc-balance-panel__airdrop-err" title={usdcAirdropErr}>
+                  {usdcAirdropErr}
+               </span>
             </div>
          )}
       </div>

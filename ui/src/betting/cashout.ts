@@ -26,11 +26,11 @@ import {
 } from "spamm-aggregator-sdk";
 import { getMmListCached } from "./mmCache";
 import { nextBetId } from "./nextBetId";
-import { buildSignV1Transaction, simulateInstructionReturnData } from "./txPipeline";
+import { resolveUserTxFeePayer, signUserInstructions, simulateInstructionReturnData } from "./txPipeline";
 import type { WalletBetRow } from "../markets/fetchBetHistory";
 import { LABS_DOMAIN } from "../network";
 
-type SignedV1Tx = Awaited<ReturnType<typeof buildSignV1Transaction>>;
+type SignedV1Tx = Awaited<ReturnType<typeof signUserInstructions>>;
 
 export function walletRowFreebetId(row: WalletBetRow): number {
    if (row.kind === "single") {
@@ -113,7 +113,8 @@ export async function quoteAuctionCashout(params: {
          bet.marketId,
          mmPrograms,
       );
-      const ret = await simulateInstructionReturnData(params.rpc, ix, params.user);
+      const feePayer = await resolveUserTxFeePayer(params.rpc, params.user);
+      const ret = await simulateInstructionReturnData(params.rpc, ix, feePayer);
       if (ret == null || ret.length === 0) {
          throw new Error("No cashout quote");
       }
@@ -150,7 +151,8 @@ export async function quoteAuctionCashout(params: {
       parlay.legs.map((leg) => ({ marketId: leg.marketId })),
       mmPrograms,
    );
-   const ret = await simulateInstructionReturnData(params.rpc, ix, params.user);
+   const feePayer = await resolveUserTxFeePayer(params.rpc, params.user);
+   const ret = await simulateInstructionReturnData(params.rpc, ix, feePayer);
    if (ret == null || ret.length === 0) {
       throw new Error("No cashout quote");
    }
@@ -171,6 +173,7 @@ export async function buildSignAuctionCashoutTx(params: {
    maxPayment: bigint;
    amount: bigint;
 }): Promise<SignedV1Tx> {
+   const feePayer = await resolveUserTxFeePayer(params.rpc, params.walletSigner.address);
    const cashoutId = nextBetId();
    const minPayout = minPayoutFromQuote(params.maxPayment);
    if (params.row.kind === "single") {
@@ -184,16 +187,16 @@ export async function buildSignAuctionCashoutTx(params: {
             eventStateSequence: bet.eventStateSequence,
             eventGameState: bet.eventGameState,
          },
-         params.walletSigner.address,
+         feePayer,
          bet,
          bet.marketId,
          params.fillingMm,
          [...params.mmPrograms],
       );
-      return buildSignV1Transaction(params.rpc, {
-         feePayer: params.walletSigner,
+      return signUserInstructions(params.rpc, {
+         walletSigner: params.walletSigner,
+         feePayer,
          instructions: [ix],
-         signers: [params.walletSigner],
       });
    }
    const parlay = params.row.account;
@@ -213,15 +216,15 @@ export async function buildSignAuctionCashoutTx(params: {
          numLegs: parlay.numLegs,
          snapshots,
       },
-      params.walletSigner.address,
+      feePayer,
       parlay,
       parlay.legs.map((leg) => leg.marketId),
       params.fillingMm,
    );
-   return buildSignV1Transaction(params.rpc, {
-      feePayer: params.walletSigner,
+   return signUserInstructions(params.rpc, {
+      walletSigner: params.walletSigner,
+      feePayer,
       instructions: [ix],
-      signers: [params.walletSigner],
    });
 }
 
@@ -314,6 +317,7 @@ export async function quoteAndSignRfqParlayCashout(params: {
    }
    const maxPayment = BigInt(quote.maxPayment);
    const minPayout = minPayoutFromQuote(maxPayment);
+   const feePayer = await resolveUserTxFeePayer(params.rpc, params.walletSigner.address);
    const fill: FillRfqParlayCashoutIxData = {
       origBetId: params.parlay.betId,
       cashoutId,
@@ -327,15 +331,15 @@ export async function quoteAndSignRfqParlayCashout(params: {
    };
    const ix = await getFillRfqParlayCashoutIx(
       fill,
-      params.walletSigner.address,
+      feePayer,
       params.parlay,
       params.parlay.legs.map((leg) => leg.marketId),
       quote.mmProgramId as Address,
    );
-   const signed = await buildSignV1Transaction(params.rpc, {
-      feePayer: params.walletSigner,
+   const signed = await signUserInstructions(params.rpc, {
+      walletSigner: params.walletSigner,
+      feePayer,
       instructions: [ix],
-      signers: [params.walletSigner],
    });
    return { signed, maxPayment };
 }
@@ -378,13 +382,14 @@ export async function buildSignClaimCashoutTx(params: {
    ticketFeepayer: Address;
    mint: Address;
 }): Promise<SignedV1Tx> {
-   const ix = await getClaimCashoutEscrowIx(params.walletSigner.address, params.escrow, {
+   const feePayer = await resolveUserTxFeePayer(params.rpc, params.walletSigner.address);
+   const ix = await getClaimCashoutEscrowIx(feePayer, params.escrow, {
       feepayer: params.ticketFeepayer,
    }, params.mint);
-   return buildSignV1Transaction(params.rpc, {
-      feePayer: params.walletSigner,
+   return signUserInstructions(params.rpc, {
+      walletSigner: params.walletSigner,
+      feePayer,
       instructions: [ix],
-      signers: [params.walletSigner],
    });
 }
 

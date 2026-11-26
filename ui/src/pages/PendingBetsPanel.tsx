@@ -10,8 +10,10 @@ import { useBetPresentation } from "../markets/useBetPresentation";
 import { useAppWallet } from "../wallet/useAppWallet";
 import { WalletBetCard } from "./MyBetsPage";
 
-/** Matches the layout rule that makes room for this column beside the main page. */
-const PANEL_MQ = "(min-width: 1620px)";
+/** Phone layout. The edge tab is hidden here. */
+const MOBILE_MQ = "(max-width: 720px)";
+/** Matches the layout rule that keeps this column beside the main page. */
+const WIDE_MQ = "(min-width: 1620px)";
 
 function useMediaQuery(query: string): boolean {
    const [matches, setMatches] = useState(() => window.matchMedia(query).matches);
@@ -26,10 +28,15 @@ function useMediaQuery(query: string): boolean {
 }
 
 export function PendingBetsPanel(): ReactElement | null {
-   const wide = useMediaQuery(PANEL_MQ);
+   const mobile = useMediaQuery(MOBILE_MQ);
+   const wide = useMediaQuery(WIDE_MQ);
+   const [forced, setForced] = useState(false);
    const { pathname } = useLocation();
-   const shown = wide && pathname !== "/my-bets";
+   const onMyBets = pathname === "/my-bets";
+   const showTab = !mobile && !wide && !onMyBets;
+   const showPanel = !mobile && !onMyBets && (wide || forced);
    const { account, isConnected } = useAppWallet();
+   const connected = isConnected && account != null;
    const { cluster } = useCluster();
    const { t } = useI18n();
    const clusterRpcUrl = useMemo(() => resolveAppHttpRpcUrl(cluster?.url), [cluster?.url]);
@@ -38,8 +45,14 @@ export function PendingBetsPanel(): ReactElement | null {
    const [err, setErr] = useState<string | null>(null);
    const [rows, setRows] = useState<readonly WalletBetRow[]>([]);
 
+   useEffect(() => {
+      if (!showTab) {
+         setForced(false);
+      }
+   }, [showTab]);
+
    const load = useCallback(async () => {
-      if (!shown || !isConnected || !account) {
+      if (!showPanel || !isConnected || !account) {
          setRows([]);
          setState("idle");
          setErr(null);
@@ -55,7 +68,7 @@ export function PendingBetsPanel(): ReactElement | null {
          setErr(e instanceof Error ? e.message : String(e));
          setState("err");
       }
-   }, [account, isConnected, rpc, shown]);
+   }, [account, isConnected, rpc, showPanel]);
 
    useEffect(() => {
       void load();
@@ -63,12 +76,34 @@ export function PendingBetsPanel(): ReactElement | null {
 
    const { eventsByKey, promosByMarketKey } = useBetPresentation(rows);
 
-   if (!shown || !isConnected || account == null) {
+   if (!showTab && !showPanel) {
       return null;
    }
 
-   return (
-      <aside className="pending-bets-panel" aria-label={t("myBets.pendingPanel")}>
+   const tab = showTab ? (
+      <button
+         type="button"
+         className={`pending-bets-tab${showPanel ? " pending-bets-tab--docked" : ""}`}
+         aria-expanded={showPanel}
+         aria-controls="pending-bets-panel"
+         onClick={() => setForced((open) => !open)}
+      >
+         {t("myBets.title")}
+      </button>
+   ) : null;
+
+   const panel =
+      showPanel && !connected && !wide ? (
+         <aside id="pending-bets-panel" className="pending-bets-panel pending-bets-panel--forced" aria-label={t("myBets.pendingPanel")}>
+            <h2 className="pending-bets-panel__title">{t("myBets.title")}</h2>
+            <p className="my-bets-page__hint">{t("myBets.connectHint")}</p>
+         </aside>
+      ) : showPanel && connected ? (
+         <aside
+            id="pending-bets-panel"
+            className={`pending-bets-panel${wide ? "" : " pending-bets-panel--forced"}`}
+            aria-label={t("myBets.pendingPanel")}
+         >
          <div className="pending-bets-panel__head">
             <h2 className="pending-bets-panel__title">{t("myBets.pendingBets", { count: rows.length })}</h2>
             <button
@@ -100,5 +135,15 @@ export function PendingBetsPanel(): ReactElement | null {
             </ul>
          )}
       </aside>
-   );
+      ) : null;
+
+   if (tab != null && panel != null) {
+      return (
+         <div className="pending-bets-dock">
+            {tab}
+            {panel}
+         </div>
+      );
+   }
+   return tab ?? panel;
 }

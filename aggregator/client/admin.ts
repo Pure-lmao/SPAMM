@@ -22,6 +22,7 @@ export const ROUTER_ADMIN_SIGNER = await loadKeypairSignerFromJsonFile(
 
 
 async function initProgram() {
+   // console.log(ROUTER_ADMIN_SIGNER.address);
    const ix = await getInitProgramIx(ROUTER_ADMIN_SIGNER.address);
    const txResult = await sendAndConfirmInstructions([ix], [ROUTER_ADMIN_SIGNER]);
    console.log(txResult);
@@ -33,7 +34,7 @@ async function changeConfigStatus(status: 0 | 1) {
    const txResult = await sendAndConfirmInstructions([ix], [ROUTER_ADMIN_SIGNER]);
    console.log(txResult);
 }
-// changeConfigStatus(1).catch(console.error);
+changeConfigStatus(1).catch(console.error);
 
 async function gradeBets(bets: Address[], results: Uint8Array) {
    const ix = await getGradeBetsIx(MARKET_OPERATOR_SIGNER.address, results, bets);

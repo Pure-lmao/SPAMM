@@ -123,6 +123,83 @@ body {
    display: none;
 }
 
+.pending-bets-tab {
+   position: fixed;
+   right: 0;
+   top: 38%;
+   z-index: 40;
+   margin: 0;
+   padding: 0.9rem 0.38rem;
+   border: 1px solid var(--border-strong);
+   border-right: none;
+   border-radius: 8px 0 0 8px;
+   background: var(--surface-raised);
+   color: var(--text);
+   font: inherit;
+   font-size: 0.72rem;
+   font-weight: 700;
+   letter-spacing: 0.06em;
+   writing-mode: vertical-rl;
+   cursor: pointer;
+   box-shadow: -4px 0 16px rgb(0 0 0 / 35%);
+}
+
+.pending-bets-tab:hover {
+   color: var(--accent);
+   border-color: var(--accent);
+}
+
+.pending-bets-dock {
+   position: relative;
+   min-width: 0;
+}
+
+.pending-bets-tab--docked {
+   position: absolute;
+   top: 1.35rem;
+   left: 1px;
+   right: auto;
+   transform: translateX(-100%);
+}
+
+@media (min-width: 721px) and (max-width: 1619px) {
+   #root:has(.pending-bets-panel--forced) {
+      max-width: none;
+   }
+
+   #root:has(.pending-bets-panel--forced) .app-header,
+   #root:has(.pending-bets-panel--forced) .app-footer {
+      width: min(calc(1200px - 2rem), 100%);
+      margin-inline: auto;
+   }
+
+   .app-body:has(.pending-bets-panel--forced) {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) min(22rem, 34vw);
+      gap: 3.1rem;
+      align-items: start;
+   }
+
+   .pending-bets-dock:has(.pending-bets-panel--forced) {
+      position: sticky;
+      top: 0.25rem;
+   }
+
+   .pending-bets-panel--forced {
+      display: flex;
+      flex-direction: column;
+      gap: 0.75rem;
+      min-height: calc(100vh - 6.5rem);
+      max-height: calc(100vh - 6.5rem);
+      overflow: auto;
+      min-width: 0;
+      padding: 0.85rem 0.8rem 1rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      background: var(--surface-deep);
+   }
+}
+
 @media (min-width: 1620px) {
    #root:has(.pending-bets-panel) {
       max-width: calc(1200px + 26rem + 1.25rem);
@@ -141,9 +218,14 @@ body {
       gap: 0.75rem;
       position: sticky;
       top: 0.25rem;
+      min-height: calc(100vh - 6.5rem);
       max-height: calc(100vh - 6.5rem);
       overflow: auto;
       min-width: 0;
+      padding: 0.85rem 0.8rem 1rem;
+      border: 1px solid var(--border-strong);
+      border-radius: 10px;
+      background: var(--surface-deep);
    }
 }
 
@@ -2147,6 +2229,14 @@ h1 {
    color: var(--text);
 }
 
+.usdc-balance-panel__sponsor {
+   grid-column: 1 / -1;
+   justify-self: end;
+   font-weight: 700;
+   color: var(--accent);
+   text-align: right;
+}
+
 .usdc-balance-panel__err {
    text-align: right;
    font-size: 0.78rem;
@@ -2239,7 +2329,7 @@ h1 {
    }
 
    .app-header__brand {
-      grid-column: 1;
+      grid-column: 1 / -1;
       grid-row: 1;
       min-width: 0;
    }
@@ -2258,12 +2348,12 @@ h1 {
 
    .app-header__wallet-shell {
       grid-column: 2;
-      grid-row: 1;
+      grid-row: 2;
       justify-self: end;
-      align-self: start;
+      align-self: center;
       display: flex;
-      flex-direction: column;
-      align-items: flex-end;
+      flex-direction: row;
+      align-items: center;
    }
 
    .app-header__actions {
@@ -2297,9 +2387,10 @@ h1 {
    }
 
    .app-header .app-top-nav {
-      grid-column: 1 / -1;
+      grid-column: 1;
       grid-row: 2;
       justify-self: start;
+      align-self: center;
       column-gap: 0.75rem;
       row-gap: 0.12rem;
       font-size: 0.82rem;
@@ -2353,7 +2444,8 @@ h1 {
 
    .app-header__wallet-panel .usdc-balance-panel__amount,
    .app-header__wallet-panel .usdc-balance-panel__suffix,
-   .app-header__wallet-panel .usdc-balance-panel__amount-dim {
+   .app-header__wallet-panel .usdc-balance-panel__amount-dim,
+   .app-header__wallet-panel .usdc-balance-panel__sponsor {
       font-size: 0.68rem;
    }
 

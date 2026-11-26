@@ -1,5 +1,7 @@
 /** Cluster selected by the `NETWORK` env var (`devnet` or `mainnet`) at dev/build time. */
 
+import { address } from "@solana/kit";
+
 export type AppNetwork = "devnet" | "mainnet";
 
 function readNetwork(): AppNetwork {
@@ -18,6 +20,12 @@ export const IS_DEVNET = APP_NETWORK === "devnet";
 export const SOLANA_CHAIN_ID = IS_DEVNET ? "solana:devnet" : "solana:mainnet";
 
 export const SOLANA_CLUSTER_LABEL = IS_DEVNET ? "Devnet" : "Mainnet";
+
+const DEVNET_USDC_MINT = address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
+const USDC_MINT = address("EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v");
+export const MINT = IS_DEVNET ? DEVNET_USDC_MINT : USDC_MINT;
+
+
 
 /**
  * yano.markets — events and markets.

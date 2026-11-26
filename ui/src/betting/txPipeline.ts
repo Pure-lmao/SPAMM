@@ -1,14 +1,23 @@
 import {
    addSignersToTransactionMessage,
    appendTransactionMessageInstructions,
+   assertIsSendableTransaction,
    assertIsTransactionWithBlockhashLifetime,
+   assertIsTransactionWithinSizeLimit,
    compileTransaction,
    createNoopSigner,
    createTransactionMessage,
    estimateAndSetResourceLimitsFactory,
    estimateResourceLimitsFactory,
    fillTransactionMessageProvisoryResourceLimits,
+   getBase64Decoder,
    getBase64EncodedWireTransaction,
+   getBase64Encoder,
+   getCompiledTransactionMessageDecoder,
+   getTransactionDecoder,
+   getTransactionLifetimeConstraintFromCompiledTransactionMessage,
+   isTransactionModifyingSigner,
+   isTransactionPartialSigner,
    pipe,
    setTransactionMessageConfig,
    setTransactionMessageFeePayer,
@@ -16,12 +25,16 @@ import {
    setTransactionMessageLifetimeUsingBlockhash,
    signTransactionMessageWithSigners,
    type Address,
+   type Blockhash,
    type Instruction,
    type Rpc,
    type SolanaRpcApi,
+   type Transaction,
    type TransactionSigner,
+   type TransactionWithBlockhashLifetime,
 } from "@solana/kit";
 import { PUBLIC_SOLANA_RPC, SOLANA_RPC_URL } from "../network";
+import { ensureSolFreeAddress, requestSolFreeSignature, solBalanceNeedsSponsor } from "../wallet/solFreeSponsor";
 
 const PUBLIC_HTTP_RPC: Record<string, string> = {
    devnet: "https://api.devnet.solana.com",
@@ -223,6 +236,133 @@ export async function buildSignV1Transaction(
    const signedTransaction = await signTransactionMessageWithSigners(txMessageWithSigners);
    assertIsTransactionWithBlockhashLifetime(signedTransaction);
    return signedTransaction;
+}
+
+/** Wallet pays fees at or above `SOL_FREE_MIN_LAMPORTS`. Below that, the stored sol-free signer pays. */
+export async function resolveUserTxFeePayer(rpc: Rpc<SolanaRpcApi>, wallet: Address): Promise<Address> {
+   const { value: lamports } = await runPacedRpc(() => rpc.getBalance(wallet).send());
+   if (!solBalanceNeedsSponsor(lamports)) {
+      return wallet;
+   }
+   return ensureSolFreeAddress();
+}
+
+const SPONSOR_PLACEHOLDER_BLOCKHASH = "11111111111111111111111111111111" as Blockhash;
+
+function hasRealSignature(sig: Uint8Array | null | undefined): boolean {
+   if (sig == null || sig.length === 0) {
+      return false;
+   }
+   for (let i = 0; i < sig.length; i++) {
+      if (sig[i] !== 0) {
+         return true;
+      }
+   }
+   return false;
+}
+
+function compiledSponsorMessageBase64(feePayer: Address, instructions: readonly Instruction[]): string {
+   const message = pipe(
+      createTransactionMessage({ version: 0 }),
+      (m) => setTransactionMessageFeePayer(feePayer, m),
+      (m) =>
+         setTransactionMessageLifetimeUsingBlockhash(
+            { blockhash: SPONSOR_PLACEHOLDER_BLOCKHASH, lastValidBlockHeight: 1n },
+            m,
+         ),
+      (m) => appendTransactionMessageInstructions([...instructions], m),
+   );
+   return getBase64Decoder().decode(compileTransaction(message).messageBytes);
+}
+
+async function addWalletSignature(
+   walletSigner: TransactionSigner,
+   transaction: Transaction & TransactionWithBlockhashLifetime,
+): Promise<Transaction & TransactionWithBlockhashLifetime> {
+   assertIsTransactionWithinSizeLimit(transaction);
+   const signerProbe = walletSigner as { [key: string]: unknown; address: Address };
+   if (isTransactionPartialSigner(signerProbe)) {
+      const [added] = await signerProbe.signTransactions([transaction]);
+      return {
+         ...transaction,
+         signatures: { ...transaction.signatures, ...added },
+      };
+   }
+   if (isTransactionModifyingSigner(signerProbe)) {
+      const [signed] = await signerProbe.modifyAndSignTransactions([transaction]);
+      const withLifetime = {
+         messageBytes: signed.messageBytes,
+         signatures: signed.signatures,
+         lifetimeConstraint:
+            "lifetimeConstraint" in signed && "blockhash" in signed.lifetimeConstraint
+               ? signed.lifetimeConstraint
+               : transaction.lifetimeConstraint,
+      };
+      assertIsTransactionWithBlockhashLifetime(withLifetime);
+      return withLifetime;
+   }
+   throw new Error("Wallet cannot sign transactions");
+}
+
+async function signSponsoredTransaction(
+   rpc: Rpc<SolanaRpcApi>,
+   walletSigner: TransactionSigner,
+   wireB64: string,
+): Promise<Transaction & TransactionWithBlockhashLifetime> {
+   const decoded = getTransactionDecoder().decode(getBase64Encoder().encode(wireB64));
+   const compiled = getCompiledTransactionMessageDecoder().decode(decoded.messageBytes);
+   const lifetime = await getTransactionLifetimeConstraintFromCompiledTransactionMessage(compiled);
+   if (!("blockhash" in lifetime)) {
+      throw new Error("Sponsored transaction is missing a blockhash");
+   }
+   const { value: latest } = await runPacedRpc(() => rpc.getLatestBlockhash({ commitment: "confirmed" }).send());
+   const withLifetime = {
+      ...decoded,
+      lifetimeConstraint: {
+         blockhash: lifetime.blockhash,
+         lastValidBlockHeight: latest.lastValidBlockHeight,
+      },
+   };
+   assertIsTransactionWithBlockhashLifetime(withLifetime);
+   const userSig = withLifetime.signatures[walletSigner.address];
+   const needsUser = userSig !== undefined && !hasRealSignature(userSig);
+   const signed = needsUser ? await addWalletSignature(walletSigner, withLifetime) : withLifetime;
+   const sponsor = compiled.staticAccounts[0];
+   if (sponsor == null || !hasRealSignature(signed.signatures[sponsor])) {
+      throw new Error("Sponsored fee payer signature missing");
+   }
+   if (needsUser && !hasRealSignature(signed.signatures[walletSigner.address])) {
+      throw new Error("Wallet did not sign the transaction");
+   }
+   assertIsTransactionWithBlockhashLifetime(signed);
+   assertIsSendableTransaction(signed);
+   return signed;
+}
+
+/**
+ * Sign aggregator user instructions.
+ * When `feePayer` is the sol-free signer, send the compiled message (the server replaces the
+ * blockhash and pays the fee) and have the wallet sign the returned transaction if it moves USDC.
+ */
+export async function signUserInstructions(
+   rpc: Rpc<SolanaRpcApi>,
+   params: Readonly<{
+      walletSigner: TransactionSigner;
+      feePayer: Address;
+      instructions: readonly Instruction[];
+   }>,
+): Promise<Awaited<ReturnType<typeof buildSignV1Transaction>>> {
+   if (params.feePayer === params.walletSigner.address) {
+      return buildSignV1Transaction(rpc, {
+         feePayer: params.walletSigner,
+         instructions: params.instructions,
+         signers: [params.walletSigner],
+      });
+   }
+   const messageB64 = compiledSponsorMessageBase64(params.feePayer, params.instructions);
+   const wireB64 = await requestSolFreeSignature(messageB64);
+   const signed = await signSponsoredTransaction(rpc, params.walletSigner, wireB64);
+   return signed as unknown as Awaited<ReturnType<typeof buildSignV1Transaction>>;
 }
 
 export async function simulateInstructionReturnData(

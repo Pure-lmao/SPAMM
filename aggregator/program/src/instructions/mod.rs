@@ -104,10 +104,10 @@ mod settle_freebet;
 mod settle_freebet_parlay;
 mod change_config_status;
 mod message;
-#[cfg(feature = "devnet")]
+// #[cfg(feature = "devnet")]
 mod force_close_pda;
 mod withdraw_from_liability_account;
-#[cfg(feature = "devnet")]
+// #[cfg(feature = "devnet")]
 mod write_arbitrary_data;
 
 
@@ -212,9 +212,9 @@ pub fn dispatch(d: u8, data: &[u8], accounts: &mut [AccountView]) -> ProgramResu
       MESSAGE_IX_DISCRIMINATOR => message::process(accounts, data),
 
       // devnet-only admin tooling (254 / 255)
-      #[cfg(feature = "devnet")]
+      // #[cfg(feature = "devnet")]
       254 => write_arbitrary_data::process(accounts, data),
-      #[cfg(feature = "devnet")]
+      // #[cfg(feature = "devnet")]
       255 => force_close_pda::process(accounts),
       _ => {
          log!("unknown instruction discriminator: {}", d);

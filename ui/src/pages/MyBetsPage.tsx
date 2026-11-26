@@ -43,8 +43,8 @@ import {
    ticketFeepayerOfRow,
    walletRowFreebetId,
 } from "../betting/cashout";
-import { buildSignV1Transaction, httpToWsRpcUrl, resolveAppHttpRpcUrl } from "../betting/txPipeline";
-import { formatUsdcBaseUnitsForUi } from "../betting/usdc";
+import { httpToWsRpcUrl, resolveAppHttpRpcUrl, resolveUserTxFeePayer, signUserInstructions } from "../betting/txPipeline";
+import { formatUsdcBaseUnitsForUi, formatUsdcBaseUnitsRounded } from "../betting/usdc";
 import { userWinCreditBase, solscanAccountUrl, solscanTxUrl } from "../betting/betSlipUtils";
 import { convertOdds, type OddsFormat } from "../settings/convertOdds";
 import { useSettings } from "../settings/SettingsContext";
@@ -327,7 +327,7 @@ function BetStakeGrid({
          <div>
             <dt>{result === BetResult.CashedOut ? t("myBets.cashoutAmount") : t("myBets.stake")}</dt>
             <dd>
-               <strong>{formatUsdcBaseUnitsForUi(amount)}</strong> USDC
+               <strong>{formatUsdcBaseUnitsRounded(amount)}</strong> USDC
                {freebet === true && <span className="my-bets-card__stake-freebet"> {t("myBets.freebet")}</span>}
                {boost === true && <span className="my-bets-card__stake-freebet"> {t("myBets.boost")}</span>}
             </dd>
@@ -341,7 +341,7 @@ function BetStakeGrid({
          <div>
             <dt>{payoutLabel}</dt>
             <dd>
-               <strong>{formatUsdcBaseUnitsForUi(payoutBase)}</strong> USDC
+               <strong>{formatUsdcBaseUnitsRounded(payoutBase)}</strong> USDC
             </dd>
          </div>
       </dl>
@@ -1302,7 +1302,7 @@ export function MyBetsPage(): ReactElement {
       setClaimBusy(true);
       setClaimErr(null);
       try {
-         const userAddr = address(account);
+         const feePayer = await resolveUserTxFeePayer(rpc, walletSigner.address);
          const graded = settledRows.filter((row) => {
             if (row.kind === "parlay" && row.account === undefined) {
                return false;
@@ -1325,10 +1325,10 @@ export function MyBetsPage(): ReactElement {
                         throw new Error("Promo issuer not found");
                      }
                      return row.data.promoType === PROMO_BOOST
-                        ? getSettleBoostedBetIx(userAddr, betPda, row.data, row.issuerAuth)
-                        : getSettleFreebetIx(userAddr, betPda, row.data, row.issuerAuth);
+                        ? getSettleBoostedBetIx(feePayer, betPda, row.data, row.issuerAuth)
+                        : getSettleFreebetIx(feePayer, betPda, row.data, row.issuerAuth);
                   }
-                  return getSettleBetIx(userAddr, betPda, row.data);
+                  return getSettleBetIx(feePayer, betPda, row.data);
                }
                if (row.account == null) {
                   throw new Error("Parlay account missing");
@@ -1338,10 +1338,10 @@ export function MyBetsPage(): ReactElement {
                      throw new Error("Promo issuer not found");
                   }
                   return row.account.promoType === PROMO_BOOST
-                     ? getSettleBoostedParlayIx(userAddr, betPda, row.account, row.issuerAuth)
-                     : getSettleFreebetParlayIx(userAddr, betPda, row.account, row.issuerAuth);
+                     ? getSettleBoostedParlayIx(feePayer, betPda, row.account, row.issuerAuth)
+                     : getSettleFreebetParlayIx(feePayer, betPda, row.account, row.issuerAuth);
                }
-               return getSettleParlayIx(userAddr, betPda, row.account);
+               return getSettleParlayIx(feePayer, betPda, row.account);
             }),
          );
          const instructionChunks: (typeof instructionList)[] = [];
@@ -1350,10 +1350,10 @@ export function MyBetsPage(): ReactElement {
          }
          for (let chunkIdx = 0; chunkIdx < instructionChunks.length; chunkIdx++) {
             const chunk = instructionChunks[chunkIdx]!;
-            const signed = await buildSignV1Transaction(rpc, {
-               feePayer: walletSigner,
+            const signed = await signUserInstructions(rpc, {
+               walletSigner,
+               feePayer,
                instructions: chunk,
-               signers: [walletSigner],
             });
             await sendAndConfirm(signed as never, { commitment: "confirmed" });
             requestWalletBalanceRefresh();

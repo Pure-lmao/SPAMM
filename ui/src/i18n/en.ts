@@ -41,7 +41,7 @@ export const enMessages = {
       inviteFriends: "Invite Friends",
       copyLink: "Copy link",
       airdropUsdc: "Airdrop 100 USDC",
-      airdropSol: "Airdrop SOL",
+      txSponsorshipActive: "Tx sponsorship active",
       airdropping: "Airdropping…",
       sending: "Sending…",
    },

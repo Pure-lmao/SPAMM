@@ -26,7 +26,7 @@ import {
 } from "spamm-aggregator-sdk";
 import { DEFAULT_EVENT_STATE_SEQUENCE, EVENT_GAME_STATE_PG } from "./chainIds";
 import { getMmListCached } from "./mmCache";
-import { buildSignV1Transaction, simulateInstructionReturnData } from "./txPipeline";
+import { resolveUserTxFeePayer, signUserInstructions, simulateInstructionReturnData } from "./txPipeline";
 
 const QUOTE_PROBE_MIN_ODDS = ODDS_SCALE + 100n;
 /** Unused on-chain for quote-proxy instructions; must be > 0 for SDK validation. */
@@ -116,7 +116,8 @@ export async function runMmQuoteFlow(params: {
          params.userAddress,
          mmPrograms,
       );
-      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress);
+      const feePayer = await resolveUserTxFeePayer(params.rpc, params.userAddress);
+      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, feePayer);
       if (!returnData || returnData.length === 0) {
          return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors };
       }
@@ -150,8 +151,9 @@ export async function buildAndSignFillBetTx(params: {
    hasActiveNetting?: boolean;
    freebet?: FreebetFillRef;
    boost?: BoostFillRef;
-}): Promise<ReturnType<typeof buildSignV1Transaction>> {
+}): Promise<Awaited<ReturnType<typeof signUserInstructions>>> {
    assertOnePromo(params.freebet, params.boost);
+   const feePayer = await resolveUserTxFeePayer(params.rpc, params.walletSigner.address);
    const fillBody = {
       betId: params.fill.betId,
       marketId: params.fill.marketId,
@@ -166,7 +168,7 @@ export async function buildAndSignFillBetTx(params: {
       params.freebet != null
          ? await getFreebetFillBetIx(
               fillBody,
-              params.userAddress,
+              feePayer,
               params.userAddress,
               params.freebet.issuerAuth,
               params.freebet.freebetId,
@@ -176,7 +178,7 @@ export async function buildAndSignFillBetTx(params: {
          : params.boost != null
            ? await getBoostedFillBetIx(
                 fillBody,
-                params.userAddress,
+                feePayer,
                 params.userAddress,
                 params.boost.issuerAuth,
                 params.boost.boostId,
@@ -185,15 +187,15 @@ export async function buildAndSignFillBetTx(params: {
              )
            : await getFillBetIx(
                 fillBody,
-                params.userAddress,
+                feePayer,
                 params.userAddress,
                 mmPrograms,
                 params.hasActiveNetting ?? false,
              );
-   return buildSignV1Transaction(params.rpc, {
-      feePayer: params.walletSigner,
+   return signUserInstructions(params.rpc, {
+      walletSigner: params.walletSigner,
+      feePayer,
       instructions: [ix],
-      signers: [params.walletSigner],
    });
 }
 
@@ -227,7 +229,8 @@ export async function runMmParlayQuoteFlow(params: {
          params.userAddress,
          mmPrograms,
       );
-      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, params.userAddress);
+      const feePayer = await resolveUserTxFeePayer(params.rpc, params.userAddress);
+      const returnData = await simulateInstructionReturnData(params.rpc, quoteIx, feePayer);
       if (!returnData || returnData.length === 0) {
          return { topMms: [], conservativeMinOddsScaled: QUOTE_PROBE_MIN_ODDS, errors, bestMm: null };
       }
@@ -258,13 +261,14 @@ export async function buildAndSignFillParlayTx(params: {
    mmProgram: Address;
    freebet?: FreebetFillRef;
    boost?: BoostFillRef;
-}): Promise<ReturnType<typeof buildSignV1Transaction>> {
+}): Promise<Awaited<ReturnType<typeof signUserInstructions>>> {
    assertOnePromo(params.freebet, params.boost);
+   const feePayer = await resolveUserTxFeePayer(params.rpc, params.walletSigner.address);
    const ix =
       params.freebet != null
          ? await getFreebetFillParlayIx(
               params.fill,
-              params.userAddress,
+              feePayer,
               params.userAddress,
               params.freebet.issuerAuth,
               params.freebet.freebetId,
@@ -273,17 +277,17 @@ export async function buildAndSignFillParlayTx(params: {
          : params.boost != null
            ? await getBoostedFillParlayIx(
                 params.fill,
-                params.userAddress,
+                feePayer,
                 params.userAddress,
                 params.boost.issuerAuth,
                 params.boost.boostId,
                 params.mmProgram,
              )
-           : await getFillParlayIx(params.fill, params.userAddress, params.userAddress, params.mmProgram);
-   return buildSignV1Transaction(params.rpc, {
-      feePayer: params.walletSigner,
+           : await getFillParlayIx(params.fill, feePayer, params.userAddress, params.mmProgram);
+   return signUserInstructions(params.rpc, {
+      walletSigner: params.walletSigner,
+      feePayer,
       instructions: [ix],
-      signers: [params.walletSigner],
    });
 }
 
@@ -294,13 +298,14 @@ export async function buildAndSignFillRfqTx(params: {
    fill: RfqFillIxFromQuote;
    freebet?: FreebetFillRef;
    boost?: BoostFillRef;
-}): Promise<ReturnType<typeof buildSignV1Transaction>> {
+}): Promise<Awaited<ReturnType<typeof signUserInstructions>>> {
    assertOnePromo(params.freebet, params.boost);
+   const feePayer = await resolveUserTxFeePayer(params.rpc, params.walletSigner.address);
    let ix;
    if (params.freebet != null && params.fill.kind === "fillRfqBet") {
       ix = await getFreebetFillRfqBetIx(
          params.fill.data,
-         params.userAddress,
+         feePayer,
          params.userAddress,
          params.freebet.issuerAuth,
          params.freebet.freebetId,
@@ -310,7 +315,7 @@ export async function buildAndSignFillRfqTx(params: {
    } else if (params.freebet != null && params.fill.kind === "fillRfqParlay") {
       ix = await getFreebetFillRfqParlayIx(
          params.fill.data,
-         params.userAddress,
+         feePayer,
          params.userAddress,
          params.freebet.issuerAuth,
          params.freebet.freebetId,
@@ -319,7 +324,7 @@ export async function buildAndSignFillRfqTx(params: {
    } else if (params.boost != null && params.fill.kind === "fillRfqBet") {
       ix = await getBoostedFillRfqBetIx(
          params.fill.data,
-         params.userAddress,
+         feePayer,
          params.userAddress,
          params.boost.issuerAuth,
          params.boost.boostId,
@@ -329,18 +334,18 @@ export async function buildAndSignFillRfqTx(params: {
    } else if (params.boost != null && params.fill.kind === "fillRfqParlay") {
       ix = await getBoostedFillRfqParlayIx(
          params.fill.data,
-         params.userAddress,
+         feePayer,
          params.userAddress,
          params.boost.issuerAuth,
          params.boost.boostId,
          params.fill.mmProgram,
       );
    } else {
-      ix = await getFillRfqIxFromData(params.fill, params.userAddress, params.userAddress, false);
+      ix = await getFillRfqIxFromData(params.fill, feePayer, params.userAddress, false);
    }
-   return buildSignV1Transaction(params.rpc, {
-      feePayer: params.walletSigner,
+   return signUserInstructions(params.rpc, {
+      walletSigner: params.walletSigner,
+      feePayer,
       instructions: [ix],
-      signers: [params.walletSigner],
    });
 }

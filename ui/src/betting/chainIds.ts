@@ -2,7 +2,7 @@ import { address, type Address } from "@solana/kit";
 import { Sport, getEventGameState } from "spamm-aggregator-sdk";
 
 /** Funded pubkey — required as tx fee payer for read-only ix simulations. */
-export const SIM_FEE_PAYER_ADDRESS = address("BqQKZKbnYMpmQEtoCjvaDVTdhfpbaCQuBiSngNKu6YQW");
+export const SIM_FEE_PAYER_ADDRESS = address("YLmoSQiCt8UmM6f29DorWCx2CPqwij5XiFuWt38MnP8");
 
 /** Market operator embedded in `MarketId` (grading authority for dev). */
 export const DEFAULT_MARKET_OPERATOR = address("YLmoSQiCt8UmM6f29DorWCx2CPqwij5XiFuWt38MnP8");

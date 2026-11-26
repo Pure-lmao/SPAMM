@@ -5,8 +5,7 @@ import {
    SPL_TOKEN_PROGRAM_ID,
    SYSTEM_PROGRAM_ID,
 } from "spamm-aggregator-sdk";
-
-const DEVNET_USDC_MINT: Address = address("Gh9ZwEmdLJ8DscKNTkTqPbNwLNNBjuSzaG9Vp2KGtKJr");
+import { MINT } from "../network";
 
 const DEVNET_USDC_AIRDROP_PROGRAM: Address = address("4sN8PnN2ki2W4TFXAfzR645FWs8nimmsYeNtxM8RBK6A");
 
@@ -26,11 +25,11 @@ const ws = (a: Address) => ({ address: a, role: AccountRole.WRITABLE_SIGNER });
  * Account order and `data` match the on-chain program layout.
  */
 export async function buildDevnetUsdcAirdropIx(user: Address): Promise<Instruction> {
-   const userAta = await getAta(user, DEVNET_USDC_MINT);
+   const userAta = await getAta(user, MINT);
    return {
       programAddress: DEVNET_USDC_AIRDROP_PROGRAM,
       accounts: [
-         rw(DEVNET_USDC_MINT),
+         rw(MINT),
          rw(userAta),
          ws(user),
          ws(user),

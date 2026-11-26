@@ -30,3 +30,25 @@ export function formatUsdcBaseUnitsForUi(amountBase: bigint): string {
    const fracStr = frac.toString().padStart(USDC_DECIMALS, "0").replace(/0+$/, "");
    return `${sign}${whole}.${fracStr}`;
 }
+
+/**
+ * Round on-chain USDC base units to `places` decimal places (half away from zero),
+ * then drop trailing zeros (e.g. `146331900` → `146.33`, `99000000` → `99`).
+ */
+export function formatUsdcBaseUnitsRounded(amountBase: bigint, places = 2): string {
+   const sign = amountBase < 0n ? "-" : "";
+   const u = amountBase < 0n ? -amountBase : amountBase;
+   const drop = USDC_DECIMALS - places;
+   const scale = 10n ** BigInt(drop);
+   const roundedUnits = drop === 0 ? u : (u + scale / 2n) / scale;
+   const fracUnit = 10n ** BigInt(places);
+   const whole = places === 0 ? roundedUnits : roundedUnits / fracUnit;
+   if (places === 0) {
+      return `${sign}${whole}`;
+   }
+   const fracStr = (roundedUnits % fracUnit).toString().padStart(places, "0").replace(/0+$/, "");
+   if (fracStr === "") {
+      return `${sign}${whole}`;
+   }
+   return `${sign}${whole}.${fracStr}`;
+}

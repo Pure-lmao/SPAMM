@@ -33,26 +33,6 @@ export const RFQ_NETWORK_MAINNET = 1;
 export const RFQ_NETWORK_DEVNET = 2;
 export const RFQ_NETWORK_LOCAL = 3;
 
-//--------MAINNET CONSTANTS--------
-
-/**
- * Baked into RFQ ed25519 messages (`constants::RFQ_NETWORK_DOMAIN`).
- * Must match the on-chain program build for this cluster.
- */
-// export const RFQ_NETWORK_DOMAIN = RFQ_NETWORK_MAINNET;
-
-// export const MINT_ID: Address = address(
-//    'EPjFWdd5AufqSSqeM2qN1xzybapC8G4wEGGkZwyTDt1v',
-// );
-
-//--------DEVNET CONSTANTS--------
-
-// /**
-//  * Baked into RFQ ed25519 messages (`constants::RFQ_NETWORK_DOMAIN`).
-//  * Must match the on-chain program build for this cluster.
-//  */
-export const RFQ_NETWORK_DOMAIN = RFQ_NETWORK_DEVNET;
-
 /** RFQ signed-message kind byte (after `networkDomain`). See `types.ts` for wire layouts. */
 export const RFQ_BET_MESSAGE_KIND = 1;
 export const RFQ_PARLAY_MESSAGE_KIND = 2;

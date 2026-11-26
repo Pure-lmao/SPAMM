@@ -88,12 +88,7 @@ async function fetchLiveOddsForMarket(
          SIM_FEE_PAYER_ADDRESS,
          mmProgramsForMarket,
       );
-      const returnData = await simulateInstructionReturnData(
-         rpc,
-         quoteIx,
-         SIM_FEE_PAYER_ADDRESS,
-         lifetime,
-      );
+      const returnData = await simulateInstructionReturnData(rpc, quoteIx, SIM_FEE_PAYER_ADDRESS, lifetime);
       if (!returnData || returnData.length === 0) {
          return null;
       }
