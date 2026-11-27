@@ -151,12 +151,13 @@ export function loadSlate(): Promise<UiSport[]> {
 }
 
 /** Download the slate at startup and again every TTL. Browse reads the copy already in memory. */
-export function startSlateRefresh(): void {
+export function startSlateRefresh(after?: () => void): void {
    const run = () => {
       const started = Date.now();
       debug("slate background start");
       void slateCache.refresh(fetchSlate).then(() => {
          debug("slate background done", { ms: Date.now() - started });
+         after?.();
       }).catch((error: unknown) => {
          debug("slate background failed", { ms: Date.now() - started });
          logError(error);

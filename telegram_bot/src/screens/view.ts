@@ -1,4 +1,4 @@
-import { MAX_PARLAY_LEGS, ODDS_SCALE } from "spamm-aggregator-sdk";
+import { BetResult, MAX_PARLAY_LEGS, ODDS_SCALE } from "spamm-aggregator-sdk";
 import { IS_DEVNET } from "../network";
 import { PAGE_SIZE, SOL_FREE_MIN_LAMPORTS, STAKE_PRESETS } from "../constants";
 import { extraCount, mainOutcomes, sectionOutcomes, sectionsFor } from "../markets/board";
@@ -6,34 +6,32 @@ import { legSummary } from "../markets/leg";
 import { findEvent, loadSlate } from "../markets/slate";
 import { matchLabel } from "../markets/search";
 import type { Session } from "../session";
-import { formatDollars, formatOdds, formatUsdc, type OddsFormat } from "../usdc";
+import { formatDollars, formatOdds, formatOddsNumber, formatUsdc, type OddsFormat } from "../usdc";
 import type { Explorer } from "../network";
 import { oddsCoveringStake } from "../betting/quote";
-import { canCashout, canClaim, describeRow, isCashedOut, isPending, rowCashLabel } from "../betting/bets";
+import { canCashout, canClaim, describeRow, isCashedOut, isPending, legsForRow, rowAmount, rowCashLabel, rowPayout, rowResult } from "../betting/bets";
 import { escrowReady, loadEscrow } from "../betting/cashout";
 import { boostLabel, boostedPayout, eligibleBoosts, eligibleFreebets, freebetLabel, loadVouchers } from "../betting/vouchers";
+import { rememberSnap, shareQuery, stableId } from "../group/store";
+import { t } from "../i18n";
 import type { Act } from "./acts";
 import { leagueFlag, sportIcon, withIcon } from "./icons";
 import type { BotWallet } from "../wallet/privy";
 import { readBalances } from "../wallet/balances";
 
-export type View = { title?: string; text: string; rows: { text: string; act: Act }[] };
+export type ViewRow = {
+   text: string;
+   act: Act;
+   share?: string;
+   band?: "stake" | "pager";
+};
 
-function escapeHtml(value: string): string {
-   return value.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
-}
-
-export function renderView(view: View): string {
-   const parts: string[] = [];
-   if (view.title != null && view.title !== "") {
-      parts.push(`<b>${escapeHtml(view.title)}</b>`);
-   }
-   const body = view.text.trim();
-   if (body !== "") {
-      parts.push(escapeHtml(body));
-   }
-   return parts.join("\n\n") || "Menu";
-}
+export type View = {
+   title?: string;
+   text: string;
+   table?: { headers: string[]; rows: string[][] };
+   rows: ViewRow[];
+};
 
 function pageOf<T>(items: readonly T[], page: number): { slice: T[]; page: number; pages: number } {
    const pages = Math.max(1, Math.ceil(items.length / PAGE_SIZE));
@@ -41,13 +39,13 @@ function pageOf<T>(items: readonly T[], page: number): { slice: T[]; page: numbe
    return { slice: items.slice(safe * PAGE_SIZE, safe * PAGE_SIZE + PAGE_SIZE), page: safe, pages };
 }
 
-function pager(page: number, pages: number, make: (page: number) => Act): { text: string; act: Act }[] {
-   const rows: { text: string; act: Act }[] = [];
+function pager(lang: string, page: number, pages: number, make: (page: number) => Act): ViewRow[] {
+   const rows: ViewRow[] = [];
    if (page > 0) {
-      rows.push({ text: "Prev", act: make(page - 1) });
+      rows.push({ text: t(lang, "prev"), act: make(page - 1), band: "pager" });
    }
    if (page + 1 < pages) {
-      rows.push({ text: "Next", act: make(page + 1) });
+      rows.push({ text: t(lang, "next"), act: make(page + 1), band: "pager" });
    }
    return rows;
 }
@@ -56,58 +54,99 @@ function picked(on: boolean, label: string): string {
    return on ? `✅ ${label}` : label;
 }
 
+function shareButton(lang: string, id: string): ViewRow {
+   return { text: t(lang, "share"), act: { t: "menu" }, share: shareQuery(id) };
+}
+
 function settingsView(session: Session, note: string): View {
+   const lang = session.lang;
    const odds: { format: OddsFormat; label: string }[] = [
-      { format: "decimal", label: "Decimal" },
-      { format: "american", label: "American" },
-      { format: "percent", label: "%" },
+      { format: "decimal", label: t(lang, "oddsDecimal") },
+      { format: "american", label: t(lang, "oddsAmerican") },
+      { format: "percent", label: t(lang, "oddsPercent") },
    ];
    const explorers: { explorer: Explorer; label: string }[] = [
-      { explorer: "solscan", label: "Solscan" },
-      { explorer: "solana", label: "explorer.solana.com" },
-      { explorer: "orb", label: "orbmarkets.io" },
+      { explorer: "solscan", label: t(lang, "explorerSolscan") },
+      { explorer: "solana", label: t(lang, "explorerSolana") },
+      { explorer: "orb", label: t(lang, "explorerOrb") },
    ];
    return {
-      title: "Settings",
-      text: `${note}Odds format\nExplorer`.trim(),
+      title: t(lang, "settingsTitle"),
+      text: `${note}${t(lang, "settingsBody")}`.trim(),
       rows: [
-         ...odds.map((item) => ({ text: picked(session.oddsFormat === item.format, `Odds · ${item.label}`), act: { t: "oddsFormat" as const, format: item.format } })),
-         ...explorers.map((item) => ({ text: picked(session.explorer === item.explorer, `Explorer · ${item.label}`), act: { t: "explorer" as const, explorer: item.explorer } })),
-         { text: "↩️ Back", act: { t: "back" } },
+         ...odds.map((item) => ({ text: picked(session.oddsFormat === item.format, item.label), act: { t: "oddsFormat" as const, format: item.format } })),
+         ...explorers.map((item) => ({ text: picked(session.explorer === item.explorer, item.label), act: { t: "explorer" as const, explorer: item.explorer } })),
+         { text: t(lang, "back"), act: { t: "back" } },
       ],
    };
 }
 
-function comboRow(session: Session): { text: string; act: Act }[] {
+function comboRow(session: Session): ViewRow[] {
    if (session.combo.length === 0) {
       return [];
    }
-   return [{ text: `Combo (${session.combo.length})`, act: { t: "combo" } }];
+   return [{ text: t(session.lang, "combo", { count: session.combo.length }), act: { t: "combo" } }];
 }
 
 export async function buildView(session: Session, wallet: BotWallet): Promise<View> {
+   const lang = session.lang;
    const note = session.notice == null ? "" : `${session.notice}\n\n`;
    if (session.phase === "search") {
       return {
-         title: "Search",
-         text: "Send a team name.",
-         rows: [{ text: "↩️ Back", act: { t: "menu" } }],
+         title: t(lang, "searchTitle"),
+         text: t(lang, "searchPrompt"),
+         rows: [{ text: t(lang, "menu"), act: { t: "menu" } }],
       };
    }
    const nav = session.nav;
+   if (nav.name === "help") {
+      return {
+         title: t(lang, "help"),
+         text: t(lang, "helpBody"),
+         rows: [{ text: t(lang, "menu"), act: { t: "menu" } }],
+      };
+   }
+   if (nav.name === "alts") {
+      return {
+         title: t(lang, "other"),
+         text: note.trim(),
+         rows: [
+            ...session.altLegs.map((leg, index) => ({
+               text: (leg.displayedDecimalOdds == null
+                  ? leg.outcomeLabel
+                  : `${leg.outcomeLabel} · ${formatOddsNumber(leg.displayedDecimalOdds, session.oddsFormat)}`).slice(0, 60),
+               act: { t: "alt" as const, index },
+            })),
+            { text: t(lang, "back"), act: { t: "back" } },
+         ],
+      };
+   }
+   if (nav.name === "events") {
+      return {
+         title: t(lang, "moreMarkets"),
+         text: note.trim(),
+         rows: [
+            ...session.eventLegs.map((leg, index) => ({ text: leg.eventTitle.slice(0, 60), act: { t: "eventMarkets" as const, index } })),
+            { text: t(lang, "back"), act: { t: "back" } },
+         ],
+      };
+   }
    if (nav.name === "menu") {
       const rows: View["rows"] = [
-         { text: "👁️ Browse", act: { t: "sports", page: 0 } },
-         { text: "🔍 Search", act: { t: "search" } },
+         { text: t(lang, "browse"), act: { t: "sports", page: 0 } },
+         { text: t(lang, "search"), act: { t: "search" } },
          ...comboRow(session),
-         { text: "📖 Open bets", act: { t: "bets", tab: "pending", page: 0 } },
-         { text: "📕 History", act: { t: "history" } },
-         { text: "💸 Claim", act: { t: "claim" } },
-         { text: "💵 Balance", act: { t: "balance" } },
-         { text: "💰 Deposit", act: { t: "deposit" } },
-         { text: "🤑 Withdraw", act: { t: "withdraw" } },
-         { text: "⚙️ Settings", act: { t: "settings" } },
+         { text: t(lang, "openBets"), act: { t: "bets", tab: "pending", page: 0 } },
+         { text: t(lang, "history"), act: { t: "history" } },
+         { text: t(lang, "claim"), act: { t: "claim" } },
+         { text: t(lang, "balance"), act: { t: "balance" } },
+         { text: t(lang, "deposit"), act: { t: "deposit" } },
+         { text: t(lang, "withdraw"), act: { t: "withdraw" } },
+         { text: t(lang, "settings"), act: { t: "settings" } },
       ];
+      if (session.heading != null && session.shareToken != null) {
+         rows.unshift(shareButton(lang, session.shareToken));
+      }
       const titled = session.heading != null;
       return { title: session.heading ?? undefined, text: titled ? (session.notice ?? "") : note.trim(), rows };
    }
@@ -135,50 +174,51 @@ export async function buildView(session: Session, wallet: BotWallet): Promise<Vi
    if (nav.name === "cashout") {
       const cash = session.cash;
       const prompt = session.phase === "cashAmount" && cash != null
-         ? `Send an amount above $0 and below ${formatDollars(cash.stake)}.`
+         ? t(lang, "cashPrompt", { amount: formatDollars(cash.stake) })
          : "";
       const text = cash == null
-         ? `${note}No cashout quote.`
-         : `${note}Cash out amount ${formatDollars(cash.amount)}\nReturn amount ${formatDollars(cash.maxPayment)}${prompt === "" ? "" : `\n\n${prompt}`}`.trim();
+         ? `${note}${t(lang, "noCashQuote")}`
+         : `${note}${t(lang, "cashAmount", { amount: formatDollars(cash.amount) })}\n${t(lang, "cashReturn", { amount: formatDollars(cash.maxPayment) })}${prompt === "" ? "" : `\n\n${prompt}`}`.trim();
       return {
-         title: "Cash out",
+         title: t(lang, "cashout"),
          text,
          rows: [
             ...(cash == null ? [] : [
-               { text: "✅ Confirm cashout", act: { t: "cashOk" } as Act },
-               { text: "Change amount", act: { t: "cashEdit" } as Act },
+               { text: t(lang, "cashOk"), act: { t: "cashOk" } as Act },
+               { text: t(lang, "cashEdit"), act: { t: "cashEdit" } as Act },
             ]),
-            { text: "↩️ Back", act: { t: "bets", tab: "pending", page: 0 } },
+            { text: t(lang, "back"), act: { t: "bets", tab: "pending", page: 0 } },
          ],
       };
    }
    if (nav.name === "settings") {
       return settingsView(session, note);
    }
-   const dest = session.withdrawDest === "" ? "Send a destination address." : `To ${session.withdrawDest}`;
-   const amt = session.withdrawAmount == null ? "" : `\nAmount ${formatUsdc(session.withdrawAmount)} USDC`;
+   const dest = session.withdrawDest === "" ? t(lang, "withdrawDest") : t(lang, "withdrawTo", { address: session.withdrawDest });
+   const amt = session.withdrawAmount == null ? "" : `\n${t(lang, "withdrawAmount", { amount: formatUsdc(session.withdrawAmount) })}`;
    return {
-      title: "Withdraw",
+      title: t(lang, "withdrawTitle"),
       text: `${note}${dest}${amt}`.trim(),
       rows: [
-         ...(session.withdrawAmount != null ? [{ text: "✅ Confirm withdraw", act: { t: "withdrawOk" } as Act }] : []),
-         { text: "🗒️ Menu", act: { t: "menu" } },
+         ...(session.withdrawAmount != null ? [{ text: t(lang, "withdrawOk"), act: { t: "withdrawOk" } as Act }] : []),
+         { text: t(lang, "menu"), act: { t: "menu" } },
       ],
    };
 }
 
 async function browse(session: Session, note: string): Promise<View> {
+   const lang = session.lang;
    const tree = await loadSlate();
    const nav = session.nav;
-   const back: View["rows"] = [{ text: "🗒️ Menu", act: { t: "menu" } }];
+   const back: View["rows"] = [{ text: t(lang, "menu"), act: { t: "menu" } }];
    if (nav.name === "sports") {
       const { slice, page, pages } = pageOf(tree, nav.page);
       return {
-         title: "Sports",
+         title: t(lang, "sports"),
          text: note.trim(),
          rows: [
             ...slice.map((sport) => ({ text: withIcon(sportIcon(`${sport.name} ${sport.sport}`), sport.name), act: { t: "leagues" as const, sportId: sport.id, page: 0 } })),
-            ...pager(page, pages, (next) => ({ t: "sports", page: next })),
+            ...pager(lang, page, pages, (next) => ({ t: "sports", page: next })),
             ...comboRow(session),
             ...back,
          ],
@@ -193,9 +233,9 @@ async function browse(session: Session, note: string): Promise<View> {
          text: note.trim(),
          rows: [
             ...slice.map((league) => ({ text: withIcon(leagueFlag(league.name), league.name), act: { t: "games" as const, sportId: nav.sportId, leagueId: league.id, page: 0 } })),
-            ...pager(page, pages, (next) => ({ t: "leagues", sportId: nav.sportId, page: next })),
+            ...pager(lang, page, pages, (next) => ({ t: "leagues", sportId: nav.sportId, page: next })),
             ...comboRow(session),
-            { text: "↩️ Back", act: { t: "sports", page: 0 } },
+            { text: t(lang, "back"), act: { t: "sports", page: 0 } },
          ],
       };
    }
@@ -209,21 +249,21 @@ async function browse(session: Session, note: string): Promise<View> {
          text: note.trim(),
          rows: [
             ...slice.map((ev) => ({ text: matchLabel(ev), act: { t: "game" as const, sportId: nav.sportId, leagueId: nav.leagueId, eventId: ev.id } })),
-            ...pager(page, pages, (next) => ({ t: "games", sportId: nav.sportId, leagueId: nav.leagueId, page: next })),
+            ...pager(lang, page, pages, (next) => ({ t: "games", sportId: nav.sportId, leagueId: nav.leagueId, page: next })),
             ...comboRow(session),
-            { text: "↩️ Back", act: { t: "leagues", sportId: nav.sportId, page: 0 } },
+            { text: t(lang, "back"), act: { t: "leagues", sportId: nav.sportId, page: 0 } },
          ],
       };
    }
    if (nav.name === "search") {
       const { slice, page, pages } = pageOf(session.hits, nav.page);
       return {
-         title: "Search",
-         text: session.hits.length === 0 ? `${note}No games matched. Try another name.`.trim() : note.trim(),
+         title: t(lang, "searchTitle"),
+         text: session.hits.length === 0 ? `${note}${t(lang, "searchEmpty")}`.trim() : note.trim(),
          rows: [
             ...slice.map((hit) => ({ text: withIcon(sportIcon(hit.sportName), hit.label), act: { t: "game" as const, sportId: hit.sportId, leagueId: hit.leagueId, eventId: hit.eventId } })),
-            ...pager(page, pages, (next) => ({ t: "searchPage", page: next })),
-            { text: "🔍 Search again", act: { t: "search" } },
+            ...pager(lang, page, pages, (next) => ({ t: "searchPage", page: next })),
+            { text: t(lang, "searchAgain"), act: { t: "search" } },
             ...back,
          ],
       };
@@ -232,19 +272,19 @@ async function browse(session: Session, note: string): Promise<View> {
       ? findEvent(tree, nav.sportId, nav.leagueId, nav.eventId)
       : null;
    if (found == null || (nav.name !== "game" && nav.name !== "sections" && nav.name !== "section")) {
-      return { text: `${note}That game is no longer on the slate.`, rows: back };
+      return { text: `${note}${t(lang, "slateEmpty")}`, rows: back };
    }
    if (nav.name === "game") {
       const outcomes = mainOutcomes(found.event, session.oddsFormat);
       const extra = extraCount(found.event);
       return {
          title: matchLabel(found.event),
-         text: `${note}${withIcon(leagueFlag(found.leagueName), found.leagueName)}\nEnter stake to get latest odds.`.trim(),
+         text: `${note}${withIcon(leagueFlag(found.leagueName), found.leagueName)}\n${t(lang, "stakeHint")}`.trim(),
          rows: [
             ...outcomes.map((item, index) => ({ text: item.text, act: { t: "focus" as const, index } })),
-            ...(extra > 0 ? [{ text: `More markets (${extra})`, act: { t: "sections" as const, sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, page: 0 } }] : []),
+            ...(extra > 0 ? [{ text: t(lang, "moreMarketsCount", { count: extra }), act: { t: "sections" as const, sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, page: 0 } }] : []),
             ...comboRow(session),
-            { text: "↩️ Back", act: { t: "games", sportId: nav.sportId, leagueId: nav.leagueId, page: 0 } },
+            { text: t(lang, "back"), act: { t: "games", sportId: nav.sportId, leagueId: nav.leagueId, page: 0 } },
          ],
       };
    }
@@ -253,15 +293,15 @@ async function browse(session: Session, note: string): Promise<View> {
       const { slice, page, pages } = pageOf(sections, nav.page);
       return {
          title: matchLabel(found.event),
-         text: `${note}More markets`.trim(),
+         text: `${note}${t(lang, "moreMarkets")}`.trim(),
          rows: [
             ...slice.map((section, index) => ({
                text: section.title,
                act: { t: "section" as const, sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, section: page * PAGE_SIZE + index, page: 0 },
             })),
-            ...pager(page, pages, (next) => ({ t: "sections", sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, page: next })),
+            ...pager(lang, page, pages, (next) => ({ t: "sections", sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, page: next })),
             ...comboRow(session),
-            { text: "↩️ Back", act: { t: "game", sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId } },
+            { text: t(lang, "back"), act: { t: "game", sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId } },
          ],
       };
    }
@@ -272,64 +312,66 @@ async function browse(session: Session, note: string): Promise<View> {
       text: `${note}${section?.title ?? "Market"}`,
       rows: [
          ...slice.map((item, index) => ({ text: item.text, act: { t: "focus" as const, index: page * PAGE_SIZE + index } })),
-         ...pager(page, pages, (next) => ({ t: "section", sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, section: nav.section, page: next })),
+         ...pager(lang, page, pages, (next) => ({ t: "section", sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, section: nav.section, page: next })),
          ...comboRow(session),
-         { text: "↩️ Back", act: { t: "sections", sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, page: 0 } },
+         { text: t(lang, "back"), act: { t: "sections", sportId: nav.sportId, leagueId: nav.leagueId, eventId: nav.eventId, page: 0 } },
       ],
    };
 }
 
 function outcomeView(session: Session, note: string): View {
+   const lang = session.lang;
    const leg = session.focus;
    if (leg == null) {
-      return { text: `${note}Pick a price first.`, rows: [{ text: "🗒️ Menu", act: { t: "menu" } }] };
+      return { text: `${note}${t(lang, "pickPrice")}`, rows: [{ text: t(lang, "menu"), act: { t: "menu" } }] };
    }
    const inCombo = session.combo.some((item) => item.id === leg.id);
    const rows: View["rows"] = [
-      { text: "Place bet", act: { t: "place" } },
+      { text: t(lang, "place"), act: { t: "place" } },
    ];
    if (inCombo) {
-      rows.push({ text: "🗑️ Remove from combo", act: { t: "unfocus" } });
+      rows.push({ text: t(lang, "removeCombo"), act: { t: "unfocus" } });
    } else {
-      rows.push({ text: "Add to combo", act: { t: "add" } });
+      rows.push({ text: t(lang, "addCombo"), act: { t: "add" } });
    }
    if (session.combo.some((item) => item.id !== leg.id)) {
-      rows.push({ text: "Add and bet combo", act: { t: "addbet" } });
+      rows.push({ text: t(lang, "addBet"), act: { t: "addbet" } });
    }
-   rows.push({ text: "↩️ Back", act: { t: "back" } });
+   rows.push({ text: t(lang, "back"), act: { t: "back" } });
    return { text: `${note}${legSummary(leg, session.oddsFormat)}`, rows };
 }
 
 function comboView(session: Session, note: string): View {
+   const lang = session.lang;
    const rows: View["rows"] = [
-      { text: "Add more", act: { t: "addMore" } },
+      { text: t(lang, "addMore"), act: { t: "addMore" } },
    ];
    session.combo.forEach((leg, index) => {
-      rows.push({ text: `🗑️ Remove ${leg.outcomeLabel}`.slice(0, 60), act: { t: "drop", index } });
+      rows.push({ text: t(lang, "remove", { label: leg.outcomeLabel }).slice(0, 60), act: { t: "drop", index } });
    });
    if (session.combo.length >= 2) {
-      rows.push({ text: "Bet combo", act: { t: "betCombo" } });
+      rows.push({ text: t(lang, "betCombo"), act: { t: "betCombo" } });
    }
    if (session.combo.length > 0) {
-      rows.push({ text: "🚫 Clear", act: { t: "clearCombo" } });
+      rows.push({ text: t(lang, "clear"), act: { t: "clearCombo" } });
    }
    const body = session.combo.length === 0
-      ? "Combo is empty."
+      ? t(lang, "comboEmpty")
       : session.combo.map((leg, index) => `${index + 1}. ${leg.eventTitle} — ${leg.outcomeLabel}`).join("\n");
-   return { title: `Combo (${session.combo.length})`, text: `${note}${body}`.trim(), rows };
+   return { title: t(lang, "comboTitle", { count: session.combo.length }), text: `${note}${body}`.trim(), rows };
 }
 
 async function slipView(session: Session, wallet: BotWallet, note: string): Promise<View> {
+   const lang = session.lang;
    const slip = session.slip;
    if (slip == null) {
-      return { text: `${note}No slip.`, rows: [{ text: "🗒️ Menu", act: { t: "menu" } }] };
+      return { text: `${note}${t(lang, "noSlip")}`, rows: [{ text: t(lang, "menu"), act: { t: "menu" } }] };
    }
    const rfqOnly = slip.legs.length > MAX_PARLAY_LEGS;
    const vouchers = await loadVouchers(wallet.address);
    const quoted = slip.quote?.topMms;
    const freebets = eligibleFreebets(vouchers.freebets, slip.legs, quoted);
    const boosts = eligibleBoosts(vouchers.boosts, slip.legs, quoted);
-   const lines = slip.legs.map((leg, index) => `${index + 1}. ${leg.outcomeLabel} (${leg.eventTitle})`);
    const price = slip.stake != null && slip.quote != null ? oddsCoveringStake(slip.quote.topMms, slip.stake) : null;
    const covered = slip.quote == null ? 0n : slip.quote.topMms.reduce((sum, row) => sum + row.maxAmount, 0n);
    const payout = price == null || slip.stake == null ? null : (slip.stake * price) / ODDS_SCALE;
@@ -339,19 +381,28 @@ async function slipView(session: Session, wallet: BotWallet, note: string): Prom
    const shownPayout = payout == null || slip.stake == null
       ? null
       : boost == null ? payout : boostedPayout(payout, slip.stake, boost.data.boostBps);
-   const priceLine = price == null ? "" : `\nQuote ${formatOdds(price, session.oddsFormat)}`;
-   const payoutLine = shownPayout == null ? "" : `\nPayout ${formatDollars(shownPayout)}`;
-   const coverLine = price != null && slip.stake != null && covered < slip.stake
-      ? `\nBook covers ${formatDollars(covered)}`
-      : "";
-   const stakeLine = slip.stake == null ? "\nEnter a stake." : `\nStake ${formatDollars(slip.stake)}`;
+   const lines = [
+      slip.stake == null ? t(lang, "enterStake") : t(lang, "stake", { amount: formatDollars(slip.stake) }),
+   ];
+   if (price != null) {
+      lines.push(t(lang, "quote", { odds: formatOdds(price, session.oddsFormat) }));
+   }
+   if (shownPayout != null) {
+      lines.push(t(lang, "payout", { amount: formatDollars(shownPayout) }));
+   }
+   if (price != null && slip.stake != null && covered < slip.stake) {
+      lines.push(t(lang, "covers", { amount: formatDollars(covered) }));
+   }
    const err = slip.quoteError ?? slip.rfqError;
-   const rows: View["rows"] = slip.legs.map((leg, index) => ({ text: `🗑️ Remove ${leg.outcomeLabel}`.slice(0, 60), act: { t: "drop", index } }));
+   if (err != null) {
+      lines.push(err);
+   }
+   const rows: View["rows"] = slip.legs.map((leg, index) => ({ text: t(lang, "remove", { label: leg.outcomeLabel }).slice(0, 60), act: { t: "drop" as const, index } }));
    if (slip.stake == null) {
       for (const preset of STAKE_PRESETS) {
-         rows.push({ text: `$${preset}`, act: { t: "stake", amount: String(preset) } });
+         rows.push({ text: `$${preset}`, act: { t: "stake", amount: String(preset) }, band: "stake" });
       }
-      rows.push({ text: "Or type stake", act: { t: "stakeType" } });
+      rows.push({ text: t(lang, "typeStake"), act: { t: "stakeType" } });
    } else if (session.nav.name === "rfq") {
       slip.rfqQuotes.forEach((quote, index) => {
          const left = Math.max(0, quote.offerExpiry - Math.floor(Date.now() / 1000));
@@ -360,33 +411,44 @@ async function slipView(session: Session, wallet: BotWallet, note: string): Prom
             act: { t: "rfqPick", index },
          });
       });
-      rows.push({ text: "Request again", act: { t: "rfq" } });
+      rows.push({ text: t(lang, "requestAgain"), act: { t: "rfq" } });
    } else {
       if (price != null) {
-         rows.push({ text: "✅ Confirm", act: { t: "confirm" } });
-         rows.push({ text: "Set min odds", act: { t: "min" } });
+         rows.push({ text: t(lang, "confirm"), act: { t: "confirm" } });
+         rows.push({ text: t(lang, "minOdds"), act: { t: "min" } });
       }
       if (slip.voucherKind !== "freebet") {
-         rows.push({ text: "Change stake", act: { t: "stakeType" } });
+         rows.push({ text: t(lang, "changeStake"), act: { t: "stakeType" } });
       }
-      rows.push({ text: rfqOnly || price == null ? "Request RFQ" : "Request offchain quotes", act: { t: "rfq" } });
+      rows.push({ text: rfqOnly || price == null ? t(lang, "requestRfq") : t(lang, "requestOffchain"), act: { t: "rfq" } });
    }
    if (freebets.length > 0) {
-      rows.push({ text: `Use freebet ${freebetLabel(freebets[0]!)}`.slice(0, 60), act: { t: "freebet" } });
+      rows.push({ text: t(lang, "useFreebet", { label: freebetLabel(freebets[0]!) }).slice(0, 60), act: { t: "freebet" } });
    }
    if (boosts.length > 0) {
-      rows.push({ text: `Use boost ${boostLabel(boosts[0]!)}`.slice(0, 60), act: { t: "boost" } });
+      rows.push({ text: t(lang, "useBoost", { label: boostLabel(boosts[0]!) }).slice(0, 60), act: { t: "boost" } });
    }
    if (slip.voucherKind != null) {
-      rows.push({ text: "Cash stake", act: { t: "noVoucher" } });
+      rows.push({ text: t(lang, "cashStake"), act: { t: "noVoucher" } });
    }
-   rows.push({ text: "↩️ Back", act: { t: "back" } });
-   const head = rfqOnly ? `On-chain quotes stop at ${MAX_PARLAY_LEGS} legs.\n` : "";
-   const errLine = err == null ? "" : `\n${err}`;
-   return { title: "Bet Slip", text: `${note}${head}${lines.join("\n")}${stakeLine}${priceLine}${payoutLine}${coverLine}${errLine}`.trim(), rows };
+   rows.push({ text: t(lang, "back"), act: { t: "back" } });
+   const head = rfqOnly ? `${t(lang, "rfqCap", { count: MAX_PARLAY_LEGS })}\n` : "";
+   return {
+      title: t(lang, "slip"),
+      table: {
+         headers: [t(lang, "leg"), t(lang, "price")],
+         rows: slip.legs.map((leg) => [
+            leg.outcomeLabel,
+            leg.displayedDecimalOdds == null ? "—" : formatOddsNumber(leg.displayedDecimalOdds, session.oddsFormat),
+         ]),
+      },
+      text: `${note}${head}${lines.join("\n")}`.trim(),
+      rows,
+   };
 }
 
 async function betsView(session: Session, wallet: BotWallet, note: string): Promise<View> {
+   const lang = session.lang;
    const nav = session.nav;
    if (nav.name !== "bets") {
       return { text: note, rows: [] };
@@ -395,75 +457,129 @@ async function betsView(session: Session, wallet: BotWallet, note: string): Prom
       .map((row, index) => ({ row, index }))
       .filter((item) => nav.tab === "pending" ? isPending(item.row) || isCashedOut(item.row) : canClaim(item.row));
    const { slice, page, pages } = pageOf(indexed, nav.page);
-   const blocks: string[] = [];
+   const tableRows: string[][] = [];
    const buttons: View["rows"] = [
-      { text: nav.tab === "pending" ? "See graded bets" : "See open bets", act: { t: "bets", tab: nav.tab === "pending" ? "graded" : "pending", page: 0 } },
+      { text: nav.tab === "pending" ? t(lang, "seeGraded") : t(lang, "seeOpen"), act: { t: "bets", tab: nav.tab === "pending" ? "graded" : "pending", page: 0 } },
    ];
    if (nav.tab === "graded" && indexed.length > 0) {
-      buttons.push({ text: "Claim all", act: { t: "claim" } });
+      buttons.push({ text: t(lang, "claimAll"), act: { t: "claim" } });
    }
    for (let i = 0; i < slice.length; i++) {
       const item = slice[i]!;
       const n = page * PAGE_SIZE + i + 1;
-      blocks.push(`${n}. ${await describeRow(item.row, session.oddsFormat)}`);
+      const described = (await describeRow(item.row, session.oddsFormat)).replace(/\n/g, " · ");
+      tableRows.push([String(n), described]);
+      const legs = await legsForRow(item.row);
+      const pending = isPending(item.row);
+      const result = BetResult[rowResult(item.row)] ?? String(rowResult(item.row));
+      const id = stableId(`bet:${item.row.address}`);
+      rememberSnap({
+         id,
+         ownerId: session.userId,
+         ownerName: session.userName,
+         legs,
+         stake: rowAmount(item.row).toString(),
+         payout: rowPayout(item.row).toString(),
+         result: pending ? "Pending" : result,
+         betAddress: item.row.address,
+         kind: "ticket",
+      });
+      buttons.push({ text: `${t(lang, "share")} ${n}`, act: { t: "menu" }, share: shareQuery(id) });
       if (nav.tab === "pending" && canCashout(item.row)) {
-         buttons.push({ text: `Cash Out Bet ${n}`, act: { t: "cash", index: item.index } });
+         buttons.push({ text: t(lang, "cashOut", { n }), act: { t: "cash", index: item.index } });
       }
       if (nav.tab === "pending" && isCashedOut(item.row)) {
          const betId = item.row.kind === "single" ? item.row.data.betId : item.row.account.betId;
          const escrow = await loadEscrow(wallet.address, betId);
          if (escrow != null && escrowReady(escrow)) {
-            buttons.push({ text: `Claim cashout ${await rowCashLabel(item.row)}`.slice(0, 60), act: { t: "escrow", index: item.index } });
+            buttons.push({ text: t(lang, "claimCashout", { label: await rowCashLabel(item.row) }).slice(0, 60), act: { t: "escrow", index: item.index } });
          }
       }
    }
    return {
-      title: nav.tab === "pending" ? "Open bets" : "Graded",
-      text: `${note}${blocks.join("\n\n") || "None."}`.trim(),
+      title: nav.tab === "pending" ? t(lang, "openBets") : t(lang, "graded"),
+      text: `${note}${tableRows.length === 0 ? t(lang, "none") : ""}`.trim(),
+      table: tableRows.length === 0 ? undefined : { headers: ["#", t(lang, "ticket")], rows: tableRows },
       rows: [
          ...buttons,
-         ...pager(page, pages, (next) => ({ t: "bets", tab: nav.tab, page: next })),
-         { text: "Refresh", act: { t: "bets", tab: nav.tab, page } },
-         { text: "🗒️ Menu", act: { t: "menu" } },
+         ...pager(lang, page, pages, (next) => ({ t: "bets", tab: nav.tab, page: next })),
+         { text: t(lang, "refresh"), act: { t: "bets", tab: nav.tab, page } },
+         { text: t(lang, "menu"), act: { t: "menu" } },
       ],
    };
 }
 
 function historyView(session: Session, note: string): View {
-   const body = session.historyRows.length === 0
-      ? "No claimed bets."
-      : session.historyRows.map((row) => `${row.title}\n${row.detail}\n${row.stake} → ${row.payout}`).join("\n\n");
+   const lang = session.lang;
+   const rows: View["rows"] = [];
+   const tableRows: string[][] = [];
+   session.historyRows.forEach((row, index) => {
+      tableRows.push([row.title, `${row.detail} · ${row.stake} → ${row.payout}`]);
+      if (row.legs.length === 0) {
+         return;
+      }
+      const id = stableId(`hist:${row.recordId ?? `${index}:${row.title}:${row.stake}`}`);
+      const pending = row.result === "Pending";
+      rememberSnap({
+         id,
+         ownerId: session.userId,
+         ownerName: session.userName,
+         legs: row.legs,
+         stake: row.stakeRaw,
+         payout: row.payoutRaw,
+         result: pending ? "Pending" : row.result,
+         betAddress: row.recordId,
+         kind: "ticket",
+      });
+      rows.push({ text: `${t(lang, "share")} ${index + 1}`, act: { t: "menu" }, share: shareQuery(id) });
+   });
    return {
-      title: "History",
-      text: `${note}${body}`.trim(),
+      title: t(lang, "history"),
+      text: `${note}${tableRows.length === 0 ? t(lang, "noHistory") : ""}`.trim(),
+      table: tableRows.length === 0 ? undefined : { headers: [t(lang, "pick"), t(lang, "ticket")], rows: tableRows },
       rows: [
-         ...(session.historyNext == null ? [] : [{ text: "Older", act: { t: "older" } as Act }]),
-         { text: "🗒️ Menu", act: { t: "menu" } },
+         ...rows,
+         ...(session.historyNext == null ? [] : [{ text: t(lang, "older"), act: { t: "older" } as Act }]),
+         { text: t(lang, "menu"), act: { t: "menu" } },
       ],
    };
 }
 
-function walletLines(sol: bigint, usdc: bigint, address: string): string {
-   const solText = `SOL ${(Number(sol) / 1e9).toFixed(4)}`;
-   const sponsored = sol < SOL_FREE_MIN_LAMPORTS ? `${solText} · transaction sponsorship active` : solText;
-   return `${sponsored}\nUSDC ${formatUsdc(usdc)}\n${address}`;
+function walletTable(lang: string, sol: bigint, usdc: bigint, address: string): NonNullable<View["table"]> {
+   const solText = (Number(sol) / 1e9).toFixed(4);
+   return {
+      headers: [t(lang, "field"), t(lang, "value")],
+      rows: [
+         [t(lang, "sol"), solText],
+         [t(lang, "usdc"), formatUsdc(usdc)],
+         [t(lang, "address"), address],
+      ],
+   };
 }
 
 async function walletView(session: Session, wallet: BotWallet, note: string): Promise<View> {
+   const lang = session.lang;
    const bal = await readBalances(wallet.address);
-   const lines = walletLines(bal.sol, bal.usdc, wallet.address);
+   const table = walletTable(lang, bal.sol, bal.usdc, wallet.address);
+   const sponsored = bal.sol < SOL_FREE_MIN_LAMPORTS
+      ? t(lang, "sponsored", { sol: `${t(lang, "sol")} ${(Number(bal.sol) / 1e9).toFixed(4)}` })
+      : "";
    const cluster = IS_DEVNET ? "devnet" : "mainnet";
    if (session.nav.name === "deposit") {
       return {
-         title: "Deposit",
-         text: `${note}Send only USDC on Solana ${cluster}.\n${lines}`.trim(),
+         title: t(lang, "deposit"),
+         text: `${note}${t(lang, "depositHint", { cluster })}${sponsored === "" ? "" : `\n${sponsored}`}`.trim(),
+         table,
          rows: [
-            ...(IS_DEVNET ? [{ text: "Get test USDC", act: { t: "airdrop" } as Act }] : []),
-            { text: "🗒️ Menu", act: { t: "menu" } },
+            ...(IS_DEVNET ? [{ text: t(lang, "testUsdc"), act: { t: "airdrop" } as Act }] : []),
+            { text: t(lang, "menu"), act: { t: "menu" } },
          ],
       };
    }
-   return { title: "Balance", text: `${note}${lines}`.trim(), rows: [{ text: "🗒️ Menu", act: { t: "menu" } }] };
+   return {
+      title: t(lang, "balance"),
+      text: `${note}${sponsored}`.trim(),
+      table,
+      rows: [{ text: t(lang, "menu"), act: { t: "menu" } }],
+   };
 }
-
-export { historyView };

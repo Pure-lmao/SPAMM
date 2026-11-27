@@ -104,6 +104,11 @@ function buttonsFor(event: UiEvent, market: UiMarket, column: BetColumn, format:
    return out;
 }
 
+export function primaryOutcomes(event: UiEvent, format: OddsFormat = "decimal"): OutcomeButton[] {
+   const main = pickMain(event.markets ?? [], event.sport_id);
+   return main == null ? [] : buttonsFor(event, main, "main", format);
+}
+
 export function mainOutcomes(event: UiEvent, format: OddsFormat = "decimal"): OutcomeButton[] {
    const markets = event.markets ?? [];
    const main = pickMain(markets, event.sport_id);
@@ -163,6 +168,16 @@ export function sectionsFor(event: UiEvent): MarketSection[] {
    }
    sections.sort((a, b) => a.title.localeCompare(b.title));
    return sections;
+}
+
+export function outcomesForMarket(event: UiEvent, market: UiMarket, format: OddsFormat = "decimal"): OutcomeButton[] {
+   const name = family(market, event);
+   const column: BetColumn = name === "spread" || name === "asian"
+      ? "spread"
+      : name === "total" || name === "homeTotal" || name === "awayTotal"
+         ? "total"
+         : columnFor(market);
+   return buttonsFor(event, market, column, format);
 }
 
 export function sectionOutcomes(event: UiEvent, rows: readonly UiMarket[], format: OddsFormat = "decimal"): OutcomeButton[] {

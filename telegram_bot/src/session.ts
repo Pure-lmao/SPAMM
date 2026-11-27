@@ -28,7 +28,10 @@ export type Nav =
    | { name: "search"; page: number }
    | { name: "cashout" }
    | { name: "withdraw" }
-   | { name: "settings" };
+   | { name: "settings" }
+   | { name: "help" }
+   | { name: "alts" }
+   | { name: "events" };
 
 export type Phase = "idle" | "search" | "stake" | "minOdds" | "withdrawAddress" | "withdrawAmount" | "cashAmount";
 
@@ -59,7 +62,16 @@ export type CashQuote = {
    rfq: boolean;
 };
 
+export type Surface = "dm" | "group";
+
+export type EphemeralPanel = { chatId: number; id: number };
+
 export type Session = {
+   userId: number;
+   userName: string;
+   lang: string;
+   surface: Surface;
+   canPost: boolean;
    nav: Nav;
    /** Screens under the current one. Back pops this. */
    trail: Nav[];
@@ -74,6 +86,10 @@ export type Session = {
    buttons: Btn[];
    acts: Act[];
    anchorId: number | null;
+   ephemeral: EphemeralPanel | null;
+   shareToken: string | null;
+   altLegs: Leg[];
+   eventLegs: Leg[];
    busy: boolean;
    notice: string | null;
    hits: SearchHit[];
@@ -106,6 +122,11 @@ export function emptySlip(legs: Leg[], fromCombo: boolean): SlipState {
 
 export function freshSession(): Session {
    return {
+      userId: 0,
+      userName: "",
+      lang: "en",
+      surface: "dm",
+      canPost: false,
       nav: { name: "menu" },
       trail: [],
       pickFrom: null,
@@ -117,6 +138,10 @@ export function freshSession(): Session {
       buttons: [],
       acts: [],
       anchorId: null,
+      ephemeral: null,
+      shareToken: null,
+      altLegs: [],
+      eventLegs: [],
       busy: false,
       notice: null,
       hits: [],
@@ -137,9 +162,11 @@ const sessions = new Map<number, Session>();
 export function sessionFor(userId: number): Session {
    const existing = sessions.get(userId);
    if (existing != null) {
+      existing.userId = userId;
       return existing;
    }
    const created = freshSession();
+   created.userId = userId;
    sessions.set(userId, created);
    return created;
 }

@@ -1,7 +1,7 @@
 import { address } from "@solana/kit";
 import { LIVE_CASHOUT_DELAY, MAX_PARLAY_LEGS } from "spamm-aggregator-sdk";
 import { txUrl } from "../network";
-import { claimGraded, describeRow, fetchHistory, fetchOpenBets, rowAmount } from "../betting/bets";
+import { claimGraded, describeRow, fetchHistory, fetchOpenBets, rowAmount, rowPayout } from "../betting/bets";
 import { cashoutUsesRfq, claimEscrow, escrowReady, fillCashout, fillRfqCashout, loadEscrow, quoteCashout } from "../betting/cashout";
 import { placeAuction, placeRfq, type VoucherPick } from "../betting/place";
 import { eligibleBoosts, eligibleFreebets, filterQuotes, loadVouchers, voucherReason, type SlipBoost, type SlipFreebet } from "../betting/vouchers";
@@ -14,7 +14,9 @@ import { parlayLeg, type Leg } from "../markets/leg";
 import { searchEvents } from "../markets/search";
 import { findEvent, loadSlate } from "../markets/slate";
 import { addComboLeg, emptySlip, go, popNav, type Session } from "../session";
-import { formatDollars, oddsFromDecimal, parseUsdc } from "../usdc";
+import { openEventMarkets } from "../group/cards";
+import { rememberSnap, stableId } from "../group/store";
+import { formatDollars, parseOddsToScaled, parseUsdc, type OddsFormat } from "../usdc";
 import { airdropDevnetUsdc, readBalances, withdrawUsdc } from "../wallet/balances";
 import type { BotWallet } from "../wallet/privy";
 import type { Act } from "./acts";
@@ -276,6 +278,28 @@ export async function applyAct(session: Session, wallet: BotWallet, act: Act): P
       go(session, { name: "settings" });
       return;
    }
+   if (act.t === "help") {
+      go(session, { name: "help" });
+      return;
+   }
+   if (act.t === "alt") {
+      const leg = session.altLegs[act.index];
+      if (leg == null) {
+         session.notice = "That price is gone. Open the game again.";
+         return;
+      }
+      openSlip(session, [leg], false);
+      return;
+   }
+   if (act.t === "eventMarkets") {
+      const leg = session.eventLegs[act.index];
+      if (leg == null) {
+         session.notice = "That game is no longer on the slate.";
+         return;
+      }
+      await openEventMarkets(session, leg);
+      return;
+   }
    if (act.t === "oddsFormat") {
       session.oddsFormat = act.format;
       return;
@@ -533,6 +557,7 @@ async function pickVoucher(session: Session, wallet: BotWallet, kind: "freebet" 
 }
 
 async function finishBet(session: Session, wallet: BotWallet, signature: string): Promise<void> {
+   const placed = session.slip?.legs ?? [];
    if (session.slip?.fromCombo) {
       session.combo = [];
    }
@@ -546,6 +571,21 @@ async function finishBet(session: Session, wallet: BotWallet, signature: string)
       session.openRows = await fetchOpenBets(wallet.address);
       const newest = session.openRows[0];
       session.notice = newest == null ? `Bet sent\n${link}` : `${await describeRow(newest, session.oddsFormat)}\n${link}`;
+      if (newest != null && placed.length > 0) {
+         const id = stableId(`bet:${newest.address}`);
+         rememberSnap({
+            id,
+            ownerId: session.userId,
+            ownerName: session.userName,
+            legs: placed,
+            stake: rowAmount(newest).toString(),
+            payout: rowPayout(newest).toString(),
+            result: "Pending",
+            betAddress: newest.address,
+            kind: "ticket",
+         });
+         session.shareToken = id;
+      }
    } catch {
       session.notice = `Bet sent\n${link}`;
    }

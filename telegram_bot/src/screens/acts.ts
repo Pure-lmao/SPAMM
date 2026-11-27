@@ -43,4 +43,7 @@ export type Act =
    | { t: "settings" }
    | { t: "oddsFormat"; format: "decimal" | "american" | "percent" }
    | { t: "explorer"; explorer: "solscan" | "solana" | "orb" }
+   | { t: "help" }
+   | { t: "alt"; index: number }
+   | { t: "eventMarkets"; index: number }
    | { t: "back" };

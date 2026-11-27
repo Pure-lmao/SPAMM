@@ -22,6 +22,9 @@ import {
 import { HISTORY_PAGE, HISTORY_TTL_MS, LABELS_TTL_MS, SETTLE_BATCH } from "../constants";
 import { ttlMap } from "../cache";
 import { rpc } from "../chain/rpc";
+import { chainSide, legId, type Leg } from "../markets/leg";
+import { outcomesForMarket } from "../markets/board";
+import { findEvent, loadSlate } from "../markets/slate";
 import { LABS_DOMAIN } from "../network";
 import { formatDollars, formatOdds, type OddsFormat } from "../usdc";
 import { sendInstructions } from "../wallet/send";
@@ -130,6 +133,62 @@ function matchup(teams: { home: string; away: string }, event: bigint): string {
    return `${teams.home} vs ${teams.away}`;
 }
 
+export async function publicLeg(market: MarketId, side: number, oddsScaled: bigint): Promise<Leg> {
+   const sport = Number(market.eventId.sport);
+   const league = market.eventId.league;
+   const eventId = Number(market.eventId.event);
+   const teams = await eventTeams(String(market.operator), sport, league, market.eventId.event);
+   const tree = await loadSlate();
+   const found = findEvent(tree, sport, league, eventId);
+   const ui = found?.event.markets?.find((item) => item.id === market.mkt && item.period_id === market.period && (item.player_id ?? 0) === Number(market.player));
+   if (found != null && ui != null) {
+      const hit = outcomesForMarket(found.event, ui).find((item) => chainSide(item.leg) === side);
+      if (hit != null) {
+         return hit.leg;
+      }
+   }
+   const decimal = oddsScaled > 0n ? Math.round((Number(oddsScaled) / 10000) * 100) / 100 : null;
+   const leg: Leg = {
+      id: "",
+      eventTitle: matchup(teams, market.eventId.event),
+      marketLabel: "",
+      outcomeLabel: sideLabel(market.mkt, side, {
+         sport: market.eventId.sport,
+         period: market.period,
+         playerId: Number(market.player),
+         homeName: teams.home,
+         awayName: teams.away,
+      }),
+      displayedDecimalOdds: decimal != null && decimal > 0 ? decimal : null,
+      eventId,
+      leagueId: league,
+      sportApiId: sport,
+      marketWireId: market.mkt,
+      periodId: market.period,
+      playerId: Number(market.player),
+      playerName: "",
+      operator: String(market.operator),
+      mint: String(market.mint),
+      column: "main",
+      outcomeIndex: side,
+      mktString: "",
+   };
+   leg.id = legId(leg);
+   return leg;
+}
+
+export async function legsForRow(row: WalletBetRow): Promise<Leg[]> {
+   if (row.kind === "single") {
+      const odds = row.data.amount > 0n ? (row.data.payout * 10000n) / row.data.amount : 0n;
+      return [await publicLeg(row.data.marketId, row.data.side, odds)];
+   }
+   const legs: Leg[] = [];
+   for (const leg of row.account.legs.slice(0, row.account.numLegs)) {
+      legs.push(await publicLeg(leg.marketId, leg.side, leg.oddsScaled));
+   }
+   return legs;
+}
+
 function marketLine(market: MarketId, side: number, teams: { home: string; away: string }): string {
    return sideLabel(market.mkt, side, {
       sport: market.eventId.sport,
@@ -234,6 +293,11 @@ export type HistoryRow = {
    detail: string;
    stake: string;
    payout: string;
+   recordId: string | null;
+   result: string;
+   legs: Leg[];
+   stakeRaw: string;
+   payoutRaw: string;
 };
 
 export async function fetchHistory(user: Address, before?: string): Promise<{ rows: HistoryRow[]; next: string | null }> {
@@ -270,28 +334,96 @@ async function historyLine(raw: unknown): Promise<HistoryRow | null> {
       return null;
    }
    const rec = raw as Record<string, unknown>;
-   const selections = Array.isArray(rec.selections) ? rec.selections : [];
+   const selections = Array.isArray(rec.selections) ? rec.selections : typeof rec.selections === "string" ? parsedList(rec.selections) : [];
    const first = selections[0];
    let title = "Bet";
+   const legs: Leg[] = [];
+   const fallbackOp = typeof rec.operator === "string" ? rec.operator : "";
+   const fallbackMint = typeof rec.mint === "string" ? rec.mint : "";
+   for (const item of selections) {
+      if (item == null || typeof item !== "object") {
+         continue;
+      }
+      const built = await historyLeg(item as Record<string, unknown>, fallbackOp, fallbackMint);
+      if (built != null) {
+         legs.push(built);
+      }
+   }
    if (first != null && typeof first === "object") {
       const sel = first as Record<string, unknown>;
       const sport = numField(sel.sport_id);
       const league = numField(sel.league_id);
       const event = numField(sel.event_id);
-      const operator = typeof sel.operator === "string" ? sel.operator : typeof rec.operator === "string" ? rec.operator : "";
+      const operator = typeof sel.operator === "string" ? sel.operator : fallbackOp;
       if (sport != null && league != null && event != null && operator !== "") {
          const id = BigInt(Math.trunc(event));
          const name = matchup(await eventTeams(operator, sport, league, id), id);
          title = selections.length > 1 ? `${name} +${selections.length - 1}` : name;
       }
    }
-   const stake = formatDollars(BigInt(Math.trunc(Number(rec.amount_filled ?? 0))));
-   const payout = formatDollars(BigInt(Math.trunc(Number(rec.final_payout ?? rec.payout ?? 0))));
+   const stakeRaw = BigInt(Math.trunc(Number(rec.amount_filled ?? 0)));
+   const payoutRaw = BigInt(Math.trunc(Number(rec.final_payout ?? rec.payout ?? 0)));
+   const stake = formatDollars(stakeRaw);
+   const payout = formatDollars(payoutRaw);
    const result = BetResult[Number(rec.result)] ?? String(rec.result ?? "");
    return {
       title,
       detail: `${selections.length > 1 ? `Parlay ${selections.length} legs` : "Single"} · ${result}`,
       stake,
       payout,
+      recordId: typeof rec.id === "string" ? rec.id : null,
+      result,
+      legs,
+      stakeRaw: stakeRaw.toString(),
+      payoutRaw: payoutRaw.toString(),
    };
+}
+
+function parsedList(raw: string): unknown[] {
+   try {
+      const value = JSON.parse(raw) as unknown;
+      return Array.isArray(value) ? value : [];
+   } catch {
+      return [];
+   }
+}
+
+async function historyLeg(sel: Record<string, unknown>, fallbackOp: string, fallbackMint: string): Promise<Leg | null> {
+   const sport = numField(sel.sport_id);
+   const league = numField(sel.league_id);
+   const event = numField(sel.event_id);
+   const mkt = numField(sel.mkt_id);
+   const side = numField(sel.side);
+   const operator = typeof sel.operator === "string" && sel.operator !== "" ? sel.operator : fallbackOp;
+   const mint = typeof sel.mint === "string" && sel.mint !== "" ? sel.mint : fallbackMint;
+   if (sport == null || league == null || event == null || mkt == null || side == null || operator === "" || mint === "") {
+      return null;
+   }
+   const odds = bigField(sel.odds_scaled);
+   try {
+      return await publicLeg({
+         eventId: { event: BigInt(Math.trunc(event)), league, sport: sport as MarketId["eventId"]["sport"] },
+         mkt,
+         period: numField(sel.period_id) ?? 0,
+         isPregame: true,
+         player: BigInt(numField(sel.player_id) ?? 0),
+         operator: address(operator),
+         mint: address(mint),
+      }, side, odds);
+   } catch {
+      return null;
+   }
+}
+
+function bigField(value: unknown): bigint {
+   if (typeof value === "bigint") {
+      return value;
+   }
+   if (typeof value === "number" && Number.isFinite(value)) {
+      return BigInt(Math.trunc(value));
+   }
+   if (typeof value === "string" && /^-?\d+$/.test(value)) {
+      return BigInt(value);
+   }
+   return 0n;
 }
