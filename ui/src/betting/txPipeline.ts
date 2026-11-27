@@ -10,24 +10,31 @@ import {
    estimateAndSetResourceLimitsFactory,
    estimateResourceLimitsFactory,
    fillTransactionMessageProvisoryResourceLimits,
+   getBase58Decoder,
    getBase64Decoder,
    getBase64EncodedWireTransaction,
    getBase64Encoder,
    getCompiledTransactionMessageDecoder,
+   getSignatureFromTransaction,
    getTransactionDecoder,
    getTransactionLifetimeConstraintFromCompiledTransactionMessage,
    isTransactionModifyingSigner,
    isTransactionPartialSigner,
+   isTransactionSendingSigner,
    pipe,
+   sendAndConfirmTransactionFactory,
    setTransactionMessageConfig,
    setTransactionMessageFeePayer,
    setTransactionMessageFeePayerSigner,
    setTransactionMessageLifetimeUsingBlockhash,
+   signAndSendTransactionMessageWithSigners,
    signTransactionMessageWithSigners,
    type Address,
    type Blockhash,
    type Instruction,
    type Rpc,
+   type Signature,
+   type SignatureBytes,
    type SolanaRpcApi,
    type Transaction,
    type TransactionSigner,
@@ -35,6 +42,7 @@ import {
 } from "@solana/kit";
 import { PUBLIC_SOLANA_RPC, SOLANA_RPC_URL } from "../network";
 import { ensureSolFreeAddress, requestSolFreeSignature, solBalanceNeedsSponsor } from "../wallet/solFreeSponsor";
+import { isRecoverableSignAndSendFailure } from "../wallet/walletStandardV1Signer";
 
 const PUBLIC_HTTP_RPC: Record<string, string> = {
    devnet: "https://api.devnet.solana.com",
@@ -205,7 +213,7 @@ export async function buildSignV1Transaction(
       instructions: readonly Instruction[];
       signers: readonly TransactionSigner[];
    }>,
-): Promise<ReturnType<typeof signTransactionMessageWithSigners>> {
+): Promise<Transaction & TransactionWithBlockhashLifetime> {
    const { value: latestBlockhash } = await runPacedRpc(() =>
       rpc.getLatestBlockhash({ commitment: "confirmed" }).send(),
    );
@@ -233,6 +241,32 @@ export async function buildSignV1Transaction(
 
    const txMessage = await estimateAndSet(txMessageBase, { commitment: "confirmed" });
    const txMessageWithSigners = addSignersToTransactionMessage([...params.signers], txMessage);
+   if (params.signers.some((signer) => isTransactionSendingSigner(signer))) {
+      try {
+         const signatureBytes = await signAndSendTransactionMessageWithSigners(txMessageWithSigners);
+         if (signatureBytes == null) {
+            throw new Error("Wallet did not return a transaction signature");
+         }
+         const signedTransaction = attachFeePayerSignature(
+            compileTransaction(txMessageWithSigners),
+            params.feePayer.address,
+            signatureBytes,
+         );
+         assertIsTransactionWithBlockhashLifetime(signedTransaction);
+         rememberWalletBroadcast(signedTransaction, signatureBytesToSignature(signatureBytes));
+         return signedTransaction;
+      } catch (error) {
+         const canSignWithoutSend = params.signers.every(
+            (signer) =>
+               !isTransactionSendingSigner(signer) ||
+               isTransactionModifyingSigner(signer) ||
+               isTransactionPartialSigner(signer),
+         );
+         if (!canSignWithoutSend || !isRecoverableSignAndSendFailure(error)) {
+            throw error;
+         }
+      }
+   }
    const signedTransaction = await signTransactionMessageWithSigners(txMessageWithSigners);
    assertIsTransactionWithBlockhashLifetime(signedTransaction);
    return signedTransaction;
@@ -326,7 +360,11 @@ async function signSponsoredTransaction(
    assertIsTransactionWithBlockhashLifetime(withLifetime);
    const userSig = withLifetime.signatures[walletSigner.address];
    const needsUser = userSig !== undefined && !hasRealSignature(userSig);
-   const signed = needsUser ? await addWalletSignature(walletSigner, withLifetime) : withLifetime;
+   const signed = needsUser ? await signSponsoredWithWallet(walletSigner, withLifetime) : withLifetime;
+   if (walletBroadcastSignatures.has(signed)) {
+      assertIsTransactionWithBlockhashLifetime(signed);
+      return signed;
+   }
    const sponsor = compiled.staticAccounts[0];
    if (sponsor == null || !hasRealSignature(signed.signatures[sponsor])) {
       throw new Error("Sponsored fee payer signature missing");
@@ -339,10 +377,103 @@ async function signSponsoredTransaction(
    return signed;
 }
 
+async function signSponsoredWithWallet(
+   walletSigner: TransactionSigner,
+   transaction: Transaction & TransactionWithBlockhashLifetime,
+): Promise<Transaction & TransactionWithBlockhashLifetime> {
+   if (!isTransactionSendingSigner(walletSigner)) {
+      return addWalletSignature(walletSigner, transaction);
+   }
+   try {
+      const [signatureBytes] = await walletSigner.signAndSendTransactions([transaction]);
+      if (signatureBytes == null) {
+         throw new Error("Wallet did not return a transaction signature");
+      }
+      rememberWalletBroadcast(transaction, signatureBytesToSignature(signatureBytes));
+      return transaction;
+   } catch (error) {
+      const canSignWithoutSend = isTransactionModifyingSigner(walletSigner) || isTransactionPartialSigner(walletSigner);
+      if (!canSignWithoutSend || !isRecoverableSignAndSendFailure(error)) {
+         throw error;
+      }
+      return addWalletSignature(walletSigner, transaction);
+   }
+}
+
+const walletBroadcastSignatures = new WeakMap<object, Signature>();
+
+function rememberWalletBroadcast(transaction: object, signature: Signature): void {
+   walletBroadcastSignatures.set(transaction, signature);
+}
+
+function signatureBytesToSignature(signature: SignatureBytes): Signature {
+   return getBase58Decoder().decode(signature) as Signature;
+}
+
+function attachFeePayerSignature<T extends Transaction>(transaction: T, feePayer: Address, signature: SignatureBytes): T {
+   return {
+      ...transaction,
+      signatures: {
+         ...transaction.signatures,
+         [feePayer]: signature,
+      },
+   };
+}
+
+async function confirmWalletBroadcast(
+   rpc: Rpc<SolanaRpcApi>,
+   signature: Signature,
+   lastValidBlockHeight: bigint,
+): Promise<void> {
+   for (;;) {
+      const { value } = await runPacedRpc(() =>
+         rpc.getSignatureStatuses([signature], { searchTransactionHistory: true }).send(),
+      );
+      const status = value[0];
+      if (status != null) {
+         if (status.err != null) {
+            throw new Error(`Transaction failed: ${stringifyUnknown(status.err)}`);
+         }
+         if (status.confirmationStatus === "confirmed" || status.confirmationStatus === "finalized") {
+            return;
+         }
+      }
+      const height = await runPacedRpc(() => rpc.getBlockHeight({ commitment: "confirmed" }).send());
+      if (height > lastValidBlockHeight) {
+         throw new Error("Transaction expired before confirmation");
+      }
+      await sleepMs(800);
+   }
+}
+
+/**
+ * Send a signed transaction and wait for confirmation.
+ * When the wallet already broadcast it via sign-and-send, only confirmation runs.
+ */
+export async function broadcastUserTransaction(
+   rpc: Rpc<SolanaRpcApi>,
+   rpcSubscriptions: unknown,
+   transaction: Transaction & TransactionWithBlockhashLifetime,
+): Promise<Signature> {
+   const alreadySent = walletBroadcastSignatures.get(transaction);
+   if (alreadySent != null) {
+      await confirmWalletBroadcast(rpc, alreadySent, transaction.lifetimeConstraint.lastValidBlockHeight);
+      return alreadySent;
+   }
+   const sendAndConfirm = sendAndConfirmTransactionFactory({
+      rpc,
+      rpcSubscriptions,
+   } as never);
+   await sendAndConfirm(transaction as never, { commitment: "confirmed" });
+   return getSignatureFromTransaction(transaction);
+}
+
 /**
  * Sign aggregator user instructions.
- * When `feePayer` is the sol-free signer, send the compiled message (the server replaces the
- * blockhash and pays the fee) and have the wallet sign the returned transaction if it moves USDC.
+ * Wallets that support sign-and-send broadcast the transaction here. Other wallets only sign, and
+ * `broadcastUserTransaction` sends it.
+ * When `feePayer` is the sol-free signer, the server replaces the blockhash and pays the fee, then
+ * the wallet signs the returned transaction if it moves USDC.
  */
 export async function signUserInstructions(
    rpc: Rpc<SolanaRpcApi>,

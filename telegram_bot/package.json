@@ -1,0 +1,21 @@
+{
+   "name": "spamm-telegram-bot",
+   "version": "0.0.1",
+   "private": true,
+   "type": "module",
+   "scripts": {
+      "start": "bun run src/index.ts",
+      "check": "tsc --noEmit"
+   },
+   "dependencies": {
+      "@privy-io/node": "^0.16.0",
+      "@solana-program/token": "^0.18.0",
+      "@solana/kit": "^8.3.0",
+      "grammy": "^1.38.0",
+      "spamm-aggregator-sdk": "link:spamm-aggregator-sdk"
+   },
+   "devDependencies": {
+      "@types/bun": "latest",
+      "typescript": "^5.7.2"
+   }
+}

@@ -18,6 +18,7 @@ import { fetchActivePromos } from "../markets/fetchPromos";
 import { PromoMarketsSection } from "../markets/PromoMarketsSection";
 import type { UiGroupedSport, UiPromotionalMarket } from "../markets/types";
 import { useI18n } from "../i18n/useI18n";
+import { leagueJumpId, sportJumpId, SportsJumpNav, type SportsJumpSport } from "../layout/SportsJumpNav";
 import { API_DOMAIN } from "../network";
 
 const apiDomain = API_DOMAIN;
@@ -100,6 +101,51 @@ export function HomePage(): ReactElement {
    const fontProbeRef = useRef<HTMLSpanElement>(null);
 
    const displayTree = useMemo(() => (tree == null ? null : filterGroupedSportsForHome(tree)), [tree]);
+   const jumpSports = useMemo((): SportsJumpSport[] => {
+      if (displayTree == null) {
+         return [];
+      }
+      return displayTree.map((sport) => ({
+         id: sport.id,
+         label: sportName(sport.id, sport.sport),
+         leagues: sport.leagues.map((league) => ({
+            id: league.id,
+            label: leagueName(league.name),
+         })),
+      }));
+   }, [displayTree, sportName, leagueName]);
+   const pendingScrollId = useRef<string | null>(null);
+   const [scrollNonce, setScrollNonce] = useState(0);
+
+   function revealSport(sportId: number): void {
+      setCollapsedSports((prev) => {
+         if (!prev.has(sportId)) {
+            return prev;
+         }
+         const next = new Set(prev);
+         next.delete(sportId);
+         return next;
+      });
+   }
+
+   function queueScroll(id: string): void {
+      pendingScrollId.current = id;
+      setScrollNonce((n) => n + 1);
+   }
+
+   useLayoutEffect(() => {
+      const id = pendingScrollId.current;
+      if (id == null) {
+         return;
+      }
+      const el = document.getElementById(id);
+      if (el == null) {
+         return;
+      }
+      pendingScrollId.current = null;
+      const reduce = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+      el.scrollIntoView({ behavior: reduce ? "auto" : "smooth", block: "start" });
+   }, [scrollNonce]);
 
    useLayoutEffect(() => {
       if (displayTree == null || fontProbeRef.current == null) {
@@ -154,6 +200,29 @@ export function HomePage(): ReactElement {
          {err != null && <div className="banner-error">{err}</div>}
          {tree === null && err == null && <p className="loading">{t("home.loading")}</p>}
          {tree != null && displayTree != null && (
+            <div className="home-page">
+            {jumpSports.length > 0 && (
+               <SportsJumpNav
+                  sports={jumpSports}
+                  onSport={(sportId) => {
+                     revealSport(sportId);
+                     queueScroll(sportJumpId(sportId));
+                  }}
+                  onLeague={(sportId, leagueId) => {
+                     revealSport(sportId);
+                     const key = leagueCollapseKey(sportId, leagueId);
+                     setCollapsedLeagues((prev) => {
+                        if (!prev.has(key)) {
+                           return prev;
+                        }
+                        const next = new Set(prev);
+                        next.delete(key);
+                        return next;
+                     });
+                     queueScroll(leagueJumpId(sportId, leagueId));
+                  }}
+               />
+            )}
             <div className="home-events-scope" style={homeScopeStyle}>
                <PromoMarketsSection promos={promos} />
                <div className="events-table-font-probe-host" aria-hidden>
@@ -177,7 +246,7 @@ export function HomePage(): ReactElement {
                   displayTree.map((sport) => {
                const sportCollapsed = collapsedSports.has(sport.id);
                return (
-                  <section key={sport.id} className="sport-section" data-sport={sport.id}>
+                  <section key={sport.id} id={sportJumpId(sport.id)} className="sport-section" data-sport={sport.id}>
                      <button
                         type="button"
                         className="sport-title sport-title--toggle"
@@ -207,7 +276,7 @@ export function HomePage(): ReactElement {
                               sport.id === 1 ||
                               league.events.some((ev) => getMainOddsDetail(ev.markets, sport.id)?.values.length === 3);
                            return (
-                              <div key={lk} className="league-block">
+                              <div key={lk} id={leagueJumpId(sport.id, league.id)} className="league-block">
                                  <button
                                     type="button"
                                     className="league-row league-row--toggle"
@@ -478,6 +547,7 @@ export function HomePage(): ReactElement {
                );
                   })
                )}
+            </div>
             </div>
          )}
       </>

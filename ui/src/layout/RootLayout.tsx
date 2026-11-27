@@ -9,6 +9,7 @@ import { SettingsMenu } from "../settings/SettingsMenu";
 import { WalletBar } from "../wallet/WalletBar";
 import { useI18n } from "../i18n/useI18n";
 import { PendingBetsPanel } from "../pages/PendingBetsPanel";
+import { SideRailsProvider } from "./sideRails";
 
 /** Keep in sync with `max-width` in `index.css` for `.app-header` wallet menu rules. */
 const WALLET_MENU_MQ = "(max-width: 720px)";
@@ -61,6 +62,7 @@ export function RootLayout(): ReactElement {
    }, [walletMenuOpen]);
 
    return (
+      <SideRailsProvider>
       <div className="app-shell">
          <header className="app-header">
             <AppBrand />
@@ -100,5 +102,6 @@ export function RootLayout(): ReactElement {
          </div>
          <AppFooter />
       </div>
+      </SideRailsProvider>
    );
 }

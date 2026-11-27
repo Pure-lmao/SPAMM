@@ -13,6 +13,8 @@ export const enMessages = {
       myBets: "My Bets",
       demo: "Demo",
       primary: "Primary",
+      sports: "Sports",
+      showSports: "Show sports",
    },
    settings: {
       settings: "Settings",

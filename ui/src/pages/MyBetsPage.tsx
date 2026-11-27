@@ -2,7 +2,6 @@ import { useCallback, useEffect, useMemo, useRef, useState, type ReactElement } 
 import {
    createSolanaRpc,
    createSolanaRpcSubscriptions,
-   sendAndConfirmTransactionFactory,
    address,
    type Address,
    type Rpc,
@@ -43,7 +42,8 @@ import {
    ticketFeepayerOfRow,
    walletRowFreebetId,
 } from "../betting/cashout";
-import { httpToWsRpcUrl, resolveAppHttpRpcUrl, resolveUserTxFeePayer, signUserInstructions } from "../betting/txPipeline";
+import { subscribeBetRefresh } from "../betting/betRefresh";
+import { broadcastUserTransaction, httpToWsRpcUrl, resolveAppHttpRpcUrl, resolveUserTxFeePayer, signUserInstructions } from "../betting/txPipeline";
 import { formatUsdcBaseUnitsForUi, formatUsdcBaseUnitsRounded } from "../betting/usdc";
 import { userWinCreditBase, solscanAccountUrl, solscanTxUrl } from "../betting/betSlipUtils";
 import { convertOdds, type OddsFormat } from "../settings/convertOdds";
@@ -546,10 +546,6 @@ function CashoutModal({
       setSendErr(null);
       try {
          const user = address(account);
-         const sendAndConfirm = sendAndConfirmTransactionFactory({
-            rpc,
-            rpcSubscriptions,
-         } as never);
          let signed;
          if (usesRfq) {
             if (row.kind !== "parlay" || row.account == null) {
@@ -580,7 +576,7 @@ function CashoutModal({
                amount: cashAmount,
             });
          }
-         await sendAndConfirm(signed as never, { commitment: "confirmed" });
+         await broadcastUserTransaction(rpc, rpcSubscriptions, signed);
          requestWalletBalanceRefresh();
          onChanged();
          onClose();
@@ -802,11 +798,7 @@ function CardActions({
             ticketFeepayer: ticketFeepayerOfRow(row),
             mint: row.kind === "single" ? row.data.marketId.mint : row.legs[0]!.marketId.mint,
          });
-         const sendAndConfirm = sendAndConfirmTransactionFactory({
-            rpc,
-            rpcSubscriptions,
-         } as never);
-         await sendAndConfirm(signed as never, { commitment: "confirmed" });
+         await broadcastUserTransaction(rpc, rpcSubscriptions, signed);
          requestWalletBalanceRefresh();
          onChanged();
       } catch (e) {
@@ -935,7 +927,6 @@ function parlayHasMixedLegGrades(legs: readonly WalletParlayLeg[]): boolean {
 
 function ParlayLegRow({
    leg,
-   legIndex,
    eventsByKey,
    promosByMarketKey,
    hideEventLine = false,
@@ -943,7 +934,6 @@ function ParlayLegRow({
    showPendingGrade = false,
 }: {
    leg: WalletParlayLeg;
-   legIndex: number;
    eventsByKey: ReadonlyMap<string, BetCardEvent | null>;
    promosByMarketKey: ReadonlyMap<string, UiPromotionalMarket>;
    hideEventLine?: boolean;
@@ -960,9 +950,6 @@ function ParlayLegRow({
    const showResult = legResult !== BetResult.Pending || showPendingGrade;
    return (
       <li className="my-bets-card__parlay-leg">
-         <span className="my-bets-card__parlay-leg-num" aria-hidden>
-            {legIndex + 1}
-         </span>
          <div className="my-bets-card__parlay-leg-main">
             <div className="my-bets-card__parlay-leg-text">
                <BetMarketBody lines={lines} hideEventLine={hideEventLine} />
@@ -1012,7 +999,6 @@ function ParlayEventGroup({
                <ParlayLegRow
                   key={index}
                   leg={leg}
-                  legIndex={index}
                   eventsByKey={eventsByKey}
                   promosByMarketKey={promosByMarketKey}
                   hideEventLine
@@ -1053,7 +1039,6 @@ function ParlayLegsList({
                <ParlayLegRow
                   key={`${listKey}-${group.index}`}
                   leg={group.leg}
-                  legIndex={group.index}
                   eventsByKey={eventsByKey}
                   promosByMarketKey={promosByMarketKey}
                   showPendingGrade={showPendingGrade}
@@ -1291,6 +1276,10 @@ export function MyBetsPage(): ReactElement {
       void loadClosed();
    }, [loadOpen, loadClosed]);
 
+   useEffect(() => subscribeBetRefresh(() => {
+      void loadOpen();
+   }), [loadOpen]);
+
    const runClaim = useCallback(async () => {
       if (!isConnected || !account || !walletSigner || !signerReady) {
          return;
@@ -1312,10 +1301,6 @@ export function MyBetsPage(): ReactElement {
          if (graded.length === 0) {
             return;
          }
-         const sendAndConfirm = sendAndConfirmTransactionFactory({
-            rpc,
-            rpcSubscriptions,
-         } as never);
          const instructionList = await Promise.all(
             graded.map((row) => {
                const betPda = address(row.address);
@@ -1355,7 +1340,7 @@ export function MyBetsPage(): ReactElement {
                feePayer,
                instructions: chunk,
             });
-            await sendAndConfirm(signed as never, { commitment: "confirmed" });
+            await broadcastUserTransaction(rpc, rpcSubscriptions, signed);
             requestWalletBalanceRefresh();
             const from = chunkIdx * MAX_SETTLE_IX_PER_TX;
             const settledAddresses = new Set(

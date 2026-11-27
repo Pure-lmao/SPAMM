@@ -5,10 +5,12 @@ import { useLocation } from "react-router-dom";
 import { BetResult } from "spamm-aggregator-sdk";
 import { resolveAppHttpRpcUrl } from "../betting/txPipeline";
 import { useI18n } from "../i18n/useI18n";
+import { subscribeBetRefresh } from "../betting/betRefresh";
 import { fetchOpenWalletBets, walletBetRowResult, type WalletBetRow } from "../markets/fetchBetHistory";
 import { useBetPresentation } from "../markets/useBetPresentation";
 import { useAppWallet } from "../wallet/useAppWallet";
 import { WalletBetCard } from "./MyBetsPage";
+import { useSideRails } from "../layout/sideRails";
 
 /** Phone layout. The edge tab is hidden here. */
 const MOBILE_MQ = "(max-width: 720px)";
@@ -30,11 +32,11 @@ function useMediaQuery(query: string): boolean {
 export function PendingBetsPanel(): ReactElement | null {
    const mobile = useMediaQuery(MOBILE_MQ);
    const wide = useMediaQuery(WIDE_MQ);
-   const [forced, setForced] = useState(false);
+   const { betsRequested, betsDismissed, openBets, closeBets, setBetsVisible } = useSideRails();
    const { pathname } = useLocation();
    const onMyBets = pathname === "/my-bets";
-   const showTab = !mobile && !wide && !onMyBets;
-   const showPanel = !mobile && !onMyBets && (wide || forced);
+   const showPanel = !mobile && !onMyBets && !betsDismissed && (wide || betsRequested);
+   const showTab = !mobile && !onMyBets && !(wide && showPanel);
    const { account, isConnected } = useAppWallet();
    const connected = isConnected && account != null;
    const { cluster } = useCluster();
@@ -46,10 +48,9 @@ export function PendingBetsPanel(): ReactElement | null {
    const [rows, setRows] = useState<readonly WalletBetRow[]>([]);
 
    useEffect(() => {
-      if (!showTab) {
-         setForced(false);
-      }
-   }, [showTab]);
+      setBetsVisible(showPanel);
+      return () => setBetsVisible(false);
+   }, [showPanel, setBetsVisible]);
 
    const load = useCallback(async () => {
       if (!showPanel || !isConnected || !account) {
@@ -74,6 +75,10 @@ export function PendingBetsPanel(): ReactElement | null {
       void load();
    }, [load]);
 
+   useEffect(() => subscribeBetRefresh(() => {
+      void load();
+   }), [load]);
+
    const { eventsByKey, promosByMarketKey } = useBetPresentation(rows);
 
    if (!showTab && !showPanel) {
@@ -86,7 +91,13 @@ export function PendingBetsPanel(): ReactElement | null {
          className={`pending-bets-tab${showPanel ? " pending-bets-tab--docked" : ""}`}
          aria-expanded={showPanel}
          aria-controls="pending-bets-panel"
-         onClick={() => setForced((open) => !open)}
+         onClick={() => {
+            if (showPanel) {
+               closeBets();
+            } else {
+               openBets();
+            }
+         }}
       >
          {t("myBets.title")}
       </button>
